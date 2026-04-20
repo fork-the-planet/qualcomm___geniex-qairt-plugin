@@ -1,3 +1,3 @@
 [submodule "third-party/nexaproc"]
 	path = third-party/nexaproc
-	url = git@github.com:qcom-it-nexa-ai/nexaproc.git
+	url = git@github.com:qcom-ai-hub/geniex-proc.git
