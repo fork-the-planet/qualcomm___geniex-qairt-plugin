@@ -134,11 +134,13 @@ int main(int argc, char** argv) {
     };
     config.llm_config.tokenizer_path  = (model_dir / "tokenizer.json").string();
     config.llm_config.embedding_path  = (model_dir / "embed_tokens.npy").string();
+    config.llm_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
 
     config.vision_config.model_paths = {
         (model_dir / "vit" / "patch_embed.serialized.bin").string(),
         (model_dir / "vit" / "vit.serialized.bin").string(),
     };
+    config.vision_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
 
     // Audio encoder disabled — audio processing not yet supported.
     // config.audio_config.model_paths = {

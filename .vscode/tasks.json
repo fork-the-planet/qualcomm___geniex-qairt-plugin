@@ -160,6 +160,22 @@
             "options": { "shell": { "executable": "powershell.exe" } },
             "group": { "kind": "build", "isDefault": false },
             "problemMatcher": []
+        },
+        {
+            "label": "Build Qwen2-Omni (Debug)",
+            "type": "shell",
+            "command": "cmake -B build -A ARM64 -DGENIEX_BUILD_VLM=ON; cmake --build build --config Debug --target qwen2_omni -j32",
+            "options": { "shell": { "executable": "powershell.exe" } },
+            "group": { "kind": "build", "isDefault": false },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build and Run Qwen2-Omni (Release)",
+            "type": "shell",
+            "command": "cmake -B build -A ARM64 -DGENIEX_BUILD_VLM=ON; cmake --build build --config Release --target qwen2_omni -j32; .\\build\\bin\\Release\\qwen2_omni.exe",
+            "options": { "shell": { "executable": "powershell.exe" } },
+            "group": { "kind": "build", "isDefault": false },
+            "problemMatcher": []
         }
     ]
 }
