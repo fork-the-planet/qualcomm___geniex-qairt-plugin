@@ -8,7 +8,7 @@
 #include "qwen2_omni.h"
 #include "vlm/vlm_types.h"
 #include "types.h"
-#include "mm-process-interface.h"
+#include "geniex-proc/qwen2vl.h"
 #include "geniex-proc/tokenizer.h"
 
 #ifdef _WIN32
@@ -62,7 +62,7 @@ static bool parseArgs(int argc, char** argv, Args& args) {
 
 // ── BatchFeatures → geniex types ─────────────────────────────────────────────
 
-static geniex::PixelData toPixelData(const mm_process::BatchFeatures& bf) {
+static geniex::PixelData toPixelData(const geniex::BatchFeatures& bf) {
     geniex::PixelData pd;
     if (bf.image_grid_thw.dimension() == 0 || bf.image_grid_thw.shape()[0] == 0) return pd;
 
@@ -80,33 +80,33 @@ static geniex::PixelData toPixelData(const mm_process::BatchFeatures& bf) {
     return pd;
 }
 
-static geniex::AudioData toAudioData(const mm_process::BatchFeatures& bf) {
-    geniex::AudioData ad;
-    if (bf.audio_features.dimension() < 3 || bf.audio_features.shape()[2] == 0) return ad;
+// static geniex::AudioData toAudioData(const geniex::BatchFeatures& bf) {
+//     geniex::AudioData ad;
+//     if (bf.audio_features.dimension() < 3 || bf.audio_features.shape()[2] == 0) return ad;
 
-    // audio_features shape: [1, num_mel_bins, T_padded]
-    // audio_attention_mask shape: [1, T_padded]
-    // AudioData.audio_features: mel-major flat [num_mel_bins * num_frames],
-    //   indexed as data[m * num_frames + t].
-    // Padding is stripped: only copy the valid frames.
+//     // audio_features shape: [1, num_mel_bins, T_padded]
+//     // audio_attention_mask shape: [1, T_padded]
+//     // AudioData.audio_features: mel-major flat [num_mel_bins * num_frames],
+//     //   indexed as data[m * num_frames + t].
+//     // Padding is stripped: only copy the valid frames.
 
-    const int32_t num_mel  = static_cast<int32_t>(bf.audio_features.shape()[1]);
-    const int32_t T_padded = static_cast<int32_t>(bf.audio_features.shape()[2]);
+//     const int32_t num_mel  = static_cast<int32_t>(bf.audio_features.shape()[1]);
+//     const int32_t T_padded = static_cast<int32_t>(bf.audio_features.shape()[2]);
 
-    int32_t valid_frames = 0;
-    for (int32_t t = 0; t < T_padded; ++t)
-        valid_frames += bf.audio_attention_mask(0, t);
+//     int32_t valid_frames = 0;
+//     for (int32_t t = 0; t < T_padded; ++t)
+//         valid_frames += bf.audio_attention_mask(0, t);
 
-    ad.num_mel_bins = num_mel;
-    ad.num_frames   = valid_frames;
-    ad.audio_features.resize(static_cast<size_t>(num_mel) * valid_frames);
-    for (int32_t m = 0; m < num_mel; ++m)
-        for (int32_t t = 0; t < valid_frames; ++t)
-            ad.audio_features[m * valid_frames + t] = bf.audio_features(0, m, t);
+//     ad.num_mel_bins = num_mel;
+//     ad.num_frames   = valid_frames;
+//     ad.audio_features.resize(static_cast<size_t>(num_mel) * valid_frames);
+//     for (int32_t m = 0; m < num_mel; ++m)
+//         for (int32_t t = 0; t < valid_frames; ++t)
+//             ad.audio_features[m * valid_frames + t] = bf.audio_features(0, m, t);
 
-    ad.audio_attention_mask.assign(valid_frames, 1);
-    return ad;
-}
+//     ad.audio_attention_mask.assign(valid_frames, 1);
+//     return ad;
+// }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
@@ -140,11 +140,12 @@ int main(int argc, char** argv) {
         (model_dir / "vit" / "vit.serialized.bin").string(),
     };
 
-    config.audio_config.model_paths = {
-        (model_dir / "audio_encoder" / "audio_encoder_helper0.serialized.bin").string(),
-        (model_dir / "audio_encoder" / "audio_encoder.serialized.bin").string(),
-        (model_dir / "audio_encoder" / "audio_encoder_helper1.serialized.bin").string(),
-    };
+    // Audio encoder disabled — audio processing not yet supported.
+    // config.audio_config.model_paths = {
+    //     (model_dir / "audio_encoder" / "audio_encoder_helper0.serialized.bin").string(),
+    //     (model_dir / "audio_encoder" / "audio_encoder.serialized.bin").string(),
+    //     (model_dir / "audio_encoder" / "audio_encoder_helper1.serialized.bin").string(),
+    // };
 
     geniex::GenerationConfig gen_cfg;
     gen_cfg.max_tokens    = args.max_tokens;
@@ -170,12 +171,11 @@ int main(int argc, char** argv) {
 
     // ── Load tokenizer and processor ──────────────────────────────────────────
 
-    auto tokenizer = geniex::Tokenizer::from_file(config.llm_config.tokenizer_path);
-    auto processor = mm_process::qwen2_5_omni::create_qwen2_5_omni_processor(
-        config.llm_config.tokenizer_path);
+    auto processor = geniex::qwen2vl::Qwen2VLProcessor::create(config.llm_config.tokenizer_path);
 
     // ── Chat loop ─────────────────────────────────────────────────────────────
 
+    std::vector<geniex::ChatMessage> history;
     bool first_turn = true;
 
     while (true) {
@@ -184,33 +184,24 @@ int main(int argc, char** argv) {
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
         // Save turn state so we can restore it if preprocessing fails.
-        const bool saved_first_turn = first_turn;
+        const size_t saved_history_size = history.size();
+        const bool   saved_first_turn   = first_turn;
 
-        // Build the message list.
-        // – Turn 1: include system message and any media.
-        // – Turn 2+: include only the user message (system is already in KV cache).
-        mm_process::ChatMessage user_msg(mm_process::ChatMessage::ROLE_USER, input);
-        std::vector<mm_process::ChatMessage> messages;
+        // Build the user message.
+        // – Turn 1: attach image path if provided.
+        // – Turn 2+: text only (media already encoded in KV cache).
+        geniex::ChatMessage user_msg;
+        user_msg.role    = "user";
+        user_msg.content = input;
 
         if (first_turn) {
-            if (!args.image_path.empty()) {
-                user_msg.mm_contents.push_back(mm_process::MMContent{
-                    .type  = mm_process::MMContent::Type::IMAGE,
-                    .image = args.image_path,
-                });
-            }
-            if (!args.audio_path.empty()) {
-                user_msg.mm_contents.push_back(mm_process::MMContent{
-                    .type  = mm_process::MMContent::Type::AUDIO,
-                    .audio = args.audio_path,
-                });
-            }
-            messages.push_back(mm_process::ChatMessage(
-                mm_process::ChatMessage::ROLE_SYSTEM,
-                mm_process::qwen2_5_omni::QWEN_OMNI_SYS_PROMPT));
+            if (!args.image_path.empty())
+                user_msg.mm_content_paths.push_back(args.image_path);
+            // Audio path ignored until audio processing is supported.
+            history.push_back({"system", "You are a helpful assistant."});
             first_turn = false;
         }
-        messages.push_back(user_msg);
+        history.push_back(user_msg);
 
         // ── Preprocess + Generate (all inside try so errors are reported) ──────
 
@@ -221,23 +212,13 @@ int main(int argc, char** argv) {
         std::cout << "\033[33m";
         std::vector<int32_t> output_tokens;
         try {
-            // Preprocess media (no-op when mm_contents is empty).
-            auto [audio_list, image_list, video_list] =
-                mm_process::qwen2_5_omni::process_mm_info(messages);
-
-            const std::string prompt =
-                mm_process::qwen2_5_omni::apply_chat_template(messages, true, args.enable_thinking);
-
-            mm_process::BatchFeatures bf =
-                processor->process(prompt, image_list, video_list, audio_list);
+            geniex::BatchFeatures bf = processor->process(history, /*add_generation_prompt=*/true);
 
             // Convert to geniex types.
-            geniex::AudioVLMInput vlm_input;
+            geniex::VLMInput vlm_input;
             vlm_input.pixel_data = toPixelData(bf);
-            vlm_input.audio_data = toAudioData(bf);
 
-            const std::vector<int32_t> prompt_tokens(
-                bf.input_ids.cbegin(), bf.input_ids.cend());
+            const std::vector<int32_t> prompt_tokens(bf.input_ids.cbegin(), bf.input_ids.cend());
 
             output_tokens = model->generate(
                 prompt_tokens,
@@ -248,18 +229,20 @@ int main(int argc, char** argv) {
                         t_first_token   = std::chrono::high_resolution_clock::now();
                         got_first_token = true;
                     }
-                    std::cout << tokenizer->decode({tok}) << std::flush;
+                    std::cout << processor->tokenizer().decode({tok}) << std::flush;
                 });
         } catch (const std::exception& e) {
             std::cout << "\033[0m\n" << std::flush;
             std::cerr << "Error: " << e.what() << "\n" << std::flush;
             model->resetKVCache();
+            history.resize(saved_history_size);
             first_turn = saved_first_turn;
             continue;
         } catch (...) {
             std::cout << "\033[0m\n" << std::flush;
             std::cerr << "Error: unknown exception\n" << std::flush;
             model->resetKVCache();
+            history.resize(saved_history_size);
             first_turn = saved_first_turn;
             continue;
         }

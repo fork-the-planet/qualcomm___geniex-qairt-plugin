@@ -16,6 +16,13 @@ cmake -B build -A ARM64
 cmake --build build --config Release -j32
 ```
 
+Vision-Language Models (e.g. Qwen2-Omni) require the `GENIEX_BUILD_VLM` flag:
+
+```shell
+cmake -B build -A ARM64 -DGENIEX_BUILD_VLM=ON
+cmake --build build --config Release -j32
+```
+
 Build a specific model target:
 ```shell
 cmake -B build -A ARM64
@@ -56,14 +63,6 @@ The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/m
 | Llama-v3.2-3B-Instruct-SSD | `llama3_2_3b_ssd` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_2_3b_instruct_ssd) |
 
 > The bundled HTP runtime libs in `third-party/` (`windows`, `android`, `linux-gcc11.2`) are QAIRT **v2.43.1.260218**. Runtime version is backward compatible with compile version, so all models compiled with v2.42 or earlier will run correctly.
-
-## Coming Soon
-
-The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models?domain=Generative+AI&useCase=Text+Generation&runtime=genie) are planned for support:
-
-| Model |
-|-------|
-| Llama-v3.2-3B-Instruct-SSD |
 
 ## Project Structure
 

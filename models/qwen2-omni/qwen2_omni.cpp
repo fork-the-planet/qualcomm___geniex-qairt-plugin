@@ -358,12 +358,12 @@ std::unique_ptr<Qwen2OmniModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
     if (!vis_enc->initialize(runtime_cfg, config.vision_config)) return nullptr;
 
     // Audio encoder
-    auto aud_enc = std::make_unique<Qwen2OmniAudioEncoder>();
-    if (!aud_enc->initialize(runtime_cfg, config.audio_config)) return nullptr;
+    // auto aud_enc = std::make_unique<Qwen2OmniAudioEncoder>();
+    // if (!aud_enc->initialize(runtime_cfg, config.audio_config)) return nullptr;
 
     // LLM
     auto model = std::make_unique<Qwen2OmniModel>();
-    model->setEncoders(std::move(vis_enc), std::move(aud_enc));
+    model->setEncoders(std::move(vis_enc), /*aud_enc=*/nullptr);
 
     // MRoPE provider: section {16, 24, 24}, BLOCK interleaving
     model->setMRoPEProvider(std::make_unique<MRoPEInputProvider>(

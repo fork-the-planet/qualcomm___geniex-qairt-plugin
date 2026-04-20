@@ -15,6 +15,9 @@ option(BUILD_EXAMPLES     "Build example executables"                           
 option(GENIEX_DEBUG       "Enable debug logging (includes file/line/func in log output)"  OFF)
 
 # ── Third-party dependencies ──────────────────────────────────────────────────
+if(GENIEX_BUILD_VLM)
+    set(GENIEXPROC_ENABLE_VISION ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third-party/nexaproc third-party/nexaproc)
 
 # ── Compile definitions ───────────────────────────────────────────────────────
