@@ -1,0 +1,72 @@
+#pragma once
+
+#include "llm/llm_model.h"
+#include "vlm/vlm_types.h"
+#include "vlm/vlm_input_provider.h"
+#include "vlm/vision_encoder.h"
+#include "vlm/audio_encoder.h"
+#include "geniex_export.h"
+
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <vector>
+
+namespace geniex {
+
+// LLMModel subclass that prepends modality encoding before the LLM generate loop.
+// Subclasses implement encodeVision() and optionally encodeAudio() /
+// preparePositions() / clearPositions().
+class GENIEX_VLM_API VLMModel : public LLMModel {
+public:
+    explicit VLMModel(LLMSpec spec);
+
+    // Encodes multimodal inputs, injects embeddings, then calls LLMModel::generate().
+    std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
+                                  const VLMInput&              vlm_input,
+                                  const GenerationConfig&      gen_cfg = {},
+                                  std::function<void(int32_t)> token_callback = nullptr);
+
+protected:
+    bool onInitialized() override;
+
+    // Returns flat [num_image_tokens * hidden_size] embeddings.
+    virtual std::vector<float> encodeVision(const PixelData& pixel_data) = 0;
+
+    // Returns flat [num_audio_tokens * hidden_size] embeddings.
+    // Default returns empty (no audio encoding).
+    virtual std::vector<float> encodeAudio(const AudioData& audio_data);
+
+    // Called after embedding injection, before LLMModel::generate().
+    // Subclasses override to configure position providers for the current input.
+    virtual void preparePositions(const std::vector<int32_t>& input_ids,
+                                  const VLMInput&             vlm_input,
+                                  size_t                      n_past);
+
+    // Called after LLMModel::generate() returns.
+    // Subclasses override to reset any position provider state set in preparePositions().
+    virtual void clearPositions();
+
+    // Overwrites rows in input_embeds where input_ids == target_token_id
+    // with consecutive rows from multimodal_embeds.
+    static void maskedScatter(std::vector<float>&         input_embeds,
+                              const std::vector<float>&   multimodal_embeds,
+                              const std::vector<int32_t>& input_ids,
+                              int32_t                     target_token_id,
+                              size_t                      hidden_size);
+
+    // Registers the embedding provider and adds it to input_providers_.
+    // Must be called before initialize().
+    void setEmbeddingProvider(std::unique_ptr<PrecomputedEmbeddingProvider> provider);
+
+    std::unique_ptr<VisionEncoder> vision_encoder_;
+    std::unique_ptr<AudioEncoder>  audio_encoder_;
+
+    int32_t image_token_id_ = 0;
+    int32_t audio_token_id_ = 0;
+
+private:
+    PrecomputedEmbeddingProvider* emb_provider_ = nullptr;  // non-owning; owned by input_providers_
+};
+
+} // namespace geniex

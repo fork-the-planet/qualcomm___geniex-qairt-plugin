@@ -1,0 +1,79 @@
+<h1 align="center">Geniex-QAIRT-plugin</h1>
+
+<p align="center">A framework for running generative AI models on Snapdragon NPUs.</p>
+
+## What is QAIRT?
+
+**Qualcomm AI Runtime (QAIRT)** is a suite of tools for developing, running, and optimizing AI models on Qualcomm hardware. It has the best hardware-aware design to get the metal performance. 
+
+This plugin, as one of the backend of the `geniex`, uses the QAIRT as the toolkits to support various generative AI models. 
+
+## Installation
+
+Build the project (from root directory):
+```shell
+cmake -B build -A ARM64
+cmake --build build --config Release -j32
+```
+
+Build a specific model target:
+```shell
+cmake -B build -A ARM64
+cmake --build build --config Release --target qwen3_4b_aihub -j32
+```
+
+Executables are output to `build/bin/Release/`.
+
+## Supported Hardware
+
+| Hardware | SoC | HTP Arch | SoC Model |
+|----------|-----|----------|-----------|
+| Snapdragon X Elite / Plus | SC8380 | v73 | 60 |
+| IQ-9075 | QCS9075 | v73 | 60 |
+| Snapdragon 8 Elite | SM8750 | v79 | 69 |
+| Snapdragon 8 Elite Gen5 | SM8850 | v81 | 88 |
+
+## Supported Models
+
+The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models?domain=Generative+AI&useCase=Text+Generation&runtime=genie) are supported. All models below run on **Snapdragon X Elite / Plus**.
+
+| Model | Target | Compile version | Source |
+|-------|--------|-------|--------|
+| Granite 4 Micro | `granite4_micro` | v2.36 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/granite4_micro) |
+| Phi 3.5 Mini (AIHub) | `phi3_5_aihub` | v2.43 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/phi3_5_aihub) |
+| Phi 4 Mini | `phi4` | v2.36 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/phi4) |
+| Qwen3 4B (AIHub) | `qwen3_4b_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_aihub) |
+| Qwen3 4B Instruct 2507 (AIHub) | `qwen3_4b_instruct_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_instruct_2507_aihub) |
+| Qwen2.5 7B Instruct (AIHub) | `qwen2_5_7b_instruct_aihub` | v2.42 | - |
+| Llama-v3-8B-Instruct (AIHub) | `llama_v3_8b_instruct_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_8b_instruct_aihub) |
+| Llama-v3-ELYZA-JP-8B (AIHub) | `llama_v3_elyza_jp_8b_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_elyza_jp_8b_aihub) |
+| Llama3-TAIDE-LX-8B-Chat (AIHub) | `llama_v3_taide_8b_chat_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_taide_8b_chat_aihub) |
+| Llama-v3.2-1B-Instruct (AIHub) | `llama3_2_1b_aihub` | v2.42 | - |
+| Llama-v3.2-3B-Instruct (AIHub) | `llama3_2_3b_aihub` | v2.42 | - |
+| Falcon3-7B-Instruct (AIHub) | `falcon3_7b_aihub` | v2.42 | - |
+| Llama-3.1-8B-Instruct (AIHub) | `llama3_1_8b_aihub` | v2.42 | - |
+| Llama-SEA-LION-v3.5-8B-R (AIHub) | `sea_lion_8b_aihub` | v2.42 | - |
+| Llama-v3.2-3B-Instruct-SSD | `llama3_2_3b_ssd` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_2_3b_instruct_ssd) |
+
+> The bundled HTP runtime libs in `third-party/` (`windows`, `android`, `linux-gcc11.2`) are QAIRT **v2.43.1.260218**. Runtime version is backward compatible with compile version, so all models compiled with v2.42 or earlier will run correctly.
+
+## Coming Soon
+
+The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/models?domain=Generative+AI&useCase=Text+Generation&runtime=genie) are planned for support:
+
+| Model |
+|-------|
+| Llama-v3.2-3B-Instruct-SSD |
+
+## Project Structure
+
+```
+├── models/              # Model specs (.h) and example executables (.cpp)
+│   ├── granite4/
+│   ├── phi3_5/
+│   ├── phi4/
+│   └── qwen3/
+├── core/                # geniex_core framework (LLM model, graph, KV cache, RoPE)
+├── modelfiles/          # Tokenizer and config files per model
+└── docs/                # Documentation
+```
