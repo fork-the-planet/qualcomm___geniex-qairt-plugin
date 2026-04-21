@@ -108,6 +108,18 @@
             "environment": [],
             "console": "integratedTerminal",
             "preLaunchTask": "Build Llama V3 TAIDE 8B Chat AIHub (Debug)"
+        },
+        {
+            "name": "Qwen2-Omni (Debug)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}\\build\\bin\\Debug\\qwen2_omni.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build Qwen2-Omni (Debug)"
         }
     ]
 }

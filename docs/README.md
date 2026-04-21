@@ -201,7 +201,7 @@ qnn-run/
 │   ├── windows/           # HTP runtime libs for Windows
 │   ├── android/           # HTP runtime libs for Android
 │   ├── linux-gcc11.2-v73/     # HTP runtime libs for Linux
-│   └── nexaproc/              # Tokenizer and preprocessing (submodule)
+│   └── geniex-proc/              # Tokenizer and preprocessing (submodule)
 ├── CMakeLists.txt             # Build configuration
 └── build_android.sh           # Android cross-compilation script
 ```
