@@ -1,7 +1,9 @@
 #include <chrono>
+#include <algorithm>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -29,18 +31,17 @@ struct Args {
     int32_t     max_tokens      = 512;
     bool        verbose         = false;
     bool        enable_thinking = false;
-    std::string image_path;
-    std::string audio_path;
 };
 
 static void printUsage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]\n"
-              << "  --image <path>     Image file for the first turn\n"
-              << "  --audio <path>     Audio file for the first turn\n"
               << "  --max-tokens <n>   Max tokens to generate (default 512)\n"
               << "  --thinking         Enable thinking mode\n"
               << "  --verbose          Print performance metrics\n"
-              << "  --help\n";
+              << "  --help\n"
+              << "\n"
+              << "In the interactive prompt, include image paths directly:\n"
+              << "  > what is in this image? /path/to/cat.png\n";
 }
 
 static bool parseArgs(int argc, char** argv, Args& args) {
@@ -49,15 +50,53 @@ static bool parseArgs(int argc, char** argv, Args& args) {
         auto next = [&]() -> std::string {
             return (i + 1 < argc) ? argv[++i] : std::string{};
         };
-        if      (a == "--image")      args.image_path      = next();
-        else if (a == "--audio")      args.audio_path      = next();
-        else if (a == "--max-tokens") args.max_tokens      = std::stoi(next());
+        if      (a == "--max-tokens") args.max_tokens      = std::stoi(next());
         else if (a == "--thinking")   args.enable_thinking = true;
         else if (a == "--verbose")    args.verbose         = true;
         else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
         else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
     }
     return true;
+}
+
+// ── File type detection ───────────────────────────────────────────────────────
+
+static bool isImageFile(const std::string& path) {
+    std::string p = path;
+    std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+    return p.ends_with(".jpg") || p.ends_with(".jpeg") || p.ends_with(".png")
+        || p.ends_with(".bmp") || p.ends_with(".gif")  || p.ends_with(".webp");
+}
+
+static bool isAudioFile(const std::string& path) {
+    std::string p = path;
+    std::transform(p.begin(), p.end(), p.begin(), ::tolower);
+    return p.ends_with(".wav") || p.ends_with(".mp3") || p.ends_with(".flac")
+        || p.ends_with(".aac") || p.ends_with(".ogg") || p.ends_with(".m4a");
+}
+
+/// Parse a user input line into text prompt + file paths.
+static void parseInput(const std::string& input,
+                       std::string& prompt_text,
+                       std::vector<std::string>& image_paths,
+                       std::vector<std::string>& audio_paths) {
+    image_paths.clear();
+    audio_paths.clear();
+    std::vector<std::string> text_tokens;
+
+    std::istringstream iss(input);
+    std::string token;
+    while (iss >> token) {
+        if (isImageFile(token))      image_paths.push_back(token);
+        else if (isAudioFile(token)) audio_paths.push_back(token);
+        else                         text_tokens.push_back(token);
+    }
+
+    prompt_text.clear();
+    for (size_t i = 0; i < text_tokens.size(); ++i) {
+        if (i > 0) prompt_text += ' ';
+        prompt_text += text_tokens[i];
+    }
 }
 
 // ── BatchFeatures → geniex types ─────────────────────────────────────────────
@@ -184,6 +223,11 @@ int main(int argc, char** argv) {
         std::string input;
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
+        // Parse input: separate file paths from text.
+        std::string prompt_text;
+        std::vector<std::string> image_paths, audio_paths;
+        parseInput(input, prompt_text, image_paths, audio_paths);
+
         // Save turn state so we can restore it if preprocessing fails.
         const bool saved_first_turn = first_turn;
 
@@ -202,9 +246,9 @@ int main(int argc, char** argv) {
             if (first_turn) {
                 // Full chat template + image preprocessing for the first turn.
                 geniex::ChatMessage system_msg{"system", "You are a helpful assistant."};
-                geniex::ChatMessage user_msg{"user", input};
-                if (!args.image_path.empty())
-                    user_msg.mm_content_paths.push_back(args.image_path);
+                geniex::ChatMessage user_msg{"user", prompt_text};
+                for (const auto& img : image_paths)
+                    user_msg.mm_content_paths.push_back(img);
 
                 geniex::BatchFeatures bf = processor->process(
                     {{system_msg, user_msg}, /*add_generation_prompt=*/true});
@@ -223,7 +267,7 @@ int main(int argc, char** argv) {
                 }
                 std::cerr << " n_image_tokens_in_prompt=";
                 int32_t img_tok_count = 0;
-                for (auto t : prompt_tokens) if (t == 151655) ++img_tok_count;  // <|image_pad|>
+                for (auto t : prompt_tokens) if (t == 151655) ++img_tok_count;
                 std::cerr << img_tok_count << "\n";
 
                 first_turn = false;
@@ -232,7 +276,7 @@ int main(int argc, char** argv) {
                 // The KV cache already holds all previous context.
                 const std::string turn_text =
                     "<|im_end|>\n"
-                    "<|im_start|>user\n" + input + "<|im_end|>\n"
+                    "<|im_start|>user\n" + prompt_text + "<|im_end|>\n"
                     "<|im_start|>assistant\n";
                 prompt_tokens = processor->tokenizer().encode(turn_text, /*add_special_tokens=*/false);
                 std::cerr << "[DEBUG] Turn N: prompt_tokens=" << prompt_tokens.size() << "\n";
