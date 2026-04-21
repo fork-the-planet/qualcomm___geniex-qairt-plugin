@@ -27,8 +27,8 @@ public:
     std::vector<float> lookupBatch(const std::vector<int32_t>& token_ids) const;
 
     // Switch to prefill mode: write() slices from this buffer by [n_past - offset, n_past - offset + curr_len).
-    // Buffer shape: flat [total_tokens * hidden_size].
-    // n_past_offset: the value of n_past at the time the buffer was prepared.
+    // Buffer contains embeddings for the current round's tokens only (not full history),
+    // so n_past_offset anchors it to the correct absolute KV position.
     void setBuffer(std::vector<float> embeds, size_t n_past_offset = 0);
 
     // Switch back to decode mode (per-token table lookup).
@@ -39,9 +39,9 @@ public:
 private:
     std::string        tensor_name_;
     std::vector<float> table_;        // flat [vocab_size * hidden_size]
-    std::vector<float> buffer_;       // flat [total_tokens * hidden_size]; empty = decode mode
+    std::vector<float> buffer_;       // flat [current_round_tokens * hidden_size]; empty = decode mode
     size_t             hidden_size_ = 0;
-    size_t             buffer_offset_ = 0;  // n_past at the time setBuffer() was called
+    size_t             buffer_offset_ = 0;  // absolute KV position where buffer[0] starts (= n_past at setBuffer time)
 };
 
 // ── MRoPEInputProvider ────────────────────────────────────────────────────────
@@ -69,7 +69,8 @@ public:
 
     // Pre-compute cos/sin tables from full-sequence 3D position IDs.
     // position_ids: flat [3 * seq_len] row-major: [temporal..., height..., width...].
-    // n_past_offset: the value of n_past at the time this table is prepared.
+    // Tables cover the current round's tokens only (not full history),
+    // so n_past_offset anchors them to the correct absolute KV position.
     void setPositionIds(const std::vector<int32_t>& position_ids, size_t seq_len, size_t n_past_offset = 0);
 
     // Clear tables; write() falls back to sequential 1D positions (decode phase).
@@ -95,10 +96,10 @@ private:
     size_t               half_dim_ = 0;  // sum of mrope_section_
     std::vector<float>   inv_freq_;      // cached [half_dim_], computed once at construction
 
-    std::vector<float>   cos_table_;     // flat [seq_len * half_dim_]; prefill only
-    std::vector<float>   sin_table_;     // flat [seq_len * half_dim_]; prefill only
+    std::vector<float>   cos_table_;     // flat [current_round_seq_len * half_dim_]; prefill only
+    std::vector<float>   sin_table_;     // flat [current_round_seq_len * half_dim_]; prefill only
     size_t               seq_len_  = 0;
-    size_t               position_offset_ = 0;  // n_past at the time setPositionIds() was called
+    size_t               position_offset_ = 0;  // absolute KV position where table[0] starts (= n_past at setPositionIds time)
     // Whether full-sequence position tables have been precomputed for the current prefill pass.
     // Controls whether write() slices from cos_table_/sin_table_ or computes positions on the fly.
     bool                 has_prefill_positions_ = false;
