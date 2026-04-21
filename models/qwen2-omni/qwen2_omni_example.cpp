@@ -187,27 +187,6 @@ int main(int argc, char** argv) {
         // Save turn state so we can restore it if preprocessing fails.
         const bool saved_first_turn = first_turn;
 
-        // Build the user message.
-        // – Turn 1: attach image path if provided.
-        // – Turn 2+: text only (media already encoded in KV cache).
-        geniex::ChatMessage user_msg;
-        user_msg.role    = "user";
-        user_msg.content = input;
-
-        // Build incremental messages for this turn only.
-        // The KV cache already holds all prior context, so we only need to
-        // process the new messages — not the full conversation history.
-        std::vector<geniex::ChatMessage> turn_messages;
-
-        if (first_turn) {
-            if (!args.image_path.empty())
-                user_msg.mm_content_paths.push_back(args.image_path);
-            // Audio path ignored until audio processing is supported.
-            turn_messages.push_back({"system", "You are a helpful assistant."});
-            first_turn = false;
-        }
-        turn_messages.push_back(user_msg);
-
         // ── Preprocess + Generate (all inside try so errors are reported) ──────
 
         const auto t_start = std::chrono::high_resolution_clock::now();
@@ -217,12 +196,7 @@ int main(int argc, char** argv) {
         std::cout << "\033[33m";
         std::vector<int32_t> output_tokens;
         try {
-            // Process only this turn's messages (incremental input).
-            geniex::BatchFeatures bf = processor->process(
-                {turn_messages, /*add_generation_prompt=*/true});
-
-            // Convert to geniex types.
-            // Pixel data is only present on the first turn (when images are attached).
+            std::vector<int32_t> prompt_tokens;
             geniex::VLMInput vlm_input;
 
             if (first_turn) {
@@ -232,9 +206,26 @@ int main(int argc, char** argv) {
                 if (!args.image_path.empty())
                     user_msg.mm_content_paths.push_back(args.image_path);
 
-                geniex::BatchFeatures bf = processor->process({{system_msg, user_msg}, /*add_generation_prompt=*/true});
+                geniex::BatchFeatures bf = processor->process(
+                    {{system_msg, user_msg}, /*add_generation_prompt=*/true});
                 vlm_input.pixel_data = toPixelData(bf);
                 prompt_tokens.assign(bf.input_ids.cbegin(), bf.input_ids.cend());
+
+                std::cerr << "[DEBUG] Turn 1: prompt_tokens=" << prompt_tokens.size()
+                          << " pixel_values=" << bf.pixel_values.size()
+                          << " image_grid_thw=";
+                if (bf.image_grid_thw.dimension() > 0 && bf.image_grid_thw.shape()[0] > 0) {
+                    std::cerr << bf.image_grid_thw(0,0) << "x"
+                              << bf.image_grid_thw(0,1) << "x"
+                              << bf.image_grid_thw(0,2);
+                } else {
+                    std::cerr << "(none)";
+                }
+                std::cerr << " n_image_tokens_in_prompt=";
+                int32_t img_tok_count = 0;
+                for (auto t : prompt_tokens) if (t == 151655) ++img_tok_count;  // <|image_pad|>
+                std::cerr << img_tok_count << "\n";
+
                 first_turn = false;
             } else {
                 // Incremental turn: close the previous assistant turn, open the new user turn.
@@ -244,6 +235,7 @@ int main(int argc, char** argv) {
                     "<|im_start|>user\n" + input + "<|im_end|>\n"
                     "<|im_start|>assistant\n";
                 prompt_tokens = processor->tokenizer().encode(turn_text, /*add_special_tokens=*/false);
+                std::cerr << "[DEBUG] Turn N: prompt_tokens=" << prompt_tokens.size() << "\n";
             }
 
             output_tokens = model->generate(
