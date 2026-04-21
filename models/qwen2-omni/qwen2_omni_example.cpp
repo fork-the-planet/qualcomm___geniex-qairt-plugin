@@ -256,8 +256,22 @@ int main(int argc, char** argv) {
                 prompt_tokens.assign(bf.input_ids.cbegin(), bf.input_ids.cend());
 
                 first_turn = false;
+            } else if (!image_paths.empty()) {
+                geniex::ChatMessage user_msg{"user", prompt_text};
+                for (const auto& img : image_paths)
+                    user_msg.mm_content_paths.push_back(img);
+                geniex::BatchFeatures bf = processor->process(
+                    {{user_msg}, /*add_generation_prompt=*/true});
+                vlm_input.pixel_data = toPixelData(bf);
+
+                // prepend <|im_end|>\n to close the previous assistant turn
+                const std::string prefix = "<|im_end|>\n";
+                auto prefix_tokens = processor->tokenizer().encode(prefix, false);
+
+                prompt_tokens.assign(prefix_tokens.begin(), prefix_tokens.end());
+                prompt_tokens.insert(prompt_tokens.end(), bf.input_ids.cbegin(), bf.input_ids.cend());
             } else {
-                // Incremental turn: close the previous assistant turn, open the new user turn.
+                // Subsequent turn, text-only: no image processing needed.
                 // The KV cache already holds all previous context.
                 const std::string turn_text =
                     "<|im_end|>\n"
