@@ -29,9 +29,10 @@ public:
     SSDModel(LLMSpec spec, SSDConfig ssd_cfg);
 
     // Overrides the standard generate() to use SSD decode loop.
+    // Return false from the callback to stop generation early (user stop).
     std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
                                   const GenerationConfig& gen_cfg = {},
-                                  std::function<void(int32_t)> token_callback = nullptr) override;
+                                  std::function<bool(int32_t)> token_callback = nullptr) override;
 
     void resetKVCache() override;
 

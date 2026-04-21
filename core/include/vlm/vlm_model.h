@@ -22,10 +22,11 @@ public:
     explicit VLMModel(LLMSpec spec);
 
     // Encodes multimodal inputs, injects embeddings, then calls LLMModel::generate().
+    // Return false from the callback to stop generation early (user stop).
     std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
                                   const VLMInput&              vlm_input,
                                   const GenerationConfig&      gen_cfg = {},
-                                  std::function<void(int32_t)> token_callback = nullptr);
+                                  std::function<bool(int32_t)> token_callback = nullptr);
 
 protected:
     bool onInitialized() override;
