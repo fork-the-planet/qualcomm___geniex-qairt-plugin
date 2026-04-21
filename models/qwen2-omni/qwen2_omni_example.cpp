@@ -177,7 +177,6 @@ int main(int argc, char** argv) {
 
     // ── Chat loop ─────────────────────────────────────────────────────────────
 
-    std::vector<geniex::ChatMessage> history;
     bool first_turn = true;
 
     while (true) {
@@ -186,8 +185,7 @@ int main(int argc, char** argv) {
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
         // Save turn state so we can restore it if preprocessing fails.
-        const size_t saved_history_size = history.size();
-        const bool   saved_first_turn   = first_turn;
+        const bool saved_first_turn = first_turn;
 
         // Build the user message.
         // – Turn 1: attach image path if provided.
@@ -196,14 +194,19 @@ int main(int argc, char** argv) {
         user_msg.role    = "user";
         user_msg.content = input;
 
+        // Build incremental messages for this turn only.
+        // The KV cache already holds all prior context, so we only need to
+        // process the new messages — not the full conversation history.
+        std::vector<geniex::ChatMessage> turn_messages;
+
         if (first_turn) {
             if (!args.image_path.empty())
                 user_msg.mm_content_paths.push_back(args.image_path);
             // Audio path ignored until audio processing is supported.
-            history.push_back({"system", "You are a helpful assistant."});
+            turn_messages.push_back({"system", "You are a helpful assistant."});
             first_turn = false;
         }
-        history.push_back(user_msg);
+        turn_messages.push_back(user_msg);
 
         // ── Preprocess + Generate (all inside try so errors are reported) ──────
 
@@ -214,9 +217,12 @@ int main(int argc, char** argv) {
         std::cout << "\033[33m";
         std::vector<int32_t> output_tokens;
         try {
-            geniex::BatchFeatures bf = processor->process(history, /*add_generation_prompt=*/true);
+            // Process only this turn's messages (incremental input).
+            geniex::BatchFeatures bf = processor->process(
+                {turn_messages, /*add_generation_prompt=*/true});
 
             // Convert to geniex types.
+            // Pixel data is only present on the first turn (when images are attached).
             geniex::VLMInput vlm_input;
             vlm_input.pixel_data = toPixelData(bf);
 
@@ -237,14 +243,12 @@ int main(int argc, char** argv) {
             std::cout << "\033[0m\n" << std::flush;
             std::cerr << "Error: " << e.what() << "\n" << std::flush;
             model->resetKVCache();
-            history.resize(saved_history_size);
             first_turn = saved_first_turn;
             continue;
         } catch (...) {
             std::cout << "\033[0m\n" << std::flush;
             std::cerr << "Error: unknown exception\n" << std::flush;
             model->resetKVCache();
-            history.resize(saved_history_size);
             first_turn = saved_first_turn;
             continue;
         }
