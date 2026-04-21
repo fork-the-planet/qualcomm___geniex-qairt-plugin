@@ -5,7 +5,7 @@ add_executable(qwen2_omni
 target_include_directories(qwen2_omni PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(qwen2_omni PRIVATE geniex_vlm)
+target_link_libraries(qwen2_omni PRIVATE geniex_vlm geniex-proc-vision)
 set_target_properties(qwen2_omni PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
