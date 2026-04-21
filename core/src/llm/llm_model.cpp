@@ -340,7 +340,7 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
 
 std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens,
                                          const GenerationConfig&      gen_cfg,
-                                         std::function<void(int32_t)> token_callback) {
+                                         std::function<bool(int32_t)> token_callback) {
 
     // ── Prefill ───────────────────────────────────────────────────────────────
     size_t tokens_processed = 0;
@@ -418,7 +418,10 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         }
         if (is_eos) break;
         output_tokens.push_back(next_token);
-        if (token_callback) token_callback(next_token);
+        if (token_callback && !token_callback(next_token)) {
+            GENIEX_LOG_DEBUG("token_callback requested stop at step {}", step);
+            break;
+        }
 
         // CL upgrade during decode: if n_past_ has reached the current variant's
         // capacity, advance to the next CL and reshape KV in-place.

@@ -44,7 +44,7 @@ void VLMModel::clearPositions() {}
 std::vector<int32_t> VLMModel::generate(const std::vector<int32_t>& prompt_tokens,
                                           const VLMInput&              vlm_input,
                                           const GenerationConfig&      gen_cfg,
-                                          std::function<void(int32_t)> token_callback) {
+                                          std::function<bool(int32_t)> token_callback) {
     if (!emb_provider_) {
         throw std::runtime_error("VLMModel: no embedding provider registered");
     }
@@ -68,7 +68,7 @@ std::vector<int32_t> VLMModel::generate(const std::vector<int32_t>& prompt_token
         }
     }
 
-    emb_provider_->setBuffer(std::move(text_embeds), nPast());
+    emb_provider_->setBuffer(std::move(text_embeds));
     preparePositions(prompt_tokens, vlm_input, nPast());
 
     auto result = LLMModel::generate(prompt_tokens, gen_cfg, token_callback);

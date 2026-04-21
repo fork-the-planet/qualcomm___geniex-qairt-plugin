@@ -1,3 +1,5 @@
+#include <atomic>
+#include <csignal>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -17,6 +19,16 @@ static void enable_utf8_io() {
         SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 }
 #endif
+
+// Set by SIGINT (CTRL-C). Checked by the streaming callback to stop generation.
+static std::atomic<bool> g_stop_requested{false};
+static void sigint_handler(int sig) {
+    g_stop_requested.store(true);
+    // On Windows the signal disposition is reset to SIG_DFL after the handler
+    // fires; without re-arming, a second CTRL-C hits the default handler and
+    // terminates the process mid-inference, leaving QNN graphs un-destroyed.
+    std::signal(sig, sigint_handler);
+}
 
 struct Args {
     int32_t     max_tokens     = 512;
@@ -51,6 +63,8 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     enable_utf8_io();
 #endif
+
+    std::signal(SIGINT, sigint_handler);
 
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
@@ -104,10 +118,12 @@ int main(int argc, char** argv) {
         std::string prompt = pipe->applyChatTemplate(input);
 
         std::cout << "\033[33m";
+        g_stop_requested.store(false);
         auto result = pipe->generate(prompt, gen_cfg,
             [](const char* piece) {
                 std::cout << piece << std::flush;
-                return true;
+                // CTRL-C → SIGINT → g_stop_requested = true → stop streaming.
+                return !g_stop_requested.load();
             });
         std::cout << "\033[0m\n";
 

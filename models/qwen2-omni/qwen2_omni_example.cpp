@@ -276,6 +276,7 @@ int main(int argc, char** argv) {
                         got_first_token = true;
                     }
                     std::cout << processor->tokenizer().decode({tok}) << std::flush;
+                    return true;
                 });
         } catch (const std::exception& e) {
             std::cout << "\033[0m\n" << std::flush;

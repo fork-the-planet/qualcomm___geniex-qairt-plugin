@@ -24,9 +24,10 @@ public:
     // Returns generated token IDs (excluding the prompt). Runs prefill then decode.
     // If token_callback is provided, it is called with each token immediately as it is
     // sampled (before the next decode step), enabling streaming output.
+    // Return false from the callback to stop generation early (user stop).
     virtual std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
                                   const GenerationConfig& gen_cfg = {},
-                                  std::function<void(int32_t)> token_callback = nullptr);
+                                  std::function<bool(int32_t)> token_callback = nullptr);
 
     virtual void resetKVCache();  // zeroes KV buffers and resets n_past_ / active_cl_idx_
     void saveKVCacheToFile(const std::string& path) const;

@@ -119,7 +119,7 @@ GenerateResult LLMPipeline::generate(
     auto output_tokens = impl_->model->generate(
         input_ids,
         gen_cfg,
-        [&](int32_t tok) {
+        [&](int32_t tok) -> bool {
             if (!got_first) {
                 t_first_token = Clock::now();
                 got_first     = true;
@@ -129,9 +129,12 @@ GenerateResult LLMPipeline::generate(
             full_text << piece;
 
             if (on_token && !piece.empty()) {
-                if (!on_token(piece.c_str()))
+                if (!on_token(piece.c_str())) {
                     user_stopped = true;
+                    return false;
+                }
             }
+            return !user_stopped;
         });
 
     auto t_end = Clock::now();
