@@ -255,21 +255,6 @@ int main(int argc, char** argv) {
                 vlm_input.pixel_data = toPixelData(bf);
                 prompt_tokens.assign(bf.input_ids.cbegin(), bf.input_ids.cend());
 
-                std::cerr << "[DEBUG] Turn 1: prompt_tokens=" << prompt_tokens.size()
-                          << " pixel_values=" << bf.pixel_values.size()
-                          << " image_grid_thw=";
-                if (bf.image_grid_thw.dimension() > 0 && bf.image_grid_thw.shape()[0] > 0) {
-                    std::cerr << bf.image_grid_thw(0,0) << "x"
-                              << bf.image_grid_thw(0,1) << "x"
-                              << bf.image_grid_thw(0,2);
-                } else {
-                    std::cerr << "(none)";
-                }
-                std::cerr << " n_image_tokens_in_prompt=";
-                int32_t img_tok_count = 0;
-                for (auto t : prompt_tokens) if (t == 151655) ++img_tok_count;
-                std::cerr << img_tok_count << "\n";
-
                 first_turn = false;
             } else {
                 // Incremental turn: close the previous assistant turn, open the new user turn.
@@ -279,7 +264,6 @@ int main(int argc, char** argv) {
                     "<|im_start|>user\n" + prompt_text + "<|im_end|>\n"
                     "<|im_start|>assistant\n";
                 prompt_tokens = processor->tokenizer().encode(turn_text, /*add_special_tokens=*/false);
-                std::cerr << "[DEBUG] Turn N: prompt_tokens=" << prompt_tokens.size() << "\n";
             }
 
             output_tokens = model->generate(
