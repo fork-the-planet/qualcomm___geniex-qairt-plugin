@@ -9,7 +9,7 @@
                 "${workspaceFolder}/geniex-app/src/qnn-api",
                 "${workspaceFolder}/models/**",
                 "${workspaceFolder}/third-party/**",
-                "${workspaceFolder}/third-party/nexaproc/include"
+                "${workspaceFolder}/third-party/geniex-proc/include"
             ],
             "defines": [
                 "_DEBUG",

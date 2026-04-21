@@ -134,11 +134,13 @@ int main(int argc, char** argv) {
     };
     config.llm_config.tokenizer_path  = (model_dir / "tokenizer.json").string();
     config.llm_config.embedding_path  = (model_dir / "embed_tokens.npy").string();
+    config.llm_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
 
     config.vision_config.model_paths = {
         (model_dir / "vit" / "patch_embed.serialized.bin").string(),
         (model_dir / "vit" / "vit.serialized.bin").string(),
     };
+    config.vision_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
 
     // Audio encoder disabled — audio processing not yet supported.
     // config.audio_config.model_paths = {
@@ -174,17 +176,6 @@ int main(int argc, char** argv) {
     auto processor = geniex::qwen2vl::Qwen2VLProcessor::create(config.llm_config.tokenizer_path);
 
     // ── Chat loop ─────────────────────────────────────────────────────────────
-    //
-    // Incremental KV cache strategy: only the tokens for the *current turn* are
-    // fed to generate() each round. Previous turns are already in the KV cache.
-    //
-    // Turn 1:  process([system, user_msg], add_generation_prompt=true)
-    //          → full chat template + image preprocessing via processor
-    //
-    // Turn N+: close the previous assistant turn (<|im_end|>\n) then open the
-    //          new user turn, tokenized directly — no image preprocessing needed.
-    //          The prefix fed to generate() is:
-    //            <|im_end|>\n<|im_start|>user\n{content}<|im_end|>\n<|im_start|>assistant\n
 
     bool first_turn = true;
 
@@ -193,7 +184,29 @@ int main(int argc, char** argv) {
         std::string input;
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
+        // Save turn state so we can restore it if preprocessing fails.
         const bool saved_first_turn = first_turn;
+
+        // Build the user message.
+        // – Turn 1: attach image path if provided.
+        // – Turn 2+: text only (media already encoded in KV cache).
+        geniex::ChatMessage user_msg;
+        user_msg.role    = "user";
+        user_msg.content = input;
+
+        // Build incremental messages for this turn only.
+        // The KV cache already holds all prior context, so we only need to
+        // process the new messages — not the full conversation history.
+        std::vector<geniex::ChatMessage> turn_messages;
+
+        if (first_turn) {
+            if (!args.image_path.empty())
+                user_msg.mm_content_paths.push_back(args.image_path);
+            // Audio path ignored until audio processing is supported.
+            turn_messages.push_back({"system", "You are a helpful assistant."});
+            first_turn = false;
+        }
+        turn_messages.push_back(user_msg);
 
         // ── Preprocess + Generate (all inside try so errors are reported) ──────
 
@@ -204,7 +217,12 @@ int main(int argc, char** argv) {
         std::cout << "\033[33m";
         std::vector<int32_t> output_tokens;
         try {
-            std::vector<int32_t> prompt_tokens;
+            // Process only this turn's messages (incremental input).
+            geniex::BatchFeatures bf = processor->process(
+                {turn_messages, /*add_generation_prompt=*/true});
+
+            // Convert to geniex types.
+            // Pixel data is only present on the first turn (when images are attached).
             geniex::VLMInput vlm_input;
 
             if (first_turn) {

@@ -51,7 +51,7 @@ LLMPipeline                     — high-level API: tokenizer + chat template + 
 - `models/` — per-model specs (`.h`) and example executables (`.cpp`)
 - `modelfiles/` — tokenizer configs, embedding tables, HTP configs per model
 - `geniex-app/` — QNN SDK headers (`include/QNN/`) and API wrappers (`src/qnn-api/`)
-- `third-party/nexaproc/` — git submodule for tokenizer and preprocessing
+- `third-party/geniex-proc/` — git submodule for tokenizer and preprocessing
 - `docs/` — detailed architecture docs, xtensor development workflow guides
 
 ## Build Commands

@@ -18,7 +18,7 @@ option(GENIEX_DEBUG       "Enable debug logging (includes file/line/func in log 
 if(GENIEX_BUILD_VLM)
     set(GENIEXPROC_ENABLE_VISION ON CACHE BOOL "" FORCE)
 endif()
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third-party/nexaproc third-party/nexaproc)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third-party/geniex-proc third-party/geniex-proc)
 
 # ── Compile definitions ───────────────────────────────────────────────────────
 set(GENIEX_COMPILE_DEFS
@@ -56,9 +56,9 @@ set(GENIEX_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/src/MmappedFile/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third-party/qairt/src/qualla/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third-party/qairt/src/trace/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third-party/nexaproc/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third-party/nexaproc/third_party/xtensor/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third-party/nexaproc/third_party/xtl/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third-party/geniex-proc/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third-party/geniex-proc/third_party/xtensor/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third-party/geniex-proc/third_party/xtl/include
 )
 
 # ── qnn-api sources ───────────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ set(CORE_SOURCES
 
 # ════════════════════════════════════════════════════════════════════════════
 # Tier 1: geniex_core  —  always built
-# Deps: QNN API, core, LLM model specs, tokenizers (via nexaproc)
+# Deps: QNN API, core, LLM model specs, tokenizers (via geniex-proc)
 # ════════════════════════════════════════════════════════════════════════════
 add_library(geniex_core SHARED
     ${QNN_API_SOURCES}
