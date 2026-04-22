@@ -3,30 +3,98 @@
 
 #include "xtensor/io/xnpy.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <fstream>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 
 namespace geniex {
+
+namespace {
+
+// Returns true if `path` ends with `suffix` (case-insensitive).
+bool endsWithICase(const std::string& path, const std::string& suffix) {
+    if (path.size() < suffix.size()) return false;
+    return std::equal(
+        suffix.rbegin(), suffix.rend(), path.rbegin(),
+        [](char a, char b) { return std::tolower(a) == std::tolower(b); });
+}
+
+} // namespace
 
 // ── PrecomputedEmbeddingProvider ──────────────────────────────────────────────
 
 PrecomputedEmbeddingProvider::PrecomputedEmbeddingProvider(std::string tensor_name)
     : tensor_name_(std::move(tensor_name)) {}
 
+void PrecomputedEmbeddingProvider::loadTable(const std::string& path,
+                                              size_t             vocab_size,
+                                              size_t             hidden_size) {
+    if (!table_.empty()) return;          // idempotent
+
+    if (endsWithICase(path, ".npy")) {
+        // .npy carries its own shape — trust the header, validate hints if given.
+        auto arr = xt::load_npy<float>(path);
+        if (arr.dimension() != 2) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: expected 2-D npy, got " +
+                std::to_string(arr.dimension()) + "-D in " + path);
+        }
+        const size_t npy_vocab  = arr.shape(0);
+        const size_t npy_hidden = arr.shape(1);
+        if ((vocab_size  && vocab_size  != npy_vocab) ||
+            (hidden_size && hidden_size != npy_hidden)) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: shape mismatch in " + path +
+                " (npy is [" + std::to_string(npy_vocab) + "," +
+                std::to_string(npy_hidden) + "], expected [" +
+                std::to_string(vocab_size) + "," +
+                std::to_string(hidden_size) + "])");
+        }
+        hidden_size_ = npy_hidden;
+        table_.assign(arr.begin(), arr.end());
+    } else {
+        // Headerless raw float32 — both dims must come from the caller.
+        if (vocab_size == 0 || hidden_size == 0) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: raw embedding file " + path +
+                " requires non-zero (vocab_size, hidden_size)");
+        }
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: cannot open " + path);
+        }
+        const std::streamsize expected = static_cast<std::streamsize>(
+            vocab_size * hidden_size * sizeof(float));
+        if (f.tellg() != expected) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: size mismatch for " + path +
+                " (expected " + std::to_string(expected) + " bytes, got " +
+                std::to_string(f.tellg()) + ")");
+        }
+        f.seekg(0, std::ios::beg);
+        table_.assign(vocab_size * hidden_size, 0.0f);
+        f.read(reinterpret_cast<char*>(table_.data()), expected);
+        if (!f) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: failed to read " + path);
+        }
+        hidden_size_ = hidden_size;
+    }
+}
+
 void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg,
-                                                  const LLMSpec&     /*spec*/) {
-    if (!table_.empty()) return;
+                                                  const LLMSpec&     spec) {
+    if (!table_.empty()) return;          // idempotent
     if (model_cfg.embedding_path.empty()) return;
 
-    auto arr = xt::load_npy<float>(model_cfg.embedding_path);
-    if (arr.dimension() != 2) {
-        throw std::runtime_error(
-            "PrecomputedEmbeddingProvider: expected 2-D npy, got " +
-            std::to_string(arr.dimension()) + "-D");
-    }
-    hidden_size_ = arr.shape(1);
-    table_.assign(arr.begin(), arr.end());
+    // Route through loadTable(), supplying shape hints from LLMSpec so raw
+    // (headerless) files work without additional caller ceremony.
+    loadTable(model_cfg.embedding_path, spec.vocab_size, spec.hidden_size);
 }
 
 std::vector<float> PrecomputedEmbeddingProvider::lookupBatch(

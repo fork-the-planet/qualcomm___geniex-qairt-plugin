@@ -16,9 +16,29 @@ namespace geniex {
 // Embedding provider for VLMs. Owns the embedding table and operates in two modes:
 //   Prefill: write() slices from a pre-computed buffer (set via setBuffer()).
 //   Decode:  write() falls back to per-token table lookup.
+//
+// The embedding table is loaded automatically by onInitialized() from
+// `model_cfg.embedding_path`, or explicitly by the caller via loadTable().
+// Two on-disk formats are supported, auto-detected by file extension:
+//   * `.npy` — numpy array [vocab_size, hidden_size] (float32); shape read
+//              from the header. vocab_size / hidden_size arguments (if
+//              non-zero) are validated against the header.
+//   * other  — flat row-major float32 binary with no header. vocab_size and
+//              hidden_size must be known either from the caller (loadTable)
+//              or from the owning LLMSpec (onInitialized).
 class GENIEX_VLM_API PrecomputedEmbeddingProvider : public InputProvider {
 public:
     explicit PrecomputedEmbeddingProvider(std::string tensor_name = "input_embeds");
+
+    // Loads the embedding table from `path`.
+    //  * `.npy`  — shape is read from the header; vocab_size/hidden_size are
+    //              optional and, if non-zero, validated against it.
+    //  * other   — flat row-major float32 binary; both vocab_size and
+    //              hidden_size must be non-zero and match the file size.
+    // Idempotent: does nothing if a table is already loaded.
+    void loadTable(const std::string& path,
+                   size_t             vocab_size  = 0,
+                   size_t             hidden_size = 0);
 
     void onInitialized(const ModelConfig& model_cfg, const LLMSpec& spec) override;
 

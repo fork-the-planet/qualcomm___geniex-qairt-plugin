@@ -4,39 +4,123 @@
 #include "llm/llm_model.h"
 #include "llm/llm_types.h"
 #include "pipeline/chat_template.h"
-#include "pipeline/llm_pipeline.h"
+#include "types.h"
+#include "vlm/vlm_input_provider.h"
+#include "vlm/vlm_model.h"
+#include "vlm/vision_encoder.h"
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace geniex {
 namespace qwen2_5_vl_7b {
 
 // ── Architecture constants ────────────────────────────────────────────────────
-// Source of truth: modelfiles/qwen2_5_vl/config.json
-static constexpr size_t kHiddenSize   = 3584;
-static constexpr size_t kNumHeads     = 28;
-static constexpr size_t kNumKVHeads   = 4;
-static constexpr size_t kHeadDim      = 128;   // hidden_size / num_heads
-static constexpr size_t kNumLayers    = 28;
-static constexpr size_t kVocabSize    = 152064;
-static constexpr float  kRopeTheta    = 1000000.0f;
+static constexpr size_t kHiddenSize = 3584;
+static constexpr size_t kNumHeads   = 28;
+static constexpr size_t kNumKVHeads = 4;
+static constexpr size_t kHeadDim    = 128;      // hidden_size / num_heads
+static constexpr size_t kNumLayers  = 28;
+static constexpr size_t kVocabSize  = 152064;
+static constexpr float  kRopeTheta  = 1000000.0f;
 
-// Returns the architecture spec for the Qwen2.5-VL-7B text backbone
-// (5-shard Genie export, CL=2048, prefill AR=128, decode AR=1).
+static constexpr int kImageHeight       = 336;
+static constexpr int kImageWidth        = 504;
+static constexpr int kPatchSize         = 14;
+static constexpr int kTemporalPatchSize = 2;
+static constexpr int kSpatialMergeSize  = 2;
+
+static constexpr int kGridT            = 1;
+static constexpr int kGridH            = kImageHeight / kPatchSize;      // 24
+static constexpr int kGridW            = kImageWidth  / kPatchSize;      // 36
+static constexpr int kNumPatches       = kGridT * kGridH * kGridW;       // 864
+static constexpr int kNumImageTokens   = kNumPatches /
+    (kSpatialMergeSize * kSpatialMergeSize);                             // 216
+static constexpr int kPatchFeatureSize = 3 * kTemporalPatchSize *
+    kPatchSize * kPatchSize;                                             // 1176
+
+// Qwen2.5-VL special tokens (same family as Qwen2-VL / Qwen2-Omni).
+static constexpr int32_t kVisionStartTokenId = 151652;
+static constexpr int32_t kVisionEndTokenId   = 151653;
+static constexpr int32_t kImageTokenId       = 151655;  // <|image_pad|>
+
+// MRoPE section (from config.json rope_scaling.mrope_section).
+// Sum = 64 = head_dim/2. Qwen2.5-VL uses BLOCK interleaving.
+inline const std::vector<int>& mRoPESection() {
+    static const std::vector<int> kSec = {16, 24, 24};
+    return kSec;
+}
+
+// ── Model config ──────────────────────────────────────────────────────────────
+
+struct Qwen25VLConfig {
+    // Text backbone: 5 shards (part1_of_5.bin … part5_of_5.bin).
+    ModelConfig llm_config;
+
+    // Vision encoder: single graph (vision_encoder.bin).
+    ModelConfig vision_config;
+};
+
+// ── Vision encoder ────────────────────────────────────────────────────────────
+
+// Single-graph QNN vision encoder.
 //
-// Shard layout (28 transformer layers spread across 5 shards, no embed shard):
-//   shard 1 : layers  0 –  5   – inputs_embeds → add_13335
-//   shard 2 : layers  6 – 11   – add_13335     → add_25971
-//   shard 3 : layers 12 – 17   – add_25971     → add_38607
-//   shard 4 : layers 18 – 23   – add_38607     → add_51243
-//   shard 5 : layers 24 – 27   – add_51243     → logits
+// Inputs:
+//   pixel_values          [864, 1176]   — flattened patches
+//   position_ids_cos/sin  [864, 40]     — per-patch 2D rotary
+//   window_attention_mask [1, 864, 864] — windowed attention pattern
+//   full_attention_mask   [1, 864, 864] — full attention pattern
+// Output:
+//   image_features        [216, 3584]   — merged image tokens, same hidden as LLM
 //
-// Notes:
-//  • The embedding lookup is done CPU-side (no on-device embed shard), using
-//    the raw fp32 table in modelfiles/qwen2_5_vl/embedding_weights.raw.
-//  • The full Qwen2.5-VL model uses MRoPE with a 3-dim position axis. For
-//    text-only prompts the three axes collapse to the usual 1-D position IDs,
-//    so the standard RoPEInputProvider is sufficient — the exported graph
-//    takes cos/sin tensors of shape [1, 1, AR, head_dim/2] which match.
-//    Vision/video inputs will later need a dedicated MRoPE provider.
+// The graph is compiled for a fixed 24×36 patch grid (336×504 pixels).
+// Multi-image prompts are handled by looping and calling execute() per image;
+// dynamic shapes are not supported.
+class Qwen25VLVisionEncoder : public QnnVisionEncoder {
+public:
+    // Returns flat [n_images * kNumImageTokens * kHiddenSize] embeddings.
+    std::vector<float> encode(const PixelData& pixel_data) override;
+};
+
+// ── VLM model ─────────────────────────────────────────────────────────────────
+
+class Qwen25VLModel : public VLMModel {
+public:
+    Qwen25VLModel();
+
+    // Called by makeModel() after encoder ownership is transferred.
+    void setVisionEncoder(std::unique_ptr<Qwen25VLVisionEncoder> vis);
+
+    // Called by makeModel() to register the MRoPE provider.
+    void setMRoPEProvider(std::unique_ptr<MRoPEInputProvider> provider);
+
+protected:
+    std::vector<float> encodeVision(const PixelData& pixel_data) override;
+
+    // Computes 3D MRoPE position IDs from input_ids + image grids,
+    // applies n_past offset + accumulated mrope_deltas, pushes them to the
+    // MRoPE provider.
+    void preparePositions(const std::vector<int32_t>& input_ids,
+                          const VLMInput&             vlm_input,
+                          size_t                      n_past) override;
+
+    void clearPositions() override;
+
+private:
+    MRoPEInputProvider*  mrope_provider_ = nullptr;  // non-owning
+    std::vector<int32_t> mrope_deltas_   = {0, 0, 0};
+};
+
+// ── LLMSpec ───────────────────────────────────────────────────────────────────
+
+// Shard layout (28 transformer layers across 5 shards, no on-device embed):
+//   shard 1 : layers  0 –  5   inputs_embeds → add_13335
+//   shard 2 : layers  6 – 11   add_13335     → add_25971
+//   shard 3 : layers 12 – 17   add_25971     → add_38607
+//   shard 4 : layers 18 – 23   add_38607     → add_51243
+//   shard 5 : layers 24 – 27   add_51243     → logits
 inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
@@ -70,41 +154,16 @@ inline LLMSpec makeSpec() {
         // Genie export graph names: prompt_arAR_clCL_N_of_TOTAL / token_...
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
-        // eos (<|im_end|> = 151645) + endoftext (151643) fallback.
         .eos_token_ids = {151643, 151645},
     };
 }
 
-// Builds an LLMModel configured for text-only inference.
-// The caller must set `model_cfg.embedding_path` to the raw fp32 embedding
-// table (vocab_size × hidden_size floats, row-major) before initialize().
-inline LLMModel makeModel() {
-    LLMModel m(makeSpec());
+// ── Factory ───────────────────────────────────────────────────────────────────
 
-    // Shard-1 input tensor is named "inputs_embeds" (note the 's'). The
-    // provider loads the embedding table CPU-side from model_cfg.embedding_path
-    // and auto-detects the format:
-    //   * .npy     — shape read from the numpy header
-    //   * raw .raw — shape inferred from the shard-1 tensor spec + file size
-    m.addInputProvider(std::make_unique<EmbeddingInputProvider>("inputs_embeds"));
-
-    // Text-only path: standard RoPE. Writes "position_ids_cos" / "position_ids_sin".
-    m.addInputProvider(std::make_unique<RoPEInputProvider>(kHeadDim, kRopeTheta));
-
-    return m;
-}
-
-// Qwen2.5-VL uses the ChatML template (same as Qwen2.5 / Qwen3).
-inline ChatTemplateFunc chatTemplate = chatMLTemplate;
-
-// Factory: builds an LLMPipeline ready for generate().
-inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig&      model_cfg) {
-    LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg))
-        return std::nullopt;
-    return pipe;
-}
+// Creates, configures, and initializes the full Qwen2.5-VL-7B stack
+// (vision encoder + LLM). Returns nullptr on any initialization failure.
+std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
+                                         const Qwen25VLConfig&   config);
 
 } // namespace qwen2_5_vl_7b
 } // namespace geniex
