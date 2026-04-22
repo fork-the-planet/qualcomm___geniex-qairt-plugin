@@ -216,6 +216,7 @@ endif()
 
 if(GENIEX_BUILD_VLM)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2-omni)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5_vl)
 endif()
 
 # ── HTP runtime libraries ─────────────────────────────────────────────────────

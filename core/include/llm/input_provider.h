@@ -21,9 +21,11 @@ public:
     virtual ~InputProvider() = default;
 
     // Called once after all Graph objects are ready.
-    // Implementations that need runtime configuration (e.g. embedding path from
-    // ModelConfig) perform their one-time setup here.
-    virtual void onInitialized(const ModelConfig&) {}
+    // Implementations that need runtime configuration perform their one-time
+    // setup here. They receive both the ModelConfig (paths, per-run config)
+    // and the architectural LLMSpec (shapes, vocab size, etc.), so they do
+    // not need to have these baked in at construction time.
+    virtual void onInitialized(const ModelConfig&, const LLMSpec&) {}
 
     // Write input tensor(s) into g for the given context.
     // Implementations must silently do nothing if the target tensor is absent
@@ -33,24 +35,41 @@ public:
 
 // Owns a token embedding table and writes the [curr_len * hidden_size] embeds
 // tensor for each forward pass.
+//
+// The embedding table is loaded automatically by onInitialized() from
+// `model_cfg.embedding_path`, or explicitly by the caller via loadTable().
+// Two on-disk formats are supported, auto-detected by file extension:
+//   * `.npy` — numpy array [vocab_size, hidden_size] (float32); shape read
+//              from the header. vocab_size / hidden_size arguments (if
+//              non-zero) are validated against the header.
+//   * other  — flat row-major float32 binary with no header. vocab_size and
+//              hidden_size must be known either from the caller (loadTable)
+//              or from the owning LLMSpec (onInitialized).
 class GENIEX_API EmbeddingInputProvider : public InputProvider {
 public:
     // tensor_name: name of the graph input to write (default "input_embeds").
     explicit EmbeddingInputProvider(std::string tensor_name = "input_embeds");
 
-    // Pre-loads the embedding table from a row-major float32 binary file.
-    // If called before onInitialized(), the onInitialized() load is skipped.
-    bool loadTable(const std::string& path, size_t vocab_size, size_t hidden_size);
+    // Loads the embedding table from `path`.
+    //  * `.npy`  — shape is read from the header; vocab_size/hidden_size are
+    //              optional and, if non-zero, validated against it.
+    //  * other   — flat row-major float32 binary; both vocab_size and
+    //              hidden_size must be non-zero and match the file size.
+    // Idempotent: does nothing if a table is already loaded.
+    void loadTable(const std::string& path,
+                   size_t             vocab_size  = 0,
+                   size_t             hidden_size = 0);
 
-    // If the table has not already been loaded via loadTable(), loads it from
-    // model_cfg.embedding_path (npy format). No-op if embedding_path is empty.
-    void onInitialized(const ModelConfig& model_cfg) override;
+    // Loads the table from `model_cfg.embedding_path`. For headerless raw
+    // files, shape is taken from `spec.vocab_size` / `spec.hidden_size`.
+    // No-op if embedding_path is empty or the table is already loaded.
+    void onInitialized(const ModelConfig& model_cfg, const LLMSpec& spec) override;
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
 private:
     std::string        tensor_name_;
-    std::vector<float> table_;       // flat row-major [vocab_size * hidden_size]
+    std::vector<float> table_;        // flat row-major [vocab_size * hidden_size]
     size_t             hidden_size_ = 0;
 };
 

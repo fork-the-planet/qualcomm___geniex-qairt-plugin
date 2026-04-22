@@ -57,5 +57,39 @@ GENIEX_VLM_API std::vector<float> windowReorder(const std::vector<float>& hidden
                                                  size_t embed_dim,
                                                  const std::vector<int64_t>& window_index);
 
+// ── Qwen2.5-VL vision encoder helpers ----─────────────────────────────────
+
+/// Computes per-patch 2D rotary cos/sin in NATURAL order (no window reorder).
+/// Mirrors HF Qwen2_5_VisionTransformerPretrainedModel.rot_pos_emb(): each
+/// patch gets a (h_coord, w_coord) pair permuted into spatial-merge tiles,
+/// and the cos/sin for those coords are concatenated h-freq | w-freq.
+/// Returns {cos, sin}, each flat [T*H*W, 2*inv_freq.size()].
+GENIEX_VLM_API std::pair<std::vector<float>, std::vector<float>>
+computePatchRoPE(int T, int H, int W,
+                 int spatial_merge_size,
+                 const std::vector<float>& inv_freq);
+
+/// Computes cumulative window seqlens for windowed attention.
+/// Given `window_index` returned by `computeWindowIndex`, this produces a
+/// cumulative-sum vector where `cu[i+1] - cu[i]` is the number of patches in
+/// window i (before unique_consecutive). Length = num_windows * sm_unit + 1
+/// (first entry is always 0). Used to build `window_attention_mask`.
+GENIEX_VLM_API std::vector<int64_t>
+computeCuWindowSeqlens(int T, int H, int W,
+                       int spatial_merge_size,
+                       int window_size,
+                       int patch_size);
+
+/// Builds a block-diagonal additive attention mask of shape [N, N].
+/// `boundaries` is a strictly-increasing vector with boundaries[0] = 0 and
+/// boundaries.back() = N. Positions i, j attend to each other iff they fall
+/// in the same segment [boundaries[k], boundaries[k+1]). Cells within a
+/// segment get `allowed`, everything else gets `blocked`.
+GENIEX_VLM_API std::vector<float>
+buildBlockAttentionMask(size_t N,
+                        const std::vector<int64_t>& boundaries,
+                        float allowed = 0.0f,
+                        float blocked = -1e9f);
+
 } // namespace qwen_vit
 } // namespace geniex

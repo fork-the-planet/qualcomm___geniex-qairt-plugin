@@ -120,6 +120,18 @@
             "environment": [],
             "console": "integratedTerminal",
             "preLaunchTask": "Build Qwen2-Omni (Debug)"
+        },
+        {
+            "name": "Qwen2.5-VL 7B (Debug)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}\\build\\bin\\Debug\\qwen2_5_vl_7b.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "integratedTerminal",
+            "preLaunchTask": "Build Qwen2.5-VL 7B (Debug)"
         }
     ]
 }

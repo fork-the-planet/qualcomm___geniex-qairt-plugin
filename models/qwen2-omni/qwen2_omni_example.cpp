@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen2-omni";
+    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen2_omni";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected from
     // htp-files/ installed alongside geniex_core.
@@ -168,8 +168,8 @@ int main(int argc, char** argv) {
     geniex::qwen2_omni::Qwen2OmniConfig config;
 
     config.llm_config.model_paths = {
-        (model_dir / "llm" / "ar128-ar1-cl4096" / "weight_sharing_model_1_of_2.serialized.bin").string(),
-        (model_dir / "llm" / "ar128-ar1-cl4096" / "weight_sharing_model_2_of_2.serialized.bin").string(),
+        (model_dir / "llm" / "weight_sharing_model_1_of_2.serialized.bin").string(),
+        (model_dir / "llm" / "weight_sharing_model_2_of_2.serialized.bin").string(),
     };
     config.llm_config.tokenizer_path  = (model_dir / "tokenizer.json").string();
     config.llm_config.embedding_path  = (model_dir / "embed_tokens.npy").string();
