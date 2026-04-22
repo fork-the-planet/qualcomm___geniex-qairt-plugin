@@ -115,7 +115,10 @@ target_include_directories(geniex_core PUBLIC
 target_compile_definitions(geniex_core PUBLIC ${GENIEX_COMPILE_DEFS})
 target_include_directories(geniex_core PUBLIC
     $<TARGET_PROPERTY:geniex-proc,INTERFACE_INCLUDE_DIRECTORIES>)
-target_link_libraries(geniex_core PRIVATE geniex-proc Version Shlwapi)
+target_link_libraries(geniex_core PRIVATE geniex-proc)
+if(WIN32)
+    target_link_libraries(geniex_core PRIVATE Version Shlwapi)
+endif()
 
 set_target_properties(geniex_core PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
