@@ -14,20 +14,8 @@ namespace geniex {
 PrecomputedEmbeddingProvider::PrecomputedEmbeddingProvider(std::string tensor_name)
     : tensor_name_(std::move(tensor_name)) {}
 
-bool PrecomputedEmbeddingProvider::loadTable(const std::string& path,
-                                              size_t             vocab_size,
-                                              size_t             hidden_size) {
-    auto arr = xt::load_npy<float>(path);
-    if (arr.size() != vocab_size * hidden_size) {
-        throw std::runtime_error(
-            "PrecomputedEmbeddingProvider: table size mismatch in " + path);
-    }
-    table_.assign(arr.begin(), arr.end());
-    hidden_size_ = hidden_size;
-    return true;
-}
-
-void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg) {
+void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg,
+                                                  const LLMSpec&     /*spec*/) {
     if (!table_.empty()) return;
     if (model_cfg.embedding_path.empty()) return;
 

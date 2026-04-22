@@ -141,7 +141,7 @@ bool LLMModel::onInitialized() {
     // Let each provider do its one-time setup (e.g. load embedding table from
     // model_cfg_.embedding_path if the table was not pre-loaded by the factory).
     for (auto& p : input_providers_) {
-        p->onInitialized(model_cfg_);
+        p->onInitialized(model_cfg_, spec_);
     }
 
     return true;

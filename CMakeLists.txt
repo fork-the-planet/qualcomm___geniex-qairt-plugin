@@ -105,6 +105,7 @@ target_include_directories(geniex_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/models/phi4
     ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3
     ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5_vl
     ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3
     ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2
     ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_1
@@ -207,6 +208,7 @@ if(BUILD_EXAMPLES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/phi4)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5_vl)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2_ssd)

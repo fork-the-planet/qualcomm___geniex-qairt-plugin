@@ -20,8 +20,7 @@ class GENIEX_VLM_API PrecomputedEmbeddingProvider : public InputProvider {
 public:
     explicit PrecomputedEmbeddingProvider(std::string tensor_name = "input_embeds");
 
-    bool loadTable(const std::string& path, size_t vocab_size, size_t hidden_size);
-    void onInitialized(const ModelConfig& model_cfg) override;
+    void onInitialized(const ModelConfig& model_cfg, const LLMSpec& spec) override;
 
     // Returns flat [token_ids.size() * hidden_size] embeddings for the given tokens.
     std::vector<float> lookupBatch(const std::vector<int32_t>& token_ids) const;
