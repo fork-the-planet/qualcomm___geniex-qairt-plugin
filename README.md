@@ -61,8 +61,10 @@ The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/m
 | Llama-3.1-8B-Instruct (AIHub) | `llama3_1_8b_aihub` | v2.42 | - |
 | Llama-SEA-LION-v3.5-8B-R (AIHub) | `sea_lion_8b_aihub` | v2.42 | - |
 | Llama-v3.2-3B-Instruct-SSD | `llama3_2_3b_ssd` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_2_3b_instruct_ssd) |
+| Qwen2.5-VL-7B-Instruct | `qwen2_5_vl_7b` | v2.45 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen2_5_vl_7b) |
+| Qwen2.5-Omni-3B | `qwen2_omni` | v2.36 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen2_omni) |
 
-> The bundled HTP runtime libs in `third-party/` (`windows`, `android`, `linux-gcc11.2`) are QAIRT **v2.43.1.260218**. Runtime version is backward compatible with compile version, so all models compiled with v2.42 or earlier will run correctly.
+> The bundled HTP runtime libs in `third-party/` (`windows`, `android`, `linux-gcc11.2`) are QAIRT **v2.45.0.260326**. Runtime version is backward compatible with compile version, so all models compiled with v2.45 or earlier will run correctly.
 
 ## Project Structure
 

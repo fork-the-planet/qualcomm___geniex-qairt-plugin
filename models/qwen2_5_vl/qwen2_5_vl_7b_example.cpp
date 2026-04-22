@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
     if (!parseArgs(argc, argv, args)) return 1;
 
     const auto model_dir =
-        std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl";
+        std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl_7b";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected.
     geniex::QnnRuntimeConfig runtime_cfg;
