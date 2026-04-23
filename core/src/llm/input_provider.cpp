@@ -13,7 +13,6 @@ namespace geniex {
 
 namespace {
 
-// Returns true if `path` ends with `suffix` (case-insensitive).
 bool endsWithICase(const std::string& path, const std::string& suffix) {
     if (path.size() < suffix.size()) return false;
     return std::equal(
@@ -22,8 +21,6 @@ bool endsWithICase(const std::string& path, const std::string& suffix) {
 }
 
 } // namespace
-
-// ── EmbeddingInputProvider ────────────────────────────────────────────────────
 
 EmbeddingInputProvider::EmbeddingInputProvider(std::string tensor_name)
     : tensor_name_(std::move(tensor_name)) {}
@@ -90,8 +87,6 @@ void EmbeddingInputProvider::onInitialized(const ModelConfig& model_cfg,
     if (!table_.empty()) return;          // idempotent
     if (model_cfg.embedding_path.empty()) return;
 
-    // Route through loadTable(), supplying shape hints from LLMSpec so raw
-    // (headerless) files work without additional caller ceremony.
     loadTable(model_cfg.embedding_path, spec.vocab_size, spec.hidden_size);
 }
 
@@ -101,8 +96,6 @@ void EmbeddingInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     auto embeds = tokensToEmbedding(ctx.token_ids, table_.data(), hidden_size_);
     g.write(tensor_name_, embeds.data(), embeds.size());
 }
-
-// ── TokenIdInputProvider ──────────────────────────────────────────────────────
 
 TokenIdInputProvider::TokenIdInputProvider(std::string tensor_name,
                                            int32_t     pad_token_id)
@@ -123,8 +116,6 @@ void TokenIdInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     g.write(tensor_name_, buf.data(), buf.size());
 }
 
-// ── RoPEInputProvider ─────────────────────────────────────────────────────────
-
 RoPEInputProvider::RoPEInputProvider(size_t head_dim, float theta,
                                      std::string cos_name,
                                      std::string sin_name)
@@ -141,8 +132,6 @@ void RoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     if (has_cos) g.write(cos_name_, cos_vec.data(), cos_vec.size());
     if (has_sin) g.write(sin_name_, sin_vec.data(), sin_vec.size());
 }
-
-// ── LongRoPEInputProvider ─────────────────────────────────────────────────────
 
 LongRoPEInputProvider::LongRoPEInputProvider(size_t head_dim, float theta,
                                              std::vector<float> ext_factors,
@@ -163,8 +152,6 @@ void LongRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     if (has_cos) g.write(cos_name_, cos_vec.data(), cos_vec.size());
     if (has_sin) g.write(sin_name_, sin_vec.data(), sin_vec.size());
 }
-
-// ── PartialRoPEInputProvider ─────────────────────────────────────────────────────
 
 PartialRoPEInputProvider::PartialRoPEInputProvider(size_t head_dim, float theta,
                                                    float rope_fraction, float scale,

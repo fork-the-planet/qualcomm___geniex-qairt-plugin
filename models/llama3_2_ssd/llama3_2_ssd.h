@@ -52,16 +52,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // Graph names use prompt_ prefix for both AR variants (Genie export convention).
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
     };
 }
 
-// Returns the SSD configuration for this model.
-// branches=[3,2]: 2-level draft tree with 10 nodes, 20 forecast tokens = 30 total per iteration.
-// forecast_prefix=16: 16 pre-computed KV entries loaded from disk.
 inline SSDConfig makeSSDConfig(const std::string& forecast_prefix_path) {
     return SSDConfig{
         .branches = {3, 2},
@@ -80,7 +76,6 @@ inline SSDModel makeModel(const std::string& forecast_prefix_path) {
 
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
-// Creates a ready-to-use SSD pipeline. Returns std::nullopt on failure.
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
                                                const ModelConfig& model_cfg,
                                                const std::string& forecast_prefix_path) {

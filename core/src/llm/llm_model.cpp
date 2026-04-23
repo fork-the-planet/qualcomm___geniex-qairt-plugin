@@ -15,8 +15,6 @@
 
 namespace geniex {
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
 /*static*/ std::string LLMModel::fmtPattern(const std::string& pattern,
                                              size_t             layer_idx) {
     std::string result = pattern;
@@ -52,12 +50,8 @@ void forEachLayerInRanges(const std::vector<LayerRange>& ranges, Fn&& fn) {
 
 } // namespace
 
-// ── Constructor ───────────────────────────────────────────────────────────────
-
 LLMModel::LLMModel(LLMSpec spec)
     : spec_(std::move(spec)) {}
-
-// ── onInitialized ─────────────────────────────────────────────────────────────
 
 bool LLMModel::onInitialized() {
     shard_count_ = spec_.shards.size();
@@ -79,8 +73,7 @@ bool LLMModel::onInitialized() {
         throw std::runtime_error("KV state block shard_layer_ranges size must match shard count");
     }
 
-    // ── Sort graphs by (phase, shard, cl_idx) using graph_name_pattern ─────────
-    // Parse the pattern into alternating literal/placeholder segments.
+    // QNN loads graphs in arbitrary order; reorder them so graphIndex() assumptions hold.
     struct Seg { bool ph; std::string text; };
     std::vector<Seg> segs;
     for (size_t p = 0; p < spec_.graph_name_pattern.size(); ) {
@@ -129,8 +122,6 @@ bool LLMModel::onInitialized() {
     std::stable_sort(graphs_.begin(), graphs_.end(), [&](const Graph& a, const Graph& b) {
         return sortKey(a.name()) < sortKey(b.name());
     });
-    // ── End sort ─────────────────────────────────────────────────────────────────
-
     GENIEX_LOG_DEBUG("LLMModel initialized: {} shards, {} CL variants [{}], vocab={}, hidden={}",
         shard_count_, num_cl_,
         [&]{ std::string s; for (size_t i = 0; i < num_cl_; ++i) { if (i) s+=','; s+=std::to_string(spec_.context_lengths[i]); } return s; }(),
@@ -138,8 +129,6 @@ bool LLMModel::onInitialized() {
 
     buildConnections();
 
-    // Let each provider do its one-time setup (e.g. load embedding table from
-    // model_cfg_.embedding_path if the table was not pre-loaded by the factory).
     for (auto& p : input_providers_) {
         p->onInitialized(model_cfg_, spec_);
     }
@@ -147,31 +136,24 @@ bool LLMModel::onInitialized() {
     return true;
 }
 
-// ── buildConnections ──────────────────────────────────────────────────────────
-
 void LLMModel::buildConnections() {
     shard_hidden_state_.assign(num_cl_, {});
     decode_shard_hidden_state_.assign(num_cl_, {});
 
     for (size_t cl = 0; cl < num_cl_; ++cl) {
-        // Hidden state: out_state_name[s] → in_state_name[s+1] across adjacent prefill shards.
         for (size_t s = 0; s + 1 < shard_count_; ++s) {
             shard_hidden_state_[cl].push_back(
                 {static_cast<int>(graphIndex(0, s,     cl)), spec_.shards[s].out_state_name,
                  static_cast<int>(graphIndex(0, s + 1, cl)), spec_.shards[s + 1].in_state_name});
         }
 
-        // Hidden state for decode: out_state_name[s] → in_state_name[s+1] across adjacent decode shards.
         for (size_t s = 0; s + 1 < shard_count_; ++s) {
             decode_shard_hidden_state_[cl].push_back(
                 {static_cast<int>(graphIndex(1, s,     cl)), spec_.shards[s].out_state_name,
                  static_cast<int>(graphIndex(1, s + 1, cl)), spec_.shards[s + 1].in_state_name});
         }
     }
-
 }
-
-// ── runShard ──────────────────────────────────────────────────────────────────
 
 void LLMModel::runShard(size_t shard, size_t phase, size_t cl_idx,
                          const LLMRunContext& ctx) {
@@ -200,10 +182,6 @@ void LLMModel::runShard(size_t shard, size_t phase, size_t cl_idx,
     }
 }
 
-// ── KV strided-copy helpers ───────────────────────────────────────────────────
-// A flat memcpy corrupts data because src/dst have DIFFERENT strides in the
-// token dimension (seq_len vs kv_len); we do a strided partial copy instead.
-
 void LLMModel::copyKV(Graph& src_g, const std::string& src_name, bool src_is_output,
                       Graph& dst_g, const std::string& dst_name,
                       size_t src_off, size_t dst_off, size_t n_tok, bool is_key) {
@@ -216,11 +194,8 @@ void LLMModel::copyKV(Graph& src_g, const std::string& src_name, bool src_is_out
         src_is_output ? src_g.outputPtr(src_name) : src_g.inputPtr(src_name));
     auto* dst_buf = static_cast<uint8_t*>(dst_g.inputPtr(dst_name));
 
-    // Both layouts reduce to the same strided-copy pattern:
-    //   for each row: memcpy n_tok tokens from src[row][src_off:] to dst[row][dst_off:]
-    //
-    // key   [num_kv_heads, 1, head_dim, kv_len]: n_rows = num_kv_heads*head_dim, token_size = elem_size
-    // value [num_kv_heads, 1, kv_len, head_dim]: n_rows = num_kv_heads, token_size = head_dim * elem_size
+    // key   [H, 1, head_dim, kv_len]: n_rows = H*head_dim, token_size = elem_size
+    // value [H, 1, kv_len, head_dim]: n_rows = H, token_size = head_dim * elem_size
     const size_t H  = spec_.num_kv_heads;
     const size_t hd = spec_.head_dim;
     size_t num_rows, src_kv_len, dst_kv_len, token_size;
@@ -242,10 +217,7 @@ void LLMModel::copyKV(Graph& src_g, const std::string& src_name, bool src_is_out
                     n_tok * token_size);
 }
 
-// updateKV: after executing a shard, copies the new KV tokens from the graph's
-// output tensors (shape [H,1,hd,seq_len] / [H,1,seq_len,hd]) into the corresponding
-// input tensors at token offset dst_off.  This accumulates the KV cache in-place
-// so the next graph execution sees the full history.
+// Propagates freshly-computed KV outputs back into the KV input buffers so each execution sees the full context history.
 void LLMModel::updateKV(size_t s, size_t phase, size_t dst_off, size_t n_tok) {
     const auto& kv_block = requireKVStateBlock();
     const auto& layer_ranges = kv_block.shard_layer_ranges[s];
@@ -259,15 +231,9 @@ void LLMModel::updateKV(size_t s, size_t phase, size_t dst_off, size_t n_tok) {
     });
 }
 
-// reshapeKV: in-place KV rearrangement within the shared buffer when the kv_len stride changes.
-// Replaces transferKV* and upgradeCLKV — all variants share the same physical buffer,
-// so switching phases or CL variants only requires rearranging data in-place.
-//
-// Key   [H, 1, head_dim, kv_len]: n_rows = H*head_dim, each row holds kv_len scalars.
-// Value [H, 1, kv_len,  head_dim]: n_heads = H, each head holds kv_len blocks of head_dim.
-//
-// Expanding (new > old): iterate backward to avoid overwriting source data.
-// Contracting (new < old): iterate forward.
+// Adjusts KV cache stride in-place when switching context-length variants.
+// All CL/phase variants share the same physical buffer, so no reallocation is needed.
+// Expanding iterates rows backward to avoid overwriting unread data; contracting goes forward.
 void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, size_t n_valid) {
     if (old_kv_len == new_kv_len) return;
     const auto& kv_block = requireKVStateBlock();
@@ -277,13 +243,12 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
     // Cap copy length: never read past old_kv_len or write past new_kv_len.
     const size_t copy_len = std::min(n_valid, std::min(old_kv_len, new_kv_len));
 
-    // All CL/phase variants share the same physical buffer; use prefill graph as the handle.
     Graph& g = graph(graphIndex(0, shard, active_cl_idx_));
 
     forEachLayerInRanges(layer_ranges, [&](size_t l) {
         const auto key_in = fmtPattern(kv_block.key_in_pattern, l);
 
-        // ── Key: [num_kv_heads, 1, head_dim, kv_len] ──────────────────────────
+        // Key: [num_kv_heads, 1, head_dim, kv_len]
         {
             const TensorSpec& spec = g.inputSpec(key_in);
             const size_t elem_size = spec.elementSize();
@@ -295,7 +260,6 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
                     std::memmove(buf + row * new_kv_len * elem_size,
                                  buf + row * old_kv_len * elem_size,
                                  copy_len * elem_size);
-                    // Zero-pad positions [copy_len, new_kv_len) in the expanded region.
                     if (copy_len < new_kv_len)
                         std::memset(buf + (row * new_kv_len + copy_len) * elem_size,
                                     0, (new_kv_len - copy_len) * elem_size);
@@ -308,7 +272,7 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
             }
         }
 
-        // ── Value: [num_kv_heads, 1, kv_len, head_dim] ────────────────────────
+        // Value: [num_kv_heads, 1, kv_len, head_dim]
         {
             const auto val_in = fmtPattern(kv_block.value_in_pattern, l);
             const TensorSpec& spec = g.inputSpec(val_in);
@@ -336,13 +300,10 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
     });
 }
 
-// ── generate ─────────────────────────────────────────────────────────────────
-
 std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens,
                                          const GenerationConfig&      gen_cfg,
                                          std::function<bool(int32_t)> token_callback) {
 
-    // ── Prefill ───────────────────────────────────────────────────────────────
     size_t tokens_processed = 0;
     const size_t total_tokens = prompt_tokens.size();
     size_t last_chunk_size = 0;  // valid token count in the final prefill chunk
@@ -355,7 +316,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         const size_t chunk_size  = std::min(remaining, spec_.seq_len_prefill);
         last_chunk_size = chunk_size;
 
-        // CL selection: only when multiple variants exist.
+        // Promote to a larger CL variant if required (multi-CL models only).
         if (num_cl_ > 1) {
             const size_t required = n_past_ + chunk_size;
             size_t new_cl = active_cl_idx_;
@@ -365,7 +326,6 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             }
             if (new_cl > active_cl_idx_) {
                 GENIEX_LOG_DEBUG("Upgrading CL from {} to {} for prefill", active_cl_idx_, new_cl);
-                // Reshape KV in-place: old CL stride → new CL stride (shared buffer).
                 const size_t old_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
                 const size_t new_kv = spec_.context_lengths[new_cl]          - spec_.seq_len_prefill;
                 for (size_t s = 0; s < shard_count_; ++s)
@@ -383,7 +343,6 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
 
         for (size_t s = 0; s < shard_count_; ++s) {
             runShard(s, /*phase=*/0, active_cl_idx_, ctx);
-            // Strided copy: output[0:chunk_size] → input[n_past_:n_past_+chunk_size]
             updateKV(s, /*phase=*/0, n_past_, chunk_size);
             if (s + 1 < shard_count_) {
                 applyConnections({shard_hidden_state_[active_cl_idx_][s]});
@@ -394,7 +353,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         tokens_processed += chunk_size;
     }
 
-    // Reshape KV in-place: prefill kv_len → decode kv_len (shared buffer).
+    // Switch KV stride from prefill to decode before entering the decode loop.
     {
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
@@ -402,8 +361,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             reshapeKV(s, prefill_kv, decode_kv, n_past_);
     }
 
-    // Sample the first output token from the last prefill shard's logits.
-    // The prefill output is [seq_len, vocab_size]; read row (last_chunk_size-1).
+    // Prefill output is [seq_len, vocab_size]; the last valid token is at last_chunk_size - 1.
     const size_t last_chunk_offset = last_chunk_size - 1;
     int32_t next_token = sampleNextToken(/*phase=*/0, last_chunk_offset);
     std::vector<int32_t> output_tokens;
@@ -411,7 +369,6 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     GENIEX_LOG_DEBUG("prefill done: n_past={}, first_token={}", n_past_, next_token);
 
     for (int step = 0; step < gen_cfg.max_tokens; ++step) {
-        // EOS detection: check all known EOS tokens
         bool is_eos = false;
         for (int32_t eos_id : spec_.eos_token_ids) {
             if (next_token == eos_id) { is_eos = true; break; }
@@ -423,8 +380,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             break;
         }
 
-        // CL upgrade during decode: if n_past_ has reached the current variant's
-        // capacity, advance to the next CL and reshape KV in-place.
+        // Promote to a larger CL variant if decode KV capacity is exhausted.
         if (num_cl_ > 1) {
             size_t cur_decode_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
             if (n_past_ >= cur_decode_kv) {
@@ -457,7 +413,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         next_token = sampleNextToken(/*phase=*/1);
     }
 
-    // Reshape KV in-place: decode kv_len → prefill kv_len so the next generate() resumes correctly.
+    // Restore prefill stride so the model is ready for the next generate() call.
     {
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
@@ -469,10 +425,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     return output_tokens;
 }
 
-// ── sampleNextToken ───────────────────────────────────────────────────────────
-
 int32_t LLMModel::sampleNextToken(size_t phase, size_t token_offset) const {
-    // Read logits from the last shard of the requested phase.
     const size_t last_shard   = shard_count_ - 1;
     const size_t g_idx        = graphIndex(phase, last_shard, active_cl_idx_);
     const Graph& g            = graph(g_idx);
@@ -481,12 +434,9 @@ int32_t LLMModel::sampleNextToken(size_t phase, size_t token_offset) const {
     g.read(spec_.shards.back().out_state_name, logits.data(), spec_.vocab_size,
            token_offset * spec_.vocab_size);
 
-    // Greedy argmax.
     return static_cast<int32_t>(
         std::max_element(logits.begin(), logits.end()) - logits.begin());
 }
-
-// ── KV cache management ───────────────────────────────────────────────────────
 
 std::unordered_set<std::string> LLMModel::buildKVInputNameSet() const {
     std::unordered_set<std::string> names;
@@ -506,7 +456,6 @@ void LLMModel::resetKVCache() {
     active_cl_idx_ = 0;
 
     const auto kv_names = buildKVInputNameSet();
-    // Zero KV input buffers in all prefill and decode graphs.
     const size_t total_graphs = 2 * shard_count_ * num_cl_;
     for (size_t gi = 0; gi < total_graphs; ++gi) {
         Graph& g = graph(gi);

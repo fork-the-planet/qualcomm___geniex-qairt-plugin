@@ -1,6 +1,3 @@
-// Qwen2.5-VL-7B implementation.
-//
-
 #include "qwen2_5_vl.h"
 
 #include "utils.h"
@@ -21,15 +18,12 @@ namespace qwen2_5_vl_7b {
 
 namespace {
 
-// ViT-side constants (Qwen2.5-VL vision encoder).
 // hidden=1280, num_heads=16 → head_dim=80; rotary dim = head_dim/2 = 40.
 constexpr int kVitWindowSize  = 112;             // in pixels
 constexpr int kVitRopeDim     = 40;              // half_dim*2 = 40 = cos/sin emb_dim
 constexpr float kVitRopeTheta = 10000.0f;
 
 } // namespace
-
-// ── Qwen25VLVisionEncoder ─────────────────────────────────────────────────────
 
 std::vector<float> Qwen25VLVisionEncoder::encode(const PixelData& pixel_data) {
     if (pixel_data.image_grid_thw.empty()) {
@@ -55,8 +49,6 @@ std::vector<float> Qwen25VLVisionEncoder::encode(const PixelData& pixel_data) {
 
     Graph& g = graph(0);
 
-    // ── CPU preprocessing (grid-dependent; shared across all images) ─────────
-
     // Permutations driven by the window layout.
     const auto window_index = qwen_vit::computeWindowIndex(
         kGridT, kGridH, kGridW, kSpatialMergeSize, kVitWindowSize, kPatchSize);
@@ -78,7 +70,6 @@ std::vector<float> Qwen25VLVisionEncoder::encode(const PixelData& pixel_data) {
     const auto full_mask   = qwen_vit::buildBlockAttentionMask(
         N, { 0, static_cast<int64_t>(N) }, kAllowed, kBlocked);
 
-    // ── Per-image execution ──────────────────────────────────────────────────
     if (pixel_data.pixel_values.size() != n_images * per_image_pixels) {
         throw std::runtime_error(
             "Qwen25VLVisionEncoder: pixel_values has " +
@@ -125,8 +116,6 @@ std::vector<float> Qwen25VLVisionEncoder::encode(const PixelData& pixel_data) {
     return image_features;
 }
 
-// ── Qwen25VLModel ─────────────────────────────────────────────────────────────
-
 Qwen25VLModel::Qwen25VLModel() : VLMModel(makeSpec()) {
     image_token_id_ = kImageTokenId;
     setEmbeddingProvider(
@@ -163,7 +152,6 @@ void Qwen25VLModel::preparePositions(const std::vector<int32_t>& input_ids,
 
     const size_t seq_len = input_ids.size();
 
-    // Apply n_past offset + accumulated deltas from previous turns.
     for (size_t dim = 0; dim < 3; ++dim)
         for (size_t t = 0; t < seq_len; ++t)
             mrope.position_ids[dim * seq_len + t] +=
@@ -171,7 +159,6 @@ void Qwen25VLModel::preparePositions(const std::vector<int32_t>& input_ids,
 
     mrope_provider_->setPositionIds(mrope.position_ids, seq_len, n_past);
 
-    // Accumulate for subsequent turns.
     for (int d = 0; d < 3; ++d) mrope_deltas_[d] += mrope.deltas[d];
     mrope_provider_->setMropeDeltas(mrope_deltas_);
 }
@@ -180,15 +167,11 @@ void Qwen25VLModel::clearPositions() {
     if (mrope_provider_) mrope_provider_->clearPositionIds();
 }
 
-// ── Factory ───────────────────────────────────────────────────────────────────
-
 std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
                                          const Qwen25VLConfig&   config) {
-    // Vision encoder.
     auto vis_enc = std::make_unique<Qwen25VLVisionEncoder>();
     if (!vis_enc->initialize(runtime_cfg, config.vision_config)) return nullptr;
 
-    // LLM + glue.
     auto model = std::make_unique<Qwen25VLModel>();
     model->setVisionEncoder(std::move(vis_enc));
     model->setMRoPEProvider(std::make_unique<MRoPEInputProvider>(

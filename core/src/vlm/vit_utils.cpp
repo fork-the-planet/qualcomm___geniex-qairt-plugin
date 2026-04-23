@@ -30,7 +30,7 @@ std::vector<int64_t> computeWindowIndex(int T, int H, int W,
     const int nw_h  = (llm_h + pad_h) / vit_ws;
     const int nw_w  = (llm_w + pad_w) / vit_ws;
 
-    // Build idx_pad [T, llm_h+pad_h, llm_w+pad_w], filled with -100
+    // -100 marks padding cells that should be excluded from the window index.
     const int pH = llm_h + pad_h, pW = llm_w + pad_w;
     std::vector<int64_t> idx_pad(T * pH * pW, -100);
     for (int t = 0; t < T; ++t)
@@ -39,8 +39,6 @@ std::vector<int64_t> computeWindowIndex(int T, int H, int W,
                 idx_pad[t * pH * pW + h * pW + w] =
                     static_cast<int64_t>(t * llm_h * llm_w + h * llm_w + w);
 
-    // Reshape to [T, nw_h, vit_ws, nw_w, vit_ws], transpose to [T, nw_h, nw_w, vit_ws, vit_ws],
-    // then flatten each window, collecting valid (non -100) entries.
     std::vector<int64_t> window_index;
     window_index.reserve(n_tok);
 
@@ -77,7 +75,6 @@ computeSpatialCosSin(int T, int H, int W,
     const int half     = static_cast<int>(inv_freq.size());
     const int emb_dim  = half * 2;  // h_freq concat w_freq
 
-    // Build rotary embedding table [n_groups, emb_dim]
     std::vector<float> rot_emb(n_groups * emb_dim);
     for (int t = 0; t < T; ++t)
         for (int h = 0; h < llm_h; ++h)
@@ -90,7 +87,6 @@ computeSpatialCosSin(int T, int H, int W,
                 }
             }
 
-    // Apply window reorder and expand by sm_unit
     const int seq_len = n_groups * sm_unit;
     std::vector<float> cos_out(seq_len * emb_dim), sin_out(seq_len * emb_dim);
 
@@ -125,8 +121,6 @@ std::vector<float> windowReorder(const std::vector<float>& hidden,
     }
     return out;
 }
-
-// ── Qwen2.5-VL helpers ─────────────────────────────────────────────────────
 
 std::pair<std::vector<float>, std::vector<float>>
 computePatchRoPE(int T, int H, int W,
@@ -226,7 +220,6 @@ buildBlockAttentionMask(size_t N,
         throw std::runtime_error(
             "buildBlockAttentionMask: boundaries must start at 0 and end at N");
     }
-    // row_block[i] = index of the segment containing row i.
     std::vector<int> row_block(N);
     for (size_t b = 0; b + 1 < boundaries.size(); ++b)
         for (int64_t i = boundaries[b]; i < boundaries[b + 1]; ++i)
@@ -236,7 +229,6 @@ buildBlockAttentionMask(size_t N,
     for (size_t i = 0; i < N; ++i) {
         float* row = mask.data() + i * N;
         const int b = row_block[i];
-        // Fill the in-segment block with `allowed`.
         const int64_t lo = boundaries[b];
         const int64_t hi = boundaries[b + 1];
         for (int64_t j = lo; j < hi; ++j) row[j] = allowed;

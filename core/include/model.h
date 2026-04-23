@@ -20,38 +20,32 @@ public:
     Model(Model&&) noexcept        = default;
     Model& operator=(Model&&) noexcept = default;
 
-    // Constructs QnnApi + IOTensor, calls initializeHtp(), sets the perf
-    // profile, then constructs and sets up all Graph objects. Must be called
-    // before any subclass forward() invocation.
+    // Sets up the QNN backend and loads all graphs. Must be called before any
+    // subclass inference.
     bool initialize(const QnnRuntimeConfig& runtime_cfg,
                     const ModelConfig&      model_cfg);
 
     bool isInitialized() const;
 
-    // ── Graph access ─────────────────────────────────────────────────────────
     size_t       graphCount() const;
     Graph&       graph(size_t idx);
     const Graph& graph(size_t idx) const;
 
-    // ── Sub-model access ─────────────────────────────────────────────────────
     void         addSubModel(std::shared_ptr<Model> sub_model);
     Model&       subModel(size_t idx);
     const Model& subModel(size_t idx) const;
 
 protected:
-    // Prevent direct instantiation; only concrete subclasses should be created.
     Model() = default;
 
     // Called by initialize() after all Graph objects have been set up.
     // Override to build connection lists, allocate KV buffers, etc.
     virtual bool onInitialized() { return true; }
 
-    // Executes a set of inter-graph tensor transfers using raw byte copies.
-    // Each Connection routes one graph's output buffer into another graph's
-    // input buffer, with size derived from the source TensorSpec::byteCount().
+    // Wires inter-graph connections by pointing each destination input buffer
+    // directly at the source output buffer (zero-copy inter-shard data flow).
     void applyConnections(const std::vector<Connection>& connections);
 
-    // ── Owned backend objects ─────────────────────────────────────────────────
     // Declaration order matters: graphs_ holds non-owning pointers into api_
     // and io_tensor_, so graphs_ must be destroyed first (it is listed last).
     ModelConfig                         model_cfg_;

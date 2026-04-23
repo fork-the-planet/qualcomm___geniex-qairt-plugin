@@ -24,8 +24,6 @@ static void enable_utf8_io() {
 }
 #endif
 
-// ── Argument parsing ──────────────────────────────────────────────────────────
-
 struct Args {
     int32_t max_tokens      = 512;
     bool    verbose         = false;
@@ -52,13 +50,9 @@ static bool parseArgs(int argc, char** argv, Args& args) {
     return true;
 }
 
-// ── Chat template ─────────────────────────────────────────────────────────────
-
 static std::string applyTemplate(const std::string& user_text) {
     return "<|im_start|>user\n" + user_text + "<|im_end|>\n<|im_start|>assistant\n";
 }
-
-// ── Main ──────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -96,7 +90,6 @@ int main(int argc, char** argv) {
               << "\\____/\\___/_/ /_/_/\\___/_/|_| \n"
               << "\033[0m\n";
 
-    // Initialise model.
     std::cout << "\033[1;36mLoading model...\033[0m\n";
     geniex::LLMModel model = geniex::qwen3_4b_instruct_2507_aihub::makeModel();
     try {
@@ -110,10 +103,8 @@ int main(int argc, char** argv) {
     }
     std::cout << "\033[1;32mModel loaded.\033[0m\n\n";
 
-    // Load tokenizer.
     auto tokenizer = geniex::Tokenizer::from_file(model_cfg.tokenizer_path);
 
-    // Chat loop.
     while (true) {
         std::cout << "Enter your prompt (type 'exit' to quit): ";
         std::string input;
@@ -124,7 +115,6 @@ int main(int argc, char** argv) {
         auto encoded = tokenizer->encode(prompt_text);
         const std::vector<int32_t> prompt_tokens(encoded.begin(), encoded.end());
 
-        // ── Generate ──────────────────────────────────────────────────────────
         const auto t_start = std::chrono::high_resolution_clock::now();
         std::chrono::high_resolution_clock::time_point t_first_token;
         bool got_first_token = false;

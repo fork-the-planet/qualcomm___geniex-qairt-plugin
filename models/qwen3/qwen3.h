@@ -23,8 +23,6 @@ inline LLMSpec makeSpec() {
             makeKVOnlyStateBlock({LayerRange{0, 17}, LayerRange{18, 35}}),
         },
 
-        // Default KV patterns match the model export.
-
         .seq_len_prefill = 128,
         .seq_len_decode  = 1,
 
@@ -40,8 +38,6 @@ inline LLMSpec makeSpec() {
     };
 }
 
-// Returns a fully configured LLMModel with embedding and RoPE providers.
-// The embedding table is loaded from model_cfg.embedding_path in onInitialized().
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<EmbeddingInputProvider>());
@@ -100,15 +96,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {512, 1024, 2048, 3072, 4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {151645},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
-// No CPU-side embedding table needed – the first shard does embedding on-device.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 151645));
@@ -167,14 +160,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {512, 1024, 2048, 3072, 4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {151645},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 151645));
@@ -233,7 +224,6 @@ inline LLMSpec makeSpec() {
     };
 }
 
-// Returns a fully configured LLMModel with embedding and RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<EmbeddingInputProvider>());

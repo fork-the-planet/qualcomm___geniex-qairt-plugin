@@ -51,7 +51,6 @@ static bool parseArgs(int argc, char** argv, Args& args) {
     return true;
 }
 
-// ChatML template (Qwen 2.5 Instruct)
 static std::string applyTemplate(const std::string& user_text,
                                  const std::string& system_prompt,
                                  bool first_turn) {

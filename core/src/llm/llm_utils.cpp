@@ -6,8 +6,6 @@
 
 namespace geniex {
 
-// ── RotaryEmbedding ───────────────────────────────────────────────────────────
-
 RotaryEmbedding::RotaryEmbedding(size_t head_dim, float theta)
     : half_dim_(head_dim / 2)
 {
@@ -37,8 +35,6 @@ RotaryEmbedding::forward(const std::vector<int32_t>& position_ids) const {
 
 size_t RotaryEmbedding::halfDim() const { return half_dim_; }
 
-// ── LongRoPEEmbedding ─────────────────────────────────────────────────────────
-
 LongRoPEEmbedding::LongRoPEEmbedding(size_t head_dim, float theta,
                                      std::vector<float> ext_factors,
                                      int max_position_embeddings,
@@ -58,7 +54,6 @@ std::pair<std::vector<float>, std::vector<float>>
 LongRoPEEmbedding::forward(const std::vector<int32_t>& position_ids) const {
     const size_t n = position_ids.size();
 
-    // Dynamically compute inv_freq each call (matches old xtensor implementation).
     // inv_freq[i] = 1.0 / (ext_factors[i] * base^(arange(0, dim, 2)[i] / dim))
     std::vector<float> inv_freq(half_dim_);
     for (size_t i = 0; i < half_dim_; ++i) {
@@ -67,7 +62,6 @@ LongRoPEEmbedding::forward(const std::vector<int32_t>& position_ids) const {
         inv_freq[i] = 1.f / (ext_factors_[i] * base_power);
     }
 
-    // Compute scaling factor (matches old implementation).
     float scale_ratio = static_cast<float>(max_position_embeddings_) /
                         static_cast<float>(original_max_position_embeddings_);
     float scaling_factor;
@@ -78,7 +72,6 @@ LongRoPEEmbedding::forward(const std::vector<int32_t>& position_ids) const {
                                          std::log(static_cast<float>(original_max_position_embeddings_)));
     }
 
-    // Compute cos/sin with scaling.
     std::vector<float> cos_out(n * half_dim_);
     std::vector<float> sin_out(n * half_dim_);
 
@@ -94,8 +87,6 @@ LongRoPEEmbedding::forward(const std::vector<int32_t>& position_ids) const {
 }
 
 size_t LongRoPEEmbedding::halfDim() const { return half_dim_; }
-
-// ── PartialRoPEEmbedding ──────────────────────────────────────────────────────
 
 PartialRoPEEmbedding::PartialRoPEEmbedding(size_t head_dim, float theta,
                                            float rope_fraction, float scale)
@@ -129,8 +120,6 @@ PartialRoPEEmbedding::forward(const std::vector<int32_t>& position_ids) const {
 
 size_t PartialRoPEEmbedding::halfDim() const { return rope_half_dim_; }
 
-// ── Free functions ────────────────────────────────────────────────────────────
-
 std::vector<int32_t> get_position_ids(size_t n_past, size_t count) {
     std::vector<int32_t> ids(count);
     for (size_t i = 0; i < count; ++i)
@@ -156,12 +145,10 @@ std::vector<float> get_attention_mask(size_t n_past,
     for (size_t row = 0; row < curr_len; ++row) {
         float* row_ptr = mask.data() + row * total_len;
 
-        // Visible KV-cache past tokens
         const size_t visible_past = std::min(n_past, kv_len);
         for (size_t col = 0; col < visible_past; ++col)
             row_ptr[col] = 0.f;
 
-        // Causal positions in the current prefill chunk
         for (size_t col = 0; col <= row; ++col)
             row_ptr[kv_len + col] = 0.f;
     }

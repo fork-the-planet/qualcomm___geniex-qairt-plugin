@@ -17,7 +17,6 @@
 namespace geniex {
 namespace qwen2_5_vl_7b {
 
-// ── Architecture constants ────────────────────────────────────────────────────
 static constexpr size_t kHiddenSize = 3584;
 static constexpr size_t kNumHeads   = 28;
 static constexpr size_t kNumKVHeads = 4;
@@ -53,8 +52,6 @@ inline const std::vector<int>& mRoPESection() {
     return kSec;
 }
 
-// ── Model config ──────────────────────────────────────────────────────────────
-
 struct Qwen25VLConfig {
     // Text backbone: 5 shards (part1_of_5.bin … part5_of_5.bin).
     ModelConfig llm_config;
@@ -62,8 +59,6 @@ struct Qwen25VLConfig {
     // Vision encoder: single graph (vision_encoder.bin).
     ModelConfig vision_config;
 };
-
-// ── Vision encoder ────────────────────────────────────────────────────────────
 
 // Single-graph QNN vision encoder.
 //
@@ -80,28 +75,21 @@ struct Qwen25VLConfig {
 // dynamic shapes are not supported.
 class Qwen25VLVisionEncoder : public QnnVisionEncoder {
 public:
-    // Returns flat [n_images * kNumImageTokens * kHiddenSize] embeddings.
     std::vector<float> encode(const PixelData& pixel_data) override;
 };
-
-// ── VLM model ─────────────────────────────────────────────────────────────────
 
 class Qwen25VLModel : public VLMModel {
 public:
     Qwen25VLModel();
 
-    // Called by makeModel() after encoder ownership is transferred.
     void setVisionEncoder(std::unique_ptr<Qwen25VLVisionEncoder> vis);
-
-    // Called by makeModel() to register the MRoPE provider.
     void setMRoPEProvider(std::unique_ptr<MRoPEInputProvider> provider);
 
 protected:
     std::vector<float> encodeVision(const PixelData& pixel_data) override;
 
-    // Computes 3D MRoPE position IDs from input_ids + image grids,
-    // applies n_past offset + accumulated mrope_deltas, pushes them to the
-    // MRoPE provider.
+    // Computes 3D MRoPE position IDs accounting for image grid extents and accumulated
+    // mrope_deltas, then pushes them to the MRoPE provider.
     void preparePositions(const std::vector<int32_t>& input_ids,
                           const VLMInput&             vlm_input,
                           size_t                      n_past) override;
@@ -112,8 +100,6 @@ private:
     MRoPEInputProvider*  mrope_provider_ = nullptr;  // non-owning
     std::vector<int32_t> mrope_deltas_   = {0, 0, 0};
 };
-
-// ── LLMSpec ───────────────────────────────────────────────────────────────────
 
 // Shard layout (28 transformer layers across 5 shards, no on-device embed):
 //   shard 1 : layers  0 –  5   inputs_embeds → add_13335
@@ -151,17 +137,13 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {2048},
 
-        // Genie export graph names: prompt_arAR_clCL_N_of_TOTAL / token_...
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {151643, 151645},
     };
 }
 
-// ── Factory ───────────────────────────────────────────────────────────────────
-
-// Creates, configures, and initializes the full Qwen2.5-VL-7B stack
-// (vision encoder + LLM). Returns nullptr on any initialization failure.
+// Full Qwen2.5-VL-7B stack (vision encoder + LLM). Returns nullptr on failure.
 std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
                                          const Qwen25VLConfig&   config);
 

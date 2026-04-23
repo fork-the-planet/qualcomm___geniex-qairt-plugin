@@ -6,8 +6,6 @@
 namespace geniex {
 namespace xt_utils {
 
-// ── RotaryEmbedding ──────────────────────────────────────────────────────────
-
 RotaryEmbedding::RotaryEmbedding(int dim, float theta, float scale) {
     auto idx = xt::arange<float>(0, dim, 2);
     this->inv_freq = 1.f / xt::pow(theta, idx / static_cast<float>(dim));
@@ -28,8 +26,6 @@ RotaryEmbedding::forward(const xt::xarray<int32_t>& position_ids) const {
     xt::xarray<float> sin_out = xt::sin(freqs) * scale;
     return {cos_out, sin_out};
 }
-
-// ── XTensorLLMUtils ──────────────────────────────────────────────────────────
 
 XTensorLLMUtils::XTensorLLMUtils(
     size_t seq_len, size_t kv_len, size_t hidden_size,
@@ -74,8 +70,6 @@ void XTensorLLMUtils::initializeTensorMappings(const Graph& graph) {
     }
 }
 
-// ── Embedding ────────────────────────────────────────────────────────────────
-
 xt::xarray<float> XTensorLLMUtils::tokensToEmbedding(
     const std::vector<int32_t>& token_ids,
     const xt::xarray<float>& embedding_table) const
@@ -103,8 +97,6 @@ xt::xarray<float> XTensorLLMUtils::tokenToEmbedding(
     return result;
 }
 
-// ── Position encoding ────────────────────────────────────────────────────────
-
 xt::xarray<int32_t> XTensorLLMUtils::get_position_ids(
     std::size_t n_past, std::size_t curr_len) const
 {
@@ -121,8 +113,6 @@ XTensorLLMUtils::get_cos_sin(const xt::xarray<int32_t>& position_ids) const {
     return {xt::expand_dims(c, 0), xt::expand_dims(s, 0)};
 }
 
-// ── Attention mask ───────────────────────────────────────────────────────────
-
 xt::xarray<float> XTensorLLMUtils::get_attention_mask(
     std::size_t n_past, std::size_t curr_len) const
 {
@@ -132,14 +122,12 @@ xt::xarray<float> XTensorLLMUtils::get_attention_mask(
     if (curr_len == 0)
         return xt::expand_dims(xt::expand_dims(mask, 0), 0);
 
-    // Visible past tokens
     if (n_past > 0) {
         xt::view(mask,
                  xt::range<std::size_t>(0, curr_len),
                  xt::range<std::size_t>(0, n_past)) = 0.f;
     }
 
-    // Causal mask inside current chunk
     xt::xarray<int> rows = xt::reshape_view(
         xt::arange<int>(0, static_cast<int>(curr_len)),
         std::array<std::size_t, 2>{curr_len, 1});
@@ -153,8 +141,6 @@ xt::xarray<float> XTensorLLMUtils::get_attention_mask(
     return xt::expand_dims(xt::expand_dims(mask, 0), 0);
 }
 
-// ── KV cache ─────────────────────────────────────────────────────────────────
-
 std::vector<xt::xarray<float>> XTensorLLMUtils::get_kv_cache() const {
     std::vector<xt::xarray<float>> out;
     out.reserve(num_layers_ * 2);
@@ -166,8 +152,6 @@ std::vector<xt::xarray<float>> XTensorLLMUtils::get_kv_cache() const {
     }
     return out;
 }
-
-// ── Input preparation ────────────────────────────────────────────────────────
 
 std::map<std::string, std::vector<float>>
 XTensorLLMUtils::prepare_inputs(
@@ -195,8 +179,6 @@ XTensorLLMUtils::prepare_inputs(
     return d;
 }
 
-// ── KV cache update ──────────────────────────────────────────────────────────
-
 void XTensorLLMUtils::update_kv_cache(
     std::vector<std::vector<float>>& input_data,
     std::vector<std::vector<float>>& output_data,
@@ -208,7 +190,6 @@ void XTensorLLMUtils::update_kv_cache(
         std::string val_in  = "past_value_" + std::to_string(i) + "_in";
         std::string val_out = "past_value_" + std::to_string(i) + "_out";
 
-        // Key: [num_kv_heads, 1, head_dim, kv_len]
         auto ki = xt::adapt(input_data[input_tensor_order[key_in]],
                             std::vector<std::size_t>{num_kv_heads_, 1, head_dim_, kv_len_});
         auto ko = xt::adapt(output_data[output_tensor_order[key_out]],
@@ -218,7 +199,6 @@ void XTensorLLMUtils::update_kv_cache(
             xt::view(ko, xt::all(), xt::all(), xt::all(),
                      xt::range(0, curr_len));
 
-        // Value: [num_kv_heads, 1, kv_len, head_dim]
         auto vi = xt::adapt(input_data[input_tensor_order[val_in]],
                             std::vector<std::size_t>{num_kv_heads_, 1, kv_len_, head_dim_});
         auto vo = xt::adapt(output_data[output_tensor_order[val_out]],
@@ -228,15 +208,12 @@ void XTensorLLMUtils::update_kv_cache(
             xt::view(vo, xt::all(), xt::all(),
                      xt::range(0, curr_len), xt::all());
 
-        // Write back
         input_data[input_tensor_order[key_in]] =
             std::vector<float>(ki.begin(), ki.end());
         input_data[input_tensor_order[val_in]] =
             std::vector<float>(vi.begin(), vi.end());
     }
 }
-
-// ── KV cache transfer (ARN -> AR1) ──────────────────────────────────────────
 
 void XTensorLLMUtils::transfer_kv_cache(
     std::vector<std::vector<float>>& dst,
@@ -247,7 +224,6 @@ void XTensorLLMUtils::transfer_kv_cache(
         std::string key_name = "past_key_"   + std::to_string(i) + "_in";
         std::string val_name = "past_value_" + std::to_string(i) + "_in";
 
-        // Transfer key cache
         if (input_tensor_order.count(key_name)) {
             int idx = input_tensor_order.at(key_name);
             std::size_t src_kv = src[idx].size() / (num_kv_heads_ * head_dim_);
@@ -264,7 +240,6 @@ void XTensorLLMUtils::transfer_kv_cache(
             dst[idx] = std::vector<float>(dk.begin(), dk.end());
         }
 
-        // Transfer value cache
         if (input_tensor_order.count(val_name)) {
             int idx = input_tensor_order.at(val_name);
             std::size_t src_kv = src[idx].size() / (num_kv_heads_ * head_dim_);
@@ -282,8 +257,6 @@ void XTensorLLMUtils::transfer_kv_cache(
         }
     }
 }
-
-// ── Graph I/O helpers ────────────────────────────────────────────────────────
 
 void XTensorLLMUtils::writeInputs(
     Graph& graph,
