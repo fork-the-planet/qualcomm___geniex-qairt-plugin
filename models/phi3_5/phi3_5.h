@@ -53,7 +53,6 @@ inline LLMSpec makeSpec() {
     };
 }
 
-// Returns a fully configured LLMModel with CPU-side embedding and Phi3.5 RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<EmbeddingInputProvider>());
@@ -78,8 +77,7 @@ namespace phi3_5_aihub {
 static constexpr size_t  kHeadDim    = 96;
 static constexpr float   kRopeTheta  = 10000.0f;
 
-// Per-dimension LongRoPE extension factors (48 values for head_dim=96).
-// Source: Phi3.5-mini model tensor.
+// Per-dimension LongRoPE extension factors (48 values for head_dim=96, from the model tensor).
 static inline const std::vector<float> kExtFactors = {
     1.0000f, 1.0200f, 1.0300f, 1.0300f, 1.0500f, 1.0500f, 1.0500f, 1.0500f, 1.0500f,
     1.0700f, 1.1000f, 1.1100f, 1.1600f, 1.1600f, 1.1700f, 1.2900f, 1.3400f, 1.6800f,
@@ -123,14 +121,10 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {512, 1024, 2048, 3072, 4096},
 
-        // Default graph_name_pattern matches: ar128_cl4096_1_of_4, ar1_cl4096_1_of_4, etc.
-
         .eos_token_ids = {32007, 32000},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and Phi3.5 RoPE providers.
-// No CPU-side embedding table needed – shard 0 does embedding on-device.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 0));

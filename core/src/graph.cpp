@@ -10,8 +10,6 @@
 #include "QnnTypeMacros.hpp"
 #include "QnnTypes.h"
 
-// ── File-scoped conversion helpers ───────────────────────────────────────────
-// Visible only within this translation unit.
 
 static constexpr size_t k_bits_per_byte = 8;
 
@@ -76,11 +74,8 @@ static void castFromFloat(T* out, const float* in, size_t n) {
         out[i] = static_cast<T>(in[i]);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 
 namespace geniex {
-
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Graph::Graph(qnn_wrapper_api::GraphInfo_t* graph_info,
              QnnApi*                        api,
@@ -145,15 +140,9 @@ Graph& Graph::operator=(Graph&& other) noexcept {
     return *this;
 }
 
-// ── Setup ─────────────────────────────────────────────────────────────────────
-
 bool Graph::setup(Qnn_ContextHandle_t /*context*/) {
     if (setup_done_) return true;
 
-    // Point directly at the tensor arrays that QnnApi::initializeHtp() populated.
-    // initializeHtp() allocated a fused RPC buffer and assigned valid Qnn_MemHandle_t
-    // entries to every tensor; all CL/AR variants of the same shard share the same
-    // physical memory.  No new allocation is needed or wanted here.
     inputs_  = graph_info_->inputTensors;
     outputs_ = graph_info_->outputTensors;
 
@@ -174,8 +163,6 @@ bool Graph::setup(Qnn_ContextHandle_t /*context*/) {
     setup_done_ = true;
     return true;
 }
-
-// ── buildSpecs ────────────────────────────────────────────────────────────────
 
 void Graph::buildSpecs() {
     auto makeSpec = [](const Qnn_Tensor_t& t) -> TensorSpec {
@@ -208,8 +195,6 @@ void Graph::buildSpecs() {
     }
 }
 
-// ── Tensor probing ────────────────────────────────────────────────────────────
-
 bool Graph::hasInput(const std::string& name) const {
     return input_index_.count(name) > 0;
 }
@@ -231,13 +216,10 @@ const std::vector<TensorSpec>& Graph::outputSpecs() const { return output_specs_
 
 const std::string& Graph::name() const { return name_; }
 
-// ── Typed writes ──────────────────────────────────────────────────────────────
-
 void Graph::write(const std::string& name, const float* src, size_t n) {
     void* buf = input_buffer_ptrs_.at(name);
     const Qnn_Tensor_t& t = inputs_[input_index_.at(name)];
 
-    // Guard: verify caller's element count fits in the allocated buffer.
     const size_t buf_bytes   = tensorByteSize(&t);
     const auto   dtype       = QNN_TENSOR_GET_DATA_TYPE(t);
     const size_t elem_bytes  = (dtype == QNN_DATATYPE_FLOAT_32 || dtype == QNN_DATATYPE_INT_32) ? 4
@@ -290,8 +272,6 @@ void Graph::write(const std::string& name, const int32_t* src, size_t n) {
     std::memcpy(input_buffer_ptrs_.at(name), src, n * sizeof(int32_t));
 }
 
-// ── Raw byte write / read ─────────────────────────────────────────────────────
-
 void Graph::write(const std::string& name, const void* src, size_t byte_count) {
     std::memcpy(input_buffer_ptrs_.at(name), src, byte_count);
 }
@@ -299,8 +279,6 @@ void Graph::write(const std::string& name, const void* src, size_t byte_count) {
 void Graph::read(const std::string& name, void* dst, size_t byte_count) const {
     std::memcpy(dst, output_buffer_ptrs_.at(name), byte_count);
 }
-
-// ── Typed read ────────────────────────────────────────────────────────────────
 
 void Graph::read(const std::string& name, float* dst, size_t n, size_t elem_offset) const {
     const void* buf = output_buffer_ptrs_.at(name);
@@ -345,8 +323,6 @@ void Graph::read(const std::string& name, float* dst, size_t n, size_t elem_offs
     }
 }
 
-// ── Raw pointer access ────────────────────────────────────────────────────────
-
 void* Graph::inputPtr(const std::string& name) {
     return input_buffer_ptrs_.at(name);
 }
@@ -354,8 +330,6 @@ void* Graph::inputPtr(const std::string& name) {
 const void* Graph::outputPtr(const std::string& name) const {
     return output_buffer_ptrs_.at(name);
 }
-
-// ── Execution ─────────────────────────────────────────────────────────────────
 
 bool Graph::execute(std::map<std::string, std::pair<double, uint16_t>>& time_log) {
     return api_->graphExecute(graph_info_, inputs_, outputs_, time_log);

@@ -8,8 +8,6 @@
 
 namespace geniex {
 
-// ── Llama3 chat template ────────────────────────────────────────────────────────────
-
 // Llama3 header-id format: <|start_header_id|>role<|end_header_id|>...<|eot_id|>
 // Used by Llama 3, Llama 3.1, and Llama 3.2 model families.
 inline std::string llama3ChatTemplate(const std::string& user_message,
@@ -71,15 +69,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
-// No CPU-side embedding table needed – the first shard does embedding on-device.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 128001));
@@ -87,7 +82,6 @@ inline LLMModel makeModel() {
     return m;
 }
 
-// Chat template and pipeline factory.
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
@@ -143,14 +137,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 128001));
@@ -158,7 +150,6 @@ inline LLMModel makeModel() {
     return m;
 }
 
-// Chat template and pipeline factory.
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
@@ -214,14 +205,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 128001));
@@ -229,7 +218,6 @@ inline LLMModel makeModel() {
     return m;
 }
 
-// Chat template and pipeline factory.
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,

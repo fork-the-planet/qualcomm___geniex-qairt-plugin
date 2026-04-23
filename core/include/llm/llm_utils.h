@@ -9,15 +9,13 @@
 
 namespace geniex {
 
-// Computes rotary positional embedding frequencies for a given head dimension
-// and base frequency theta. Constructed once and reused across forward calls.
+// Standard RoPE: constructed once with (head_dim, theta), reused across forward calls.
 class GENIEX_API RotaryEmbedding {
 public:
     RotaryEmbedding() = default;
     RotaryEmbedding(size_t head_dim, float theta = 10000.f);
 
-    // Returns {cos, sin}, each flat [n * half_dim] where n = position_ids.size()
-    // and half_dim = head_dim / 2.
+    // Returns {cos, sin}, each flat [n * half_dim] where n = position_ids.size().
     std::pair<std::vector<float>, std::vector<float>>
     forward(const std::vector<int32_t>& position_ids) const;
 
@@ -29,8 +27,7 @@ private:
 };
 
 // LongRoPE with dynamic scaling and per-dimension extension factors.
-// ext_factors must have at least half_dim elements; shorter vectors are padded with 1.0.
-// Produces cos/sin of size [n * half_dim] like standard RoPE.
+// ext_factors shorter than half_dim are padded with 1.0.
 class GENIEX_API LongRoPEEmbedding {
 public:
     LongRoPEEmbedding() = default;
@@ -54,7 +51,6 @@ private:
 };
 
 // Partial RoPE: rotates only (rope_fraction * head_dim) dimensions, with a post-scale factor.
-// Produces cos/sin of size [n * rope_half_dim] where rope_half_dim = int(head_dim * rope_fraction) / 2.
 class GENIEX_API PartialRoPEEmbedding {
 public:
     PartialRoPEEmbedding() = default;
@@ -76,30 +72,24 @@ private:
 GENIEX_API std::vector<int32_t> get_position_ids(size_t n_past, size_t count);
 
 // Returns {cos, sin}, each flat [n * half_dim] for the given position IDs.
-// half_dim = head_dim / 2.
 GENIEX_API std::pair<std::vector<float>, std::vector<float>>
 get_cos_sin(const std::vector<int32_t>& position_ids,
             size_t                      head_dim,
             float                       rope_theta = 10000.f);
 
 // Returns a causal attention mask, flat [seq_len * (kv_len + seq_len)].
-// Logically shaped [1, 1, seq_len, kv_len + seq_len]:
-//   - Columns [0, n_past)          in rows [0, curr_len): 0.0  (visible past)
-//   - Causal columns in current chunk: 0.0; everything else: -1e9
+// Columns [0, n_past) in all current-chunk rows are unmasked (0.0); everything
+// else is -1e9 except the causal triangle in the current chunk.
 GENIEX_API std::vector<float> get_attention_mask(size_t n_past,
                                       size_t curr_len,
                                       size_t seq_len,
                                       size_t kv_len);
 
-// Looks up and concatenates embeddings for each token ID.
 // embedded_tokens: flat row-major [vocab_size * hidden_size] float32 table.
-// Returns flat [token_ids.size() * hidden_size].
 GENIEX_API std::vector<float> tokensToEmbedding(const std::vector<int32_t>& token_ids,
                                      const float*                 embedded_tokens,
                                      size_t                       hidden_size);
 
-// Returns a zero-initialised buffer for one KV tensor (key or value) with
-// size = num_kv_heads * head_dim * kv_len elements.
 std::vector<float> get_kv_cache(size_t num_kv_heads,
                                 size_t head_dim,
                                 size_t kv_len);

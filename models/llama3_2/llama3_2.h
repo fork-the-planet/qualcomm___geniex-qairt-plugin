@@ -42,7 +42,6 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // Graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
@@ -107,7 +106,6 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // Graph names use prompt_/token_ prefix (same as Genie exports).
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
