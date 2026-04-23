@@ -6,7 +6,7 @@
             "type": "shell",
             "command": "cmake -B build -A ARM64; cmake --build build --config Debug --target phi3_5_aihub -j32",
             "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": true },
+            "group": { "kind": "build", "isDefault": false },
             "problemMatcher": []
         },
         {
