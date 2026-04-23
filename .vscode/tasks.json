@@ -2,49 +2,17 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Build Granite4 Micro (Debug)",
-            "type": "shell",
-            "command": "cmake -B build -A ARM64; cmake --build build --config Debug --target granite4_micro -j32",
-            "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": true },
-            "problemMatcher": []
-        },
-        {
-            "label": "Build and Run Granite4 Micro (Release)",
-            "type": "shell",
-            "command": "cmake -B build -A ARM64; cmake --build build --config Release --target granite4_micro -j32; .\\build\\bin\\Release\\granite4_micro.exe",
-            "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": false },
-            "problemMatcher": []
-        },
-        {
             "label": "Build Phi3-5 AIHub (Debug)",
             "type": "shell",
             "command": "cmake -B build -A ARM64; cmake --build build --config Debug --target phi3_5_aihub -j32",
             "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": false },
+            "group": { "kind": "build", "isDefault": true },
             "problemMatcher": []
         },
         {
             "label": "Build and Run Phi3-5 AIHub (Release)",
             "type": "shell",
             "command": "cmake -B build -A ARM64; cmake --build build --config Release --target phi3_5_aihub -j32; .\\build\\bin\\Release\\phi3_5_aihub.exe",
-            "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": false },
-            "problemMatcher": []
-        },
-        {
-            "label": "Build Phi4 (Debug)",
-            "type": "shell",
-            "command": "cmake -B build -A ARM64; cmake --build build --config Debug --target phi4 -j32",
-            "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": false },
-            "problemMatcher": []
-        },
-        {
-            "label": "Build and Run Phi4 (Release)",
-            "type": "shell",
-            "command": "cmake -B build -A ARM64; cmake --build build --config Release --target phi4 -j32; .\\build\\bin\\Release\\phi4.exe",
             "options": { "shell": { "executable": "powershell.exe" } },
             "group": { "kind": "build", "isDefault": false },
             "problemMatcher": []
@@ -157,22 +125,6 @@
             "label": "Build and Run Llama 3.2 3B SSD (Release)",
             "type": "shell",
             "command": "cmake -B build -A ARM64; cmake --build build --config Release --target llama3_2_3b_ssd -j32; .\\build\\bin\\Release\\llama3_2_3b_ssd.exe",
-            "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": false },
-            "problemMatcher": []
-        },
-        {
-            "label": "Build Qwen2-Omni (Debug)",
-            "type": "shell",
-            "command": "cmake -B build -A ARM64 -DGENIEX_BUILD_VLM=ON; cmake --build build --config Debug --target qwen2_omni -j32",
-            "options": { "shell": { "executable": "powershell.exe" } },
-            "group": { "kind": "build", "isDefault": false },
-            "problemMatcher": []
-        },
-        {
-            "label": "Build and Run Qwen2-Omni (Release)",
-            "type": "shell",
-            "command": "cmake -B build -A ARM64 -DGENIEX_BUILD_VLM=ON; cmake --build build --config Release --target qwen2_omni -j32; .\\build\\bin\\Release\\qwen2_omni.exe",
             "options": { "shell": { "executable": "powershell.exe" } },
             "group": { "kind": "build", "isDefault": false },
             "problemMatcher": []

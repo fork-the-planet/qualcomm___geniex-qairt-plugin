@@ -16,7 +16,7 @@ cmake -B build -A ARM64
 cmake --build build --config Release -j32
 ```
 
-Vision-Language Models (e.g. Qwen2-Omni) require the `GENIEX_BUILD_VLM` flag:
+Vision-Language Models (e.g. Qwen2.5-VL) require the `GENIEX_BUILD_VLM` flag:
 
 ```shell
 cmake -B build -A ARM64 -DGENIEX_BUILD_VLM=ON
@@ -46,9 +46,7 @@ The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/m
 
 | Model | Target | Compile version | Source |
 |-------|--------|-------|--------|
-| Granite 4 Micro | `granite4_micro` | v2.36 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/granite4_micro) |
 | Phi 3.5 Mini (AIHub) | `phi3_5_aihub` | v2.43 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/phi3_5_aihub) |
-| Phi 4 Mini | `phi4` | v2.36 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/phi4) |
 | Qwen3 4B (AIHub) | `qwen3_4b_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_aihub) |
 | Qwen3 4B Instruct 2507 (AIHub) | `qwen3_4b_instruct_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_instruct_2507_aihub) |
 | Qwen2.5 7B Instruct (AIHub) | `qwen2_5_7b_instruct_aihub` | v2.42 | - |
@@ -62,7 +60,6 @@ The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/m
 | Llama-SEA-LION-v3.5-8B-R (AIHub) | `sea_lion_8b_aihub` | v2.42 | - |
 | Llama-v3.2-3B-Instruct-SSD | `llama3_2_3b_ssd` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_2_3b_instruct_ssd) |
 | Qwen2.5-VL-7B-Instruct | `qwen2_5_vl_7b` | v2.45 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen2_5_vl_7b) |
-| Qwen2.5-Omni-3B | `qwen2_omni` | v2.36 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen2_omni) |
 
 > The bundled HTP runtime libs in `third-party/` (`windows`, `android`, `linux-gcc11.2`) are QAIRT **v2.45.0.260326**. Runtime version is backward compatible with compile version, so all models compiled with v2.45 or earlier will run correctly.
 
@@ -70,11 +67,18 @@ The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/m
 
 ```
 ├── models/              # Model specs (.h) and example executables (.cpp)
-│   ├── granite4/
+│   ├── falcon3/
+│   ├── llama3/
+│   ├── llama3_1/
+│   ├── llama3_2/
+│   ├── llama3_2_ssd/
 │   ├── phi3_5/
-│   ├── phi4/
+│   ├── qwen2_5/
+│   ├── qwen2_5_vl/        # VLM (requires GENIEX_BUILD_VLM=ON)
 │   └── qwen3/
 ├── core/                # geniex_core framework (LLM model, graph, KV cache, RoPE)
 ├── modelfiles/          # Tokenizer and config files per model
+├── geniex-app/          # QNN SDK integration layer (headers + API wrappers)
+├── third-party/         # HTP runtime libs + geniex-proc submodule (tokenizer, preprocessing)
 └── docs/                # Documentation
 ```

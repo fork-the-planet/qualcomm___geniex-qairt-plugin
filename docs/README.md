@@ -187,11 +187,8 @@ qnn-run/
 │   │       └── llm_pipeline.h # High-level API with tokenizer + chat template
 │   └── src/                   # Implementation files
 ├── models/                    # Model-specific configurations and examples
-│   ├── granite4/              # IBM Granite 4 Micro
 │   ├── phi3_5/                # Microsoft Phi-3.5 Mini
-│   ├── phi4/                  # Microsoft Phi-4 Mini
-│   ├── qwen3/                 # Alibaba Qwen3 (4B, 8B variants)
-│   └── qwen2-omni/            # Qwen2 Omni (multimodal)
+│   └── qwen3/                 # Alibaba Qwen3 (4B, 8B variants)
 ├── geniex-app/                # QNN SDK integration layer
 │   ├── include/QNN/           # QNN SDK headers
 │   └── src/
@@ -233,8 +230,6 @@ Abstract interface for CPU-side tensor preparation. Built-in implementations:
 - `EmbeddingInputProvider`: Token ID → embedding lookup
 - `TokenIdInputProvider`: Pass-through for on-device embedding
 - `RoPEInputProvider`: Rotary position embedding computation
-- `Phi35RoPEInputProvider`: Long-rope with dynamic scaling
-- `Phi4RoPEInputProvider`: Partial RoPE (75% of head_dim)
 
 #### `LLMPipeline` (pipeline/llm_pipeline.h)
 High-level API combining:
@@ -261,9 +256,7 @@ Model (base)
 InputProvider (interface)
 ├── EmbeddingInputProvider
 ├── TokenIdInputProvider
-├── RoPEInputProvider
-├── Phi35RoPEInputProvider
-└── Phi4RoPEInputProvider
+└── RoPEInputProvider
 ```
 
 ---

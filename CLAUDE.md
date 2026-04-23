@@ -123,9 +123,9 @@ Example (3-shard model with embedding shard + 2 KV shards):
 
 - **`TokenIdInputProvider`** — for Genie/AI Hub exports where embedding runs on-device (shard 0 takes `input_ids`).
 - **`EmbeddingInputProvider`** — for custom exports with CPU-side embedding table (requires `model_cfg.embedding_path`).
-- **`RoPEInputProvider`** — standard RoPE (no scaling). Used by Qwen3, Falcon3, Granite4, etc.
+- **`RoPEInputProvider`** — standard RoPE (no scaling). Used by Qwen3, Falcon3, etc.
 - **`LongRoPEInputProvider`** — long-rope with dynamic scaling and per-dimension extension factors. Caller passes `ext_factors` as a `std::vector<float>`. Used by Phi3.5.
-- **`PartialRoPEInputProvider`** — partial-dimension RoPE with post-scale. Caller passes `rope_fraction` and `scale`. Used by Phi4 (`rope_fraction=0.75`, `scale=1.19023807`).
+- **`PartialRoPEInputProvider`** — partial-dimension RoPE with post-scale. Caller passes `rope_fraction` and `scale`.
 - **`Llama3RoPEInputProvider`** — Llama 3 frequency-dependent RoPE scaling. Used by Llama 3.1/3.2. Pay attention to the `factor` parameter: Llama 3.2 uses factor=32, Llama 3.1 uses factor=8.
 
 ### Pitfalls when adding new models
