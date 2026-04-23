@@ -1,10 +1,3 @@
-// Qwen2.5-VL-7B interactive chat example, built on VLMPipeline.
-//
-// Compared to qwen2_5_vl_7b_example.cpp (which drives the model directly),
-// this version delegates chat templating, tokenization, multi-turn bridging,
-// and timing to VLMPipeline, leaving only I/O and argument parsing here.
-//
-
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
@@ -30,8 +23,6 @@ static void enable_utf8_io() {
         SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 }
 #endif
-
-// ── Argument parsing ──────────────────────────────────────────────────────────
 
 struct Args {
     int32_t     max_tokens    = 512;
@@ -65,8 +56,6 @@ static bool parseArgs(int argc, char** argv, Args& args) {
     return true;
 }
 
-// ── File type detection ───────────────────────────────────────────────────────
-
 static bool isImageFile(const std::string& path) {
     std::string p = path;
     std::transform(p.begin(), p.end(), p.begin(), ::tolower);
@@ -74,7 +63,6 @@ static bool isImageFile(const std::string& path) {
         || p.ends_with(".bmp") || p.ends_with(".gif")  || p.ends_with(".webp");
 }
 
-// Splits an input line into text + image paths.
 static void parseInput(const std::string& input,
                        std::string& prompt_text,
                        std::vector<std::string>& image_paths) {
@@ -93,8 +81,6 @@ static void parseInput(const std::string& input,
     }
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-
 int main(int argc, char** argv) {
 #ifdef _WIN32
     enable_utf8_io();
@@ -106,11 +92,7 @@ int main(int argc, char** argv) {
     const auto model_dir =
         std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl_7b";
 
-    // All QNN runtime paths are left as std::nullopt → auto-detected.
     geniex::QnnRuntimeConfig runtime_cfg;
-
-    // ── Model config ─────────────────────────────────────────────────────────
-
     geniex::qwen2_5_vl_7b::Qwen25VLConfig config;
 
     config.llm_config.model_paths = {
@@ -138,8 +120,6 @@ int main(int argc, char** argv) {
               << "\\____/\\___/_/ /_/_/\\___/_/|_| \n"
               << "\033[0m\n";
 
-    // ── Load model ────────────────────────────────────────────────────────────
-
     std::cout << "\033[1;36mLoading Qwen2.5-VL-7B...\033[0m\n";
     auto model = geniex::qwen2_5_vl_7b::makeModel(runtime_cfg, config);
     if (!model) {
@@ -147,10 +127,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // ── Build processor ──────────────────────────────────────────────────────
-    //
-    // The vision graph is compiled for a fixed 24×36 patch grid, so we force
-    // the preprocessor to always resize to 336×504 regardless of input aspect.
     geniex::qwen2vl::Qwen2VLConfig proc_cfg;
     proc_cfg.fixed_height = geniex::qwen2_5_vl_7b::kImageHeight;
     proc_cfg.fixed_width  = geniex::qwen2_5_vl_7b::kImageWidth;
@@ -162,7 +138,6 @@ int main(int argc, char** argv) {
     }
     auto& tokenizer = processor->tokenizer();
 
-    // ── Assemble pipeline ────────────────────────────────────────────────────
     geniex::VLMPipeline pipe;
     if (!pipe.create(std::move(model), std::move(processor), tokenizer)) {
         std::cerr << "Failed to assemble VLMPipeline.\n";
@@ -171,8 +146,6 @@ int main(int argc, char** argv) {
     pipe.setSystemPrompt(args.system_prompt);
 
     std::cout << "\033[1;32mModel loaded.\033[0m\n\n";
-
-    // ── Chat loop ─────────────────────────────────────────────────────────────
 
     while (true) {
         std::cout << "Enter your prompt (type 'exit' to quit, 'reset' to clear): ";

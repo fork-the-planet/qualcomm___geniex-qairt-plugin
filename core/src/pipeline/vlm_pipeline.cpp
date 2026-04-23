@@ -12,8 +12,6 @@ namespace geniex {
 
 namespace {
 
-// Convert a geniex-proc BatchFeatures (xtensor-backed) to the flat PixelData
-// consumed by VLMModel.
 PixelData toPixelData(const BatchFeatures& bf) {
     PixelData pd;
     if (bf.image_grid_thw.dimension() == 0 ||
@@ -36,18 +34,15 @@ PixelData toPixelData(const BatchFeatures& bf) {
 
 } // namespace
 
-// ── VLMPipeline::Impl ────────────────────────────────────────────────────────
 
 struct VLMPipeline::Impl {
     std::unique_ptr<VLMModel>         model;
     std::unique_ptr<VisionProcessor>  processor;
-    Tokenizer*                        tokenizer = nullptr;   // non-owning
+    Tokenizer*                        tokenizer = nullptr;
     std::string                       system_prompt;
     bool                              first_turn = true;
     bool                              ready      = false;
 };
-
-// ── Lifecycle ────────────────────────────────────────────────────────────────
 
 VLMPipeline::VLMPipeline()  : impl_(std::make_unique<Impl>()) {}
 VLMPipeline::~VLMPipeline() = default;
@@ -76,13 +71,9 @@ void VLMPipeline::reset() {
     impl_->first_turn = true;
 }
 
-// ── System prompt ────────────────────────────────────────────────────────────
-
 void VLMPipeline::setSystemPrompt(const std::string& prompt) {
     impl_->system_prompt = prompt;
 }
-
-// ── Chat template ────────────────────────────────────────────────────────────
 
 std::vector<int32_t> VLMPipeline::applyChatTemplate(
     const std::string&              user_message,
@@ -108,8 +99,6 @@ std::vector<int32_t> VLMPipeline::applyChatTemplate(
     return tokens;
 }
 
-// ── Generation ───────────────────────────────────────────────────────────────
-
 GenerateResult VLMPipeline::generate(
     const std::string&               user_message,
     const GenerationConfig&          gen_cfg,
@@ -130,7 +119,6 @@ GenerateResult VLMPipeline::generate(
         return result;
     }
 
-    // Save state so we can roll back on exception.
     const bool saved_first_turn = impl_->first_turn;
 
     std::vector<int32_t> prompt_tokens;
@@ -139,15 +127,12 @@ GenerateResult VLMPipeline::generate(
     try {
         prompt_tokens = applyChatTemplate(user_message, image_paths, vlm_input);
     } catch (...) {
-        // Processor / tokenizer failure — surface as error; KV cache untouched.
         impl_->first_turn = saved_first_turn;
         result.stop_reason = "error";
         return result;
     }
 
     result.prompt_tokens = static_cast<int64_t>(prompt_tokens.size());
-
-    // ── Run VLMModel::generate, streaming decoded text to on_token ──────────
 
     using Clock = std::chrono::high_resolution_clock;
     auto t_start = Clock::now();
@@ -179,8 +164,6 @@ GenerateResult VLMPipeline::generate(
                 return !user_stopped;
             });
     } catch (...) {
-        // Generation failed mid-run; KV cache is in an undefined state.
-        // Caller should typically call reset().
         impl_->first_turn = saved_first_turn;
         result.stop_reason = "error";
         return result;
@@ -215,8 +198,6 @@ GenerateResult VLMPipeline::generate(
     impl_->first_turn = false;
     return result;
 }
-
-// ── KV cache persistence ─────────────────────────────────────────────────────
 
 void VLMPipeline::saveKVCache(const std::string& path) const {
     if (impl_->model) impl_->model->saveKVCacheToFile(path);

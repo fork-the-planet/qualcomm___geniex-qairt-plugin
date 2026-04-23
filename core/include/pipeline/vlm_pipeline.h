@@ -13,8 +13,6 @@
 #include "vlm/vlm_model.h"
 #include "vlm/vlm_types.h"
 
-// Forward declarations — avoid pulling geniex-proc headers into geniex_vlm's
-// public ABI surface. The implementation includes them directly.
 namespace geniex {
 class VisionProcessor;
 class Tokenizer;
@@ -22,23 +20,9 @@ class Tokenizer;
 
 namespace geniex {
 
-// ── VLMPipeline ──────────────────────────────────────────────────────────────
-//
-// High-level wrapper that combines a VLMModel + a VisionProcessor (which owns
-// the tokenizer and chat template) into a single object with a
-// generate / reset workflow analogous to LLMPipeline.
-//
-// Usage (C++):
-//   auto model = geniex::qwen2_5_vl_7b::makeModel(runtime_cfg, cfg);
-//   auto proc  = geniex::qwen2vl::Qwen2VLProcessor::create(tokenizer_path, pcfg);
-//   auto& tok  = proc->tokenizer();
-//
-//   VLMPipeline pipe;
-//   pipe.create(std::move(model), std::move(proc), tok);
-//   pipe.setSystemPrompt("You are a helpful AI assistant.");
-//
-//   auto r = pipe.generate("describe this image", {"cat.jpg"}, gen_cfg, on_tok);
-//
+// High-level wrapper that pairs a VLMModel with a VisionProcessor (which owns
+// the tokenizer and chat template) and exposes a generate / reset workflow
+// analogous to LLMPipeline.
 class GENIEX_VLM_API VLMPipeline {
 public:
     VLMPipeline();
@@ -63,44 +47,33 @@ public:
                       std::move(processor), tokenizer);
     }
 
-    // True after a successful create(), false otherwise.
     bool isReady() const;
 
-    // Reset KV cache and conversation state (first_turn flag).
+    // Clears KV state and resets to the start of a new conversation.
     void reset();
 
-    // ── System prompt ────────────────────────────────────────────────────────
     void setSystemPrompt(const std::string& prompt);
 
-    // ── Chat template ────────────────────────────────────────────────────────
-    // Formats one conversation turn into model-ready tokens and populates
-    // `vlm_input` with pixel_values / image_grid_thw.
-    //
-    // Does NOT modify conversation state — generate() advances first_turn.
+    // Formats one turn into model-ready tokens and populates `vlm_input` with
+    // pixel_values / image_grid_thw.
     std::vector<int32_t> applyChatTemplate(
         const std::string&              user_message,
         const std::vector<std::string>& image_paths,
         VLMInput&                       vlm_input) const;
 
-    // ── Generation ───────────────────────────────────────────────────────────
-    // Generate a response to a user message with optional image paths.
-    // Equivalent to applyChatTemplate() + VLMModel::generate() with streaming
-    // decode and timing instrumentation.
-    //
-    // `on_token` is called with each decoded piece; return false to stop.
+    // on_token is called with each decoded text piece; return false to stop early.
     GenerateResult generate(
         const std::string&              user_message,
         const std::vector<std::string>& image_paths = {},
         const GenerationConfig&         gen_cfg     = {},
         std::function<bool(const char*)> on_token   = nullptr);
 
-    // Convenience overload: text-only turn.
+    // Text-only convenience overload.
     GenerateResult generate(
         const std::string&              user_message,
         const GenerationConfig&         gen_cfg,
         std::function<bool(const char*)> on_token   = nullptr);
 
-    // ── KV-cache persistence ─────────────────────────────────────────────────
     void saveKVCache(const std::string& path) const;
     void loadKVCache(const std::string& path);
 

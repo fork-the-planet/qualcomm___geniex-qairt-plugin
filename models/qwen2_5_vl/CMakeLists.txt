@@ -10,8 +10,7 @@ set_target_properties(qwen2_5_vl_7b PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# VLMPipeline-based variant. Same model, same weights — exercises the
-# core/include/pipeline/vlm_pipeline.h wrapper end-to-end.
+# VLMPipeline-based variant of the same model.
 add_executable(qwen2_5_vl_7b_pipeline
     qwen2_5_vl_7b_pipeline.cpp
     qwen2_5_vl.cpp
