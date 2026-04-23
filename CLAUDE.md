@@ -66,7 +66,7 @@ cmake -B build -A ARM64
 cmake --build build --config Release -j32
 
 # Build a single model target
-cmake --build build --config Release --target qwen3_4b_aihub -j32
+cmake --build build --config Release --target qwen3_4b -j32
 ```
 
 Executables output to `build/bin/Release/`.

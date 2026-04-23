@@ -1,5 +1,3 @@
-
-
 #include <chrono>
 #include <filesystem>
 #include <iomanip>
@@ -9,7 +7,7 @@
 
 #include "llm/llm_model.h"
 #include "geniex-proc/tokenizer.h"
-#include "phi3_5.h"
+#include "qwen2_5.h"
 #include "types.h"
 
 #ifdef _WIN32
@@ -25,14 +23,16 @@ static void enable_utf8_io() {
 #endif
 
 struct Args {
-    int32_t max_tokens = 512;
-    bool    verbose    = false;
+    int32_t     max_tokens    = 512;
+    bool        verbose       = false;
+    std::string system_prompt = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
 };
 
 static void printUsage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]\n"
-              << "  --max-tokens <n>   Max tokens to generate (default 512)\n"
-              << "  --verbose          Print performance metrics\n"
+              << "  --max-tokens <n>      Max tokens to generate (default 512)\n"
+              << "  --system-prompt <s>   System prompt\n"
+              << "  --verbose             Print performance metrics\n"
               << "  --help\n";
 }
 
@@ -42,19 +42,25 @@ static bool parseArgs(int argc, char** argv, Args& args) {
         auto next = [&]() -> std::string {
             return (i + 1 < argc) ? argv[++i] : std::string{};
         };
-        if      (a == "--max-tokens") args.max_tokens = std::stoi(next());
-        else if (a == "--verbose")    args.verbose    = true;
+        if      (a == "--max-tokens")    args.max_tokens    = std::stoi(next());
+        else if (a == "--system-prompt") args.system_prompt = next();
+        else if (a == "--verbose")       args.verbose       = true;
         else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
         else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
     }
     return true;
 }
 
-static std::string applyTemplate(const std::string& user_text, bool first_turn) {
+static std::string applyTemplate(const std::string& user_text,
+                                 const std::string& system_prompt,
+                                 bool first_turn) {
+    std::string prompt;
     if (first_turn) {
-        return "<|system|>You are a helpful assistant.<|end|><|user|>" + user_text + "<|end|><|assistant|>";
+        prompt = "<|im_start|>system\n" + system_prompt + "<|im_end|>\n";
     }
-    return "<|user|>" + user_text + "<|end|><|assistant|>";
+    prompt += "<|im_start|>user\n" + user_text + "<|im_end|>\n";
+    prompt += "<|im_start|>assistant\n";
+    return prompt;
 }
 
 int main(int argc, char** argv) {
@@ -65,7 +71,7 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "phi3_5_aihub";
+    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen2_5_7b_instruct";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected from
     // htp-files/ installed alongside geniex_core.
@@ -73,10 +79,12 @@ int main(int argc, char** argv) {
 
     geniex::ModelConfig model_cfg;
     model_cfg.model_paths = {
-        (model_dir / "weight_sharing_model_1_of_4.serialized.bin").string(),
-        (model_dir / "weight_sharing_model_2_of_4.serialized.bin").string(),
-        (model_dir / "weight_sharing_model_3_of_4.serialized.bin").string(),
-        (model_dir / "weight_sharing_model_4_of_4.serialized.bin").string(),
+        (model_dir / "qwen2_5_7b_instruct_part_1_of_6.bin").string(),
+        (model_dir / "qwen2_5_7b_instruct_part_2_of_6.bin").string(),
+        (model_dir / "qwen2_5_7b_instruct_part_3_of_6.bin").string(),
+        (model_dir / "qwen2_5_7b_instruct_part_4_of_6.bin").string(),
+        (model_dir / "qwen2_5_7b_instruct_part_5_of_6.bin").string(),
+        (model_dir / "qwen2_5_7b_instruct_part_6_of_6.bin").string(),
     };
     model_cfg.tokenizer_path  = (model_dir / "tokenizer.json").string();
     model_cfg.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
@@ -92,8 +100,8 @@ int main(int argc, char** argv) {
               << "\\____/\\___/_/ /_/_/\\___/_/|_| \n"
               << "\033[0m\n";
 
-    std::cout << "\033[1;36mLoading model...\033[0m\n";
-    geniex::LLMModel model = geniex::phi3_5_aihub::makeModel();
+    std::cout << "\033[1;36mLoading Qwen2.5-7B-Instruct...\033[0m\n";
+    geniex::LLMModel model = geniex::qwen2_5_7b_instruct::makeModel();
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";
@@ -113,7 +121,7 @@ int main(int argc, char** argv) {
         std::string input;
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
-        const std::string prompt_text = applyTemplate(input, first_turn);
+        const std::string prompt_text = applyTemplate(input, args.system_prompt, first_turn);
         first_turn = false;
 
         auto encoded = tokenizer->encode(prompt_text);
@@ -142,7 +150,6 @@ int main(int argc, char** argv) {
             std::cerr << "Generation error: " << e.what() << "\n";
             std::cerr.flush();
             model.resetKVCache();
-            first_turn = true;
             continue;
         }
         std::cout << "\033[0m\n";

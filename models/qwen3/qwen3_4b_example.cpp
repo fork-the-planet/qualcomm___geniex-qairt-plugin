@@ -1,4 +1,5 @@
 
+
 #include <chrono>
 #include <filesystem>
 #include <iomanip>
@@ -8,7 +9,7 @@
 
 #include "llm/llm_model.h"
 #include "geniex-proc/tokenizer.h"
-#include "llama3.h"
+#include "qwen3.h"
 #include "types.h"
 
 #ifdef _WIN32
@@ -24,16 +25,16 @@ static void enable_utf8_io() {
 #endif
 
 struct Args {
-    int32_t     max_tokens     = 512;
-    bool        verbose        = false;
-    std::string system_prompt;
+    int32_t max_tokens      = 512;
+    bool    verbose         = false;
+    bool    enable_thinking = false;
 };
 
 static void printUsage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]\n"
-              << "  --max-tokens <n>       Max tokens to generate (default 512)\n"
-              << "  --system-prompt <str>  System prompt (optional)\n"
-              << "  --verbose              Print performance metrics\n"
+              << "  --max-tokens <n>   Max tokens to generate (default 512)\n"
+              << "  --thinking         Enable thinking mode\n"
+              << "  --verbose          Print performance metrics\n"
               << "  --help\n";
 }
 
@@ -43,29 +44,17 @@ static bool parseArgs(int argc, char** argv, Args& args) {
         auto next = [&]() -> std::string {
             return (i + 1 < argc) ? argv[++i] : std::string{};
         };
-        if      (a == "--max-tokens")    args.max_tokens    = std::stoi(next());
-        else if (a == "--system-prompt") args.system_prompt = next();
-        else if (a == "--verbose")       args.verbose       = true;
+        if      (a == "--max-tokens") args.max_tokens      = std::stoi(next());
+        else if (a == "--thinking")   args.enable_thinking = true;
+        else if (a == "--verbose")    args.verbose         = true;
         else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
         else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
     }
     return true;
 }
 
-static std::string applyTemplate(const std::string& user_text, bool first_turn,
-                                 const std::string& system_prompt) {
-    std::string out;
-    if (first_turn) {
-        out = "<|begin_of_text|>";
-        if (!system_prompt.empty()) {
-            out += "<|start_header_id|>system<|end_header_id|>\n"
-                 + system_prompt + "<|eot_id|>";
-        }
-        out += "<|start_header_id|>user<|end_header_id|>\n";
-    } else {
-        out = "<|eot_id|><|start_header_id|>user<|end_header_id|>\n";
-    }
-    return out + user_text + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n";
+static std::string applyTemplate(const std::string& user_text) {
+    return "<|im_start|>user\n" + user_text + "<|im_end|>\n<|im_start|>assistant\n";
 }
 
 int main(int argc, char** argv) {
@@ -76,7 +65,7 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "llama_v3_8b_instruct_aihub";
+    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen3_4b";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected from
     // htp-files/ installed alongside geniex_core.
@@ -84,17 +73,18 @@ int main(int argc, char** argv) {
 
     geniex::ModelConfig model_cfg;
     model_cfg.model_paths = {
-        (model_dir / "llama_v3_8b_instruct_part_1_of_5.bin").string(),
-        (model_dir / "llama_v3_8b_instruct_part_2_of_5.bin").string(),
-        (model_dir / "llama_v3_8b_instruct_part_3_of_5.bin").string(),
-        (model_dir / "llama_v3_8b_instruct_part_4_of_5.bin").string(),
-        (model_dir / "llama_v3_8b_instruct_part_5_of_5.bin").string(),
+        (model_dir / "qwen3_4b_part_1_of_4.bin").string(),
+        (model_dir / "qwen3_4b_part_2_of_4.bin").string(),
+        (model_dir / "qwen3_4b_part_3_of_4.bin").string(),
+        (model_dir / "qwen3_4b_part_4_of_4.bin").string(),
     };
     model_cfg.tokenizer_path  = (model_dir / "tokenizer.json").string();
+    // No embedding_path needed – embedding runs on-device in shard 0.
     model_cfg.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
 
     geniex::GenerationConfig gen_cfg;
-    gen_cfg.max_tokens = args.max_tokens;
+    gen_cfg.max_tokens    = args.max_tokens;
+    gen_cfg.thinking_mode = args.enable_thinking;
 
     std::cout << "\033[1;32m"
               << "   ______           _     _  __\n"
@@ -105,7 +95,7 @@ int main(int argc, char** argv) {
               << "\033[0m\n";
 
     std::cout << "\033[1;36mLoading model...\033[0m\n";
-    geniex::LLMModel model = geniex::llama_v3_8b_instruct_aihub::makeModel();
+    geniex::LLMModel model = geniex::qwen3_4b::makeModel();
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";
@@ -119,14 +109,12 @@ int main(int argc, char** argv) {
 
     auto tokenizer = geniex::Tokenizer::from_file(model_cfg.tokenizer_path);
 
-    bool first_turn = true;
     while (true) {
         std::cout << "Enter your prompt (type 'exit' to quit): ";
         std::string input;
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
-        const std::string prompt_text = applyTemplate(input, first_turn, args.system_prompt);
-        first_turn = false;
+        const std::string prompt_text = applyTemplate(input);
 
         auto encoded = tokenizer->encode(prompt_text);
         const std::vector<int32_t> prompt_tokens(encoded.begin(), encoded.end());
@@ -154,7 +142,6 @@ int main(int argc, char** argv) {
             std::cerr << "Generation error: " << e.what() << "\n";
             std::cerr.flush();
             model.resetKVCache();
-            first_turn = true;
             continue;
         }
         std::cout << "\033[0m\n";

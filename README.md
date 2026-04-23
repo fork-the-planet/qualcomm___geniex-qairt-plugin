@@ -26,7 +26,7 @@ cmake --build build --config Release -j32
 Build a specific model target:
 ```shell
 cmake -B build -A ARM64
-cmake --build build --config Release --target qwen3_4b_aihub -j32
+cmake --build build --config Release --target qwen3_4b -j32
 ```
 
 Executables are output to `build/bin/Release/`.
@@ -46,18 +46,18 @@ The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/m
 
 | Model | Target | Compile version | Source |
 |-------|--------|-------|--------|
-| Phi 3.5 Mini (AIHub) | `phi3_5_aihub` | v2.43 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/phi3_5_aihub) |
-| Qwen3 4B (AIHub) | `qwen3_4b_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_aihub) |
-| Qwen3 4B Instruct 2507 (AIHub) | `qwen3_4b_instruct_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_instruct_2507_aihub) |
-| Qwen2.5 7B Instruct (AIHub) | `qwen2_5_7b_instruct_aihub` | v2.42 | - |
-| Llama-v3-8B-Instruct (AIHub) | `llama_v3_8b_instruct_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_8b_instruct_aihub) |
-| Llama-v3-ELYZA-JP-8B (AIHub) | `llama_v3_elyza_jp_8b_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_elyza_jp_8b_aihub) |
-| Llama3-TAIDE-LX-8B-Chat (AIHub) | `llama_v3_taide_8b_chat_aihub` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_taide_8b_chat_aihub) |
-| Llama-v3.2-1B-Instruct (AIHub) | `llama3_2_1b_aihub` | v2.42 | - |
-| Llama-v3.2-3B-Instruct (AIHub) | `llama3_2_3b_aihub` | v2.42 | - |
-| Falcon3-7B-Instruct (AIHub) | `falcon3_7b_aihub` | v2.42 | - |
-| Llama-3.1-8B-Instruct (AIHub) | `llama3_1_8b_aihub` | v2.42 | - |
-| Llama-SEA-LION-v3.5-8B-R (AIHub) | `sea_lion_8b_aihub` | v2.42 | - |
+| Phi 3.5 Mini | `phi3_5` | v2.43 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/phi3_5_aihub) |
+| Qwen3 4B | `qwen3_4b` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_aihub) |
+| Qwen3 4B Instruct 2507 | `qwen3_4b_instruct_2507` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen3_4b_instruct_2507_aihub) |
+| Qwen2.5 7B Instruct | `qwen2_5_7b_instruct` | v2.42 | - |
+| Llama-v3-8B-Instruct | `llama_v3_8b_instruct` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_8b_instruct_aihub) |
+| Llama-v3-ELYZA-JP-8B | `llama_v3_elyza_jp_8b` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_elyza_jp_8b_aihub) |
+| Llama3-TAIDE-LX-8B-Chat | `llama_v3_taide_8b_chat` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_taide_8b_chat_aihub) |
+| Llama-v3.2-1B-Instruct | `llama3_2_1b` | v2.42 | - |
+| Llama-v3.2-3B-Instruct | `llama3_2_3b` | v2.42 | - |
+| Falcon3-7B-Instruct | `falcon3_7b` | v2.42 | - |
+| Llama-3.1-8B-Instruct | `llama3_1_8b` | v2.42 | - |
+| Llama-SEA-LION-v3.5-8B-R | `sea_lion_8b` | v2.42 | - |
 | Llama-v3.2-3B-Instruct-SSD | `llama3_2_3b_ssd` | v2.42 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/llama_v3_2_3b_instruct_ssd) |
 | Qwen2.5-VL-7B-Instruct | `qwen2_5_vl_7b` | v2.45 | [HuggingFace](https://huggingface.co/yichqian/geniex-qairt-models/tree/main/qwen2_5_vl_7b) |
 
