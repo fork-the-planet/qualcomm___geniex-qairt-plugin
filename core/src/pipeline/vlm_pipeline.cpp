@@ -47,12 +47,6 @@ struct VLMPipeline::Impl {
     bool                              ready      = false;
 };
 
-// End-of-turn marker inserted between consecutive conversation turns to close
-// the prior assistant reply. Hardcoded to ChatML since every VLM family we
-// currently support (Qwen2-VL, Qwen2.5-VL, InternVL2+, …) uses ChatML.
-// If a non-ChatML VLM is added, move bridge handling into VisionProcessor.
-static constexpr const char* kTurnBridge = "<|im_end|>\n";
-
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
 VLMPipeline::VLMPipeline()  : impl_(std::make_unique<Impl>()) {}
@@ -110,13 +104,7 @@ std::vector<int32_t> VLMPipeline::applyChatTemplate(
     BatchFeatures bf = impl_->processor->process(pinput);
     vlm_input.pixel_data = toPixelData(bf);
 
-    std::vector<int32_t> tokens;
-    if (!impl_->first_turn) {
-        auto prefix = impl_->tokenizer->encode(kTurnBridge,
-                                               /*add_special_tokens=*/false);
-        tokens.assign(prefix.begin(), prefix.end());
-    }
-    tokens.insert(tokens.end(), bf.input_ids.cbegin(), bf.input_ids.cend());
+    std::vector<int32_t> tokens(bf.input_ids.cbegin(), bf.input_ids.cend());
     return tokens;
 }
 
