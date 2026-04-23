@@ -73,9 +73,8 @@ private:
     size_t             hidden_size_ = 0;
 };
 
-// Writes raw token IDs (int32) into a named graph input, padding to the
-// graph's tensor capacity with a configurable pad token.
-// Used for models where the embedding lookup runs on-device (e.g. AI Hub exports).
+// For models where embedding lookup runs on-device (e.g. AI Hub exports).
+// Pads to the graph's tensor capacity with a configurable pad token.
 class GENIEX_API TokenIdInputProvider : public InputProvider {
 public:
     explicit TokenIdInputProvider(std::string tensor_name = "input_ids",

@@ -52,15 +52,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {151643, 151645},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
-// No CPU-side embedding table needed - the first shard does embedding on-device.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 151643));

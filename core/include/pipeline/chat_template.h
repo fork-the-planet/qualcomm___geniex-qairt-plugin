@@ -14,8 +14,6 @@ using ChatTemplateFunc = std::string(*)(
     bool first_turn,
     bool enable_thinking);
 
-// ── Common chat templates (used by multiple model families) ──────────────────
-
 // ChatML format — used by Qwen3, Qwen2.5, and other ChatML-based models.
 GENIEX_API std::string chatMLTemplate(
     const std::string& user_message,

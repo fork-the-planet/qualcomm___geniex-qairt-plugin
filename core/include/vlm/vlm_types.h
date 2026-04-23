@@ -5,8 +5,6 @@
 namespace geniex {
 
 // Generic multimodal input for VLMModel::generate().
-// VLMModel::generate() unpacks this into PixelData / AudioData
-// before calling the respective encoders — the encoders never see VLMInput.
 // Subclass to carry additional modality fields (e.g. audio).
 struct VLMInput {
     PixelData pixel_data;

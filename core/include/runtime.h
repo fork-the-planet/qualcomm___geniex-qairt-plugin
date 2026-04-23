@@ -43,21 +43,15 @@
 
 namespace geniex {
 
-// ── Self-location ─────────────────────────────────────────────────────────────
-
 // Returns the directory that contains geniex_core.dll / libgeniex_core.so.
-//
 // Implemented in runtime.cpp (compiled exclusively into geniex_core) so that
 // the address anchors (__ImageBase on Windows, dladdr on Linux/Android) always
 // resolve to the geniex_core shared library — never to a consuming executable
 // or a different DLL.
 std::filesystem::path geniex_core_dir();
 
-// ── HTP arch detection ────────────────────────────────────────────────────────
-
-// Detects the HTP (Hexagon Tensor Processor) architecture version of the
-// current device by querying the CDSP via the FastRPC remote_handle_control API.
-//
+// Detects the HTP arch version of the current device by querying the CDSP
+// via the FastRPC remote_handle_control API.
 // The result is cached after the first call (thread-safe via std::call_once).
 // Returns the arch version (e.g. 73, 75, 79, 81), or 0 on failure.
 inline int detect_htp_arch() {
@@ -69,7 +63,7 @@ inline int detect_htp_arch() {
         remote_handle_control_t fn    = nullptr;
 
 #ifdef _WIN32
-        // Locate libcdsprpc.dll via the qcnspmcdm Qualcomm driver service.
+        // Locate libcdsprpc.dll via the qcnspmcdm service in the Windows driver store.
         SC_HANDLE scm = OpenSCManagerW(NULL, NULL, STANDARD_RIGHTS_READ);
         if (!scm) {
             GENIEX_LOG_WARN("HTP detect: cannot open SCManager ({})", GetLastError());
@@ -135,9 +129,8 @@ inline int detect_htp_arch() {
         }
 
 #else  // __ANDROID__ and __linux__
-        // libcdsprpc.so is a system library on the default linker path on Android.
-        // On Linux (e.g. Snapdragon X Elite dev kit), the Qualcomm FastRPC driver
-        // installs the same library; if it is absent the detection returns 0.
+        // libcdsprpc.so is a system library on Android; on Linux the Qualcomm
+        // FastRPC driver installs it; if absent, detection returns 0.
         void* lib = dlopen("libcdsprpc.so", RTLD_NOW | RTLD_LOCAL);
         if (!lib) {
             GENIEX_LOG_WARN("HTP detect: failed to load libcdsprpc.so: {}", dlerror());
@@ -155,7 +148,7 @@ inline int detect_htp_arch() {
         }
 #endif
 
-        // FastRPC constants from qualcomm/fastrpc public headers.
+        // FastRPC constants from the Qualcomm FastRPC public headers (BSD-3-Clause).
         constexpr uint32_t DSPRPC_GET_DSP_INFO = 2;
         constexpr uint32_t FASTRPC_ARCH_VER    = 6;
         constexpr uint32_t FASTRPC_CDSP_DOMAIN = 3;
@@ -202,37 +195,19 @@ inline int detect_htp_arch() {
     return s_arch;
 }
 
-// ── Path resolution ───────────────────────────────────────────────────────────
-
-// Fills any std::nullopt path fields in `cfg` using the platform HTP folder.
-//
-// Resolution order:
-//   1. Looks for <geniex_core_dir>/htp-files/ — a flat folder containing all
-//      HTP runtime libraries for the current platform (Windows, Android, Linux).
-//      This folder is installed alongside geniex_core during the build/install
-//      step (copied from third-party/windows/, third-party/android/, or
-//      third-party/linux-gcc11.2/ respectively).
-//   2. If the folder does not exist, throws std::runtime_error.
-//
-// HTP arch detection (detect_htp_arch()) is still called for informational
-// logging, but the folder layout no longer depends on the arch version since
-// all supported arch variants are bundled in the single platform folder.
-//
-// Only nullopt fields are filled; fields that already have a value are left
-// unchanged, allowing partial overrides.
-//
-// Side effect on Windows: calls SetDllDirectoryA() with the resolved HTP
-// directory so that the DLL loader can find transitive HTP dependencies.
+// Fills any std::nullopt path fields in `cfg` using the platform HTP folder
+// (<geniex_core_dir>/htp-files/). Throws std::runtime_error if the folder is
+// absent. Fields that already have a value are left unchanged.
+// Side effect on Windows: calls SetDllDirectoryA() so the loader can find
+// transitive HTP DLL dependencies (e.g. QnnHtpV73Stub.dll).
 inline void resolveHtpPaths(QnnRuntimeConfig& cfg) {
-    // If the caller provided all three paths explicitly, nothing to do.
     if (cfg.backend_path.has_value() &&
         cfg.system_lib_path.has_value() &&
         cfg.extensions_path.has_value()) {
         return;
     }
 
-    // Log detected arch for informational purposes.
-    // For now, the folder layout does not depend on the arch version since all supported variants are bundled together
+    // Arch is logged for diagnostics; the htp-files/ folder bundles all arch variants together.
     int arch = detect_htp_arch();
     if (arch > 0)
         GENIEX_LOG_INFO("HTP arch v{} detected.", arch);
@@ -258,8 +233,7 @@ inline void resolveHtpPaths(QnnRuntimeConfig& cfg) {
     if (!cfg.extensions_path.has_value())
         cfg.extensions_path = (htp_dir / "QnnHtpNetRunExtensions.dll").string();
 
-    // SetDllDirectoryA so the loader can find transitive HTP DLL dependencies
-    // (e.g. QnnHtpV73Stub.dll, QnnHtpV81Stub.dll) that live in the same folder.
+    // Allow the loader to find transitive HTP DLL dependencies in the same folder.
     SetDllDirectoryA(htp_dir.string().c_str());
 #else  // __ANDROID__ and __linux__
     if (!cfg.backend_path.has_value())

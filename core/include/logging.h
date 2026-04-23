@@ -16,8 +16,6 @@
 
 namespace geniex {
 
-// ── Log levels ────────────────────────────────────────────────────────────────
-
 enum class LogLevel : uint32_t {
     Trace = 0,
     Debug = 1,
@@ -26,11 +24,8 @@ enum class LogLevel : uint32_t {
     Error = 4,
 };
 
-// ── Callback ──────────────────────────────────────────────────────────────────
-
 // Signature for a user-installed log sink.
-// level   — severity of the message
-// message — null-terminated, fully formatted string (no trailing newline)
+// message is null-terminated, fully formatted, with no trailing newline.
 using LogCallback = void (*)(LogLevel level, const char* message);
 
 // Global log sink. Defaults to a colorized stderr handler.
@@ -40,10 +35,8 @@ GENIEX_API extern LogCallback geniex_log_callback;
 // Installs a custom log sink. Pass nullptr to restore the default handler.
 GENIEX_API void geniex_set_log_callback(LogCallback cb);
 
-// ── Internal helpers ──────────────────────────────────────────────────────────
-
-// Null-safe pointer formatter: prints "nullptr", the string value (char*),
-// the pointer address (void*), or the dereferenced value for other pointers.
+// Null-safe pointer formatter for log arguments: prints "nullptr", the string
+// value (char*), the address (void*), or the dereferenced value for other pointer types.
 template <typename T>
 inline auto lp(T arg) {
     if constexpr (std::is_pointer_v<T>) {

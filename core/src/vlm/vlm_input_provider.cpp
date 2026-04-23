@@ -15,7 +15,6 @@ namespace geniex {
 
 namespace {
 
-// Returns true if `path` ends with `suffix` (case-insensitive).
 bool endsWithICase(const std::string& path, const std::string& suffix) {
     if (path.size() < suffix.size()) return false;
     return std::equal(
@@ -25,7 +24,6 @@ bool endsWithICase(const std::string& path, const std::string& suffix) {
 
 } // namespace
 
-// ── PrecomputedEmbeddingProvider ──────────────────────────────────────────────
 
 PrecomputedEmbeddingProvider::PrecomputedEmbeddingProvider(std::string tensor_name)
     : tensor_name_(std::move(tensor_name)) {}
@@ -36,7 +34,6 @@ void PrecomputedEmbeddingProvider::loadTable(const std::string& path,
     if (!table_.empty()) return;          // idempotent
 
     if (endsWithICase(path, ".npy")) {
-        // .npy carries its own shape — trust the header, validate hints if given.
         auto arr = xt::load_npy<float>(path);
         if (arr.dimension() != 2) {
             throw std::runtime_error(
@@ -57,7 +54,7 @@ void PrecomputedEmbeddingProvider::loadTable(const std::string& path,
         hidden_size_ = npy_hidden;
         table_.assign(arr.begin(), arr.end());
     } else {
-        // Headerless raw float32 — both dims must come from the caller.
+        // Headerless raw float32: both dims must be provided by the caller.
         if (vocab_size == 0 || hidden_size == 0) {
             throw std::runtime_error(
                 "PrecomputedEmbeddingProvider: raw embedding file " + path +
@@ -92,8 +89,6 @@ void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg,
     if (!table_.empty()) return;          // idempotent
     if (model_cfg.embedding_path.empty()) return;
 
-    // Route through loadTable(), supplying shape hints from LLMSpec so raw
-    // (headerless) files work without additional caller ceremony.
     loadTable(model_cfg.embedding_path, spec.vocab_size, spec.hidden_size);
 }
 
@@ -116,19 +111,15 @@ void PrecomputedEmbeddingProvider::write(Graph& g, const LLMRunContext& ctx) {
     if (!g.hasInput(tensor_name_)) return;
 
     if (!buffer_.empty() && ctx.phase == 0) {
-        // Prefill: slice from pre-computed buffer by token offset relative to buffer start.
         const size_t local_offset = ctx.n_past - buffer_offset_;
         const float* src = buffer_.data() + local_offset * hidden_size_;
         g.write(tensor_name_, src, ctx.curr_len * hidden_size_);
     } else {
-        // Decode: per-token table lookup.
         if (table_.empty()) return;
         auto embeds = tokensToEmbedding(ctx.token_ids, table_.data(), hidden_size_);
         g.write(tensor_name_, embeds.data(), embeds.size());
     }
 }
-
-// ── MRoPEInputProvider ────────────────────────────────────────────────────────
 
 MRoPEInputProvider::MRoPEInputProvider(std::vector<int>  mrope_section,
                                        float             theta,
@@ -183,8 +174,7 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
                                      size_t                       seq_len,
                                      std::vector<float>&          out_cos,
                                      std::vector<float>&          out_sin) const {
-    // freqs[dim][t][i] = position_ids[dim * seq_len + t] * inv_freq_[i]
-    // Laid out as flat [3 * seq_len * half_dim_]
+    // freqs: flat [3 * seq_len * half_dim_], freqs[dim][t][i] = pos * inv_freq_[i]
     std::vector<float> freqs(3 * seq_len * half_dim_);
     for (int dim = 0; dim < 3; ++dim) {
         for (size_t t = 0; t < seq_len; ++t) {
@@ -200,7 +190,6 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
     out_sin.resize(seq_len * half_dim_);
 
     if (style_ == MRoPEInterleaving::BLOCK) {
-        // Contiguous segments: [0:S0] from temporal, [S0:S0+S1] from height, etc.
         size_t off = 0;
         for (size_t dim = 0; dim < mrope_section_.size() && off < half_dim_; ++dim) {
             const size_t len = std::min<size_t>(mrope_section_[dim], half_dim_ - off);
@@ -217,8 +206,6 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
         }
     } else {
         // STRIDE: temporal fills all, then height/width override at stride-3 offsets.
-
-        // Step 1: fill all positions from temporal (dim=0)
         for (size_t t = 0; t < seq_len; ++t) {
             const float* src = freqs.data() + t * half_dim_;  // dim=0
             float* cos_row   = out_cos.data() + t * half_dim_;
@@ -229,7 +216,6 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
             }
         }
 
-        // Step 2: override height (dim=1) and width (dim=2) at stride-3 offsets
         for (int dim = 1; dim < 3 && dim < static_cast<int>(mrope_section_.size()); ++dim) {
             const int offset = dim;
             const int length = mrope_section_[dim] * 3;
@@ -250,15 +236,13 @@ void MRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     if (!has_cos && !has_sin) return;
 
     if (has_prefill_positions_ && ctx.phase == 0) {
-        // Prefill: slice from pre-computed tables for [n_past - offset, n_past - offset + curr_len)
         const size_t local_offset = (ctx.n_past - position_offset_) * half_dim_;
         const size_t count  = ctx.curr_len * half_dim_;
         if (has_cos) g.write(cos_name_, cos_table_.data() + local_offset, count);
         if (has_sin) g.write(sin_name_, sin_table_.data() + local_offset, count);
     } else {
-        // Decode fallback: sequential positions offset by accumulated mrope_deltas.
-        // mrope_deltas_ is synced from the model after each prefill, so decode tokens
-        // continue from the correct position even after multimodal (image/audio) prefill.
+        // Decode: sequential positions offset by accumulated mrope_deltas_.
+        // mrope_deltas_ keeps decode tokens aligned with image/audio-expanded positions.
         const int32_t base = static_cast<int32_t>(ctx.n_past);
         std::vector<int32_t> pos3d(3 * ctx.curr_len);
         for (size_t t = 0; t < ctx.curr_len; ++t) {
