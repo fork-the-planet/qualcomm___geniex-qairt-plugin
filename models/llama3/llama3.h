@@ -27,14 +27,14 @@ inline std::string llama3ChatTemplate(const std::string& user_message,
     return out + user_message + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n";
 }
 
-namespace llama_v3_8b_instruct_aihub {
+namespace llama_v3_8b_instruct {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 500000.0f;
 
-// Returns the architecture spec for Llama 3 8B Instruct AI Hub export (5 shards, CL 4096).
+// Returns the architecture spec for Llama 3 8B Instruct (5 shards, CL 4096).
 //
-// Shard layout (per the AI Hub export):
+// Shard layout:
 //   shard 0 : embedding only   – input_ids → embeddings                     (no KV cache)
 //   shard 1 : layers  0 –  8   – embeddings → hidden                       (KV layers 0–8)
 //   shard 2 : layers  9 – 17   – hidden → hidden                           (KV layers 9–17)
@@ -92,17 +92,17 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace llama_v3_8b_instruct_aihub
+} // namespace llama_v3_8b_instruct
 
-namespace llama_v3_elyza_jp_8b_aihub {
+namespace llama_v3_elyza_jp_8b {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 500000.0f;
 
-// Returns the architecture spec for Llama 3 Elyza JP 8B AI Hub export (5 shards, CL 4096).
-// Same architecture as llama3_8b_instruct_aihub.
+// Returns the architecture spec for Llama 3 Elyza JP 8B (5 shards, CL 4096).
+// Same architecture as llama_v3_8b_instruct.
 //
-// Shard layout (per the AI Hub export):
+// Shard layout:
 //   shard 0 : embedding only   – input_ids → embeddings                     (no KV cache)
 //   shard 1 : layers  0 –  8   – embeddings → hidden                       (KV layers 0–8)
 //   shard 2 : layers  9 – 17   – hidden → hidden                           (KV layers 9–17)
@@ -160,17 +160,17 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace llama_v3_elyza_jp_8b_aihub
+} // namespace llama_v3_elyza_jp_8b
 
-namespace llama_v3_taide_8b_chat_aihub {
+namespace llama_v3_taide_8b_chat {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 500000.0f;
 
-// Returns the architecture spec for Llama V3 TAIDE 8B Chat AI Hub export (5 shards, CL 4096).
-// Same architecture as llama_v3_8b_instruct_aihub.
+// Returns the architecture spec for Llama V3 TAIDE 8B Chat (5 shards, CL 4096).
+// Same architecture as llama_v3_8b_instruct.
 //
-// Shard layout (per the AI Hub export):
+// Shard layout:
 //   shard 0 : embedding only   – input_ids → embeddings                     (no KV cache)
 //   shard 1 : layers  0 –  8   – embeddings → hidden                       (KV layers 0–8)
 //   shard 2 : layers  9 – 17   – hidden → hidden                           (KV layers 9–17)
@@ -228,5 +228,5 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace llama_v3_taide_8b_chat_aihub
+} // namespace llama_v3_taide_8b_chat
 } // namespace geniex

@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "llama_v3_taide_8b_chat_aihub";
+    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "llama_v3_taide_8b_chat";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected from
     // htp-files/ installed alongside geniex_core.
@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
               << "\033[0m\n";
 
     std::cout << "\033[1;36mLoading model...\033[0m\n";
-    geniex::LLMModel model = geniex::llama_v3_taide_8b_chat_aihub::makeModel();
+    geniex::LLMModel model = geniex::llama_v3_taide_8b_chat::makeModel();
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";

@@ -9,7 +9,7 @@
 
 #include "llm/llm_model.h"
 #include "geniex-proc/tokenizer.h"
-#include "qwen3.h"
+#include "phi3_5.h"
 #include "types.h"
 
 #ifdef _WIN32
@@ -25,15 +25,13 @@ static void enable_utf8_io() {
 #endif
 
 struct Args {
-    int32_t max_tokens      = 512;
-    bool    verbose         = false;
-    bool    enable_thinking = false;
+    int32_t max_tokens = 512;
+    bool    verbose    = false;
 };
 
 static void printUsage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]\n"
               << "  --max-tokens <n>   Max tokens to generate (default 512)\n"
-              << "  --thinking         Enable thinking mode\n"
               << "  --verbose          Print performance metrics\n"
               << "  --help\n";
 }
@@ -44,17 +42,19 @@ static bool parseArgs(int argc, char** argv, Args& args) {
         auto next = [&]() -> std::string {
             return (i + 1 < argc) ? argv[++i] : std::string{};
         };
-        if      (a == "--max-tokens") args.max_tokens      = std::stoi(next());
-        else if (a == "--thinking")   args.enable_thinking = true;
-        else if (a == "--verbose")    args.verbose         = true;
+        if      (a == "--max-tokens") args.max_tokens = std::stoi(next());
+        else if (a == "--verbose")    args.verbose    = true;
         else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
         else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
     }
     return true;
 }
 
-static std::string applyTemplate(const std::string& user_text) {
-    return "<|im_start|>user\n" + user_text + "<|im_end|>\n<|im_start|>assistant\n";
+static std::string applyTemplate(const std::string& user_text, bool first_turn) {
+    if (first_turn) {
+        return "<|system|>You are a helpful assistant.<|end|><|user|>" + user_text + "<|end|><|assistant|>";
+    }
+    return "<|user|>" + user_text + "<|end|><|assistant|>";
 }
 
 int main(int argc, char** argv) {
@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen3_4b_aihub";
+    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "phi3_5";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected from
     // htp-files/ installed alongside geniex_core.
@@ -73,18 +73,16 @@ int main(int argc, char** argv) {
 
     geniex::ModelConfig model_cfg;
     model_cfg.model_paths = {
-        (model_dir / "qwen3_4b_part_1_of_4.bin").string(),
-        (model_dir / "qwen3_4b_part_2_of_4.bin").string(),
-        (model_dir / "qwen3_4b_part_3_of_4.bin").string(),
-        (model_dir / "qwen3_4b_part_4_of_4.bin").string(),
+        (model_dir / "weight_sharing_model_1_of_4.serialized.bin").string(),
+        (model_dir / "weight_sharing_model_2_of_4.serialized.bin").string(),
+        (model_dir / "weight_sharing_model_3_of_4.serialized.bin").string(),
+        (model_dir / "weight_sharing_model_4_of_4.serialized.bin").string(),
     };
     model_cfg.tokenizer_path  = (model_dir / "tokenizer.json").string();
-    // No embedding_path needed – embedding runs on-device in shard 0.
     model_cfg.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
 
     geniex::GenerationConfig gen_cfg;
-    gen_cfg.max_tokens    = args.max_tokens;
-    gen_cfg.thinking_mode = args.enable_thinking;
+    gen_cfg.max_tokens = args.max_tokens;
 
     std::cout << "\033[1;32m"
               << "   ______           _     _  __\n"
@@ -95,7 +93,7 @@ int main(int argc, char** argv) {
               << "\033[0m\n";
 
     std::cout << "\033[1;36mLoading model...\033[0m\n";
-    geniex::LLMModel model = geniex::qwen3_4b_aihub::makeModel();
+    geniex::LLMModel model = geniex::phi3_5::makeModel();
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";
@@ -109,12 +107,14 @@ int main(int argc, char** argv) {
 
     auto tokenizer = geniex::Tokenizer::from_file(model_cfg.tokenizer_path);
 
+    bool first_turn = true;
     while (true) {
         std::cout << "Enter your prompt (type 'exit' to quit): ";
         std::string input;
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
-        const std::string prompt_text = applyTemplate(input);
+        const std::string prompt_text = applyTemplate(input, first_turn);
+        first_turn = false;
 
         auto encoded = tokenizer->encode(prompt_text);
         const std::vector<int32_t> prompt_tokens(encoded.begin(), encoded.end());
@@ -142,6 +142,7 @@ int main(int argc, char** argv) {
             std::cerr << "Generation error: " << e.what() << "\n";
             std::cerr.flush();
             model.resetKVCache();
+            first_turn = true;
             continue;
         }
         std::cout << "\033[0m\n";
