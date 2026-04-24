@@ -151,8 +151,8 @@ int main(int argc, char** argv) {
         if (pending.empty()) continue;
 
         // Build scheduler and KV cache manager.
-        geniex::qwen3_cb::Scheduler scheduler;
-        geniex::qwen3_cb::KVCacheManager kv_mgr;
+        geniex::cb::Scheduler scheduler;
+        geniex::cb::KVCacheManager kv_mgr;
         std::vector<std::string> session_ids;
         for (size_t i = 0; i < pending.size(); ++i) {
             std::string sid = "s" + std::to_string(session_counter++);

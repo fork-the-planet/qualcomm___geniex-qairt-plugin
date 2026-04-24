@@ -109,7 +109,6 @@ target_include_directories(geniex_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2
     ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_1
     ${CMAKE_CURRENT_SOURCE_DIR}/models/falcon3
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3_cb
     ${GENIEX_INCLUDE_DIRS}
 )
 
@@ -210,7 +209,9 @@ if(BUILD_EXAMPLES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2_ssd)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_1)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/falcon3)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3_cb)
+
+    # Continuous-batching demos (see examples/continuous_batching/README.md).
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/examples/continuous_batching)
 endif()
 
 if(GENIEX_BUILD_VLM)
