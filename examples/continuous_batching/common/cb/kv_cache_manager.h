@@ -13,28 +13,15 @@ namespace cb {
 // One session's slice inside the concatenated KV cache buffer.
 //
 //   |<-- Session A (len=20) -->|<-- Session B (len=8) -->|   free   |
-//
-// `start_pos` is the token offset inside the shared KV buffer where this
-// session's cache begins; `length` is how many valid tokens it currently
-// holds.
 struct KVCacheSegment {
     std::string session_id;
-    int         start_pos = 0;
-    int         length    = 0;
+    int         start_pos = 0;  // token offset of this session's cache
+    int         length    = 0;  // valid tokens currently held
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// KVCacheManager
-//
-// Tracks per-session segments inside the single contiguous KV buffer that QNN
-// allocates for the graph. Only bookkeeping lives here — the actual KV data
-// is in the graph's tensor buffer and is moved around by the caller using the
-// `MoveOp` list that `compact()`/`shiftForGrowth()` return.
-//
-// This class is model-agnostic: it speaks only in integer offsets. The
-// model-specific bit (strided memmove of key/value buffers) belongs in the
-// CB model glue, not here.
-// ────────────────────────────────────────────────────────────────────────────
+// Bookkeeping for per-session segments inside the graph's single contiguous
+// KV buffer. Speaks only in integer offsets: callers apply the returned
+// `MoveOp` lists to the physical tensors themselves.
 class KVCacheManager {
 public:
     struct MoveOp {
@@ -43,8 +30,7 @@ public:
         int len;
     };
 
-    // Append a new empty (or fixed-length) segment for this session at the
-    // tail of the buffer. Returns the assigned start position.
+    // Append a new segment at the tail. Returns the assigned start position.
     int allocate(const std::string& session_id, int length) {
         int start = 0;
         if (!segments_.empty()) {
@@ -55,14 +41,12 @@ public:
         return start;
     }
 
-    // Grow an existing session's cache after it has processed `additional_length`
-    // new tokens in the forward pass.
+    // Grow a session's segment after its forward pass produced new tokens.
     void extend(const std::string& session_id, int additional_length) {
         if (auto* seg = getSegment(session_id)) seg->length += additional_length;
     }
 
-    // Drop a session's segment. Does not move data — callers typically follow
-    // up with compact() to reclaim the hole.
+    // Drop a session's segment. Leaves a hole; call compact() to reclaim it.
     void release(const std::string& session_id) {
         for (auto it = segments_.begin(); it != segments_.end(); ++it) {
             if (it->session_id == session_id) {
@@ -72,8 +56,8 @@ public:
         }
     }
 
-    // Defragment: shift every segment left to eliminate gaps. Returns the
-    // list of buffer moves the caller must apply to the physical KV tensor.
+    // Shift every segment left to eliminate gaps. The returned moves must
+    // be applied to the physical KV tensor by the caller.
     std::vector<MoveOp> compact() {
         std::vector<MoveOp> moves;
         int next_pos = 0;
@@ -87,15 +71,13 @@ public:
         return moves;
     }
 
-    // Shift segments right so each session has room for its new tokens.
+    // Shift segments right to make room for each session's growth.
     //
-    // For a session growing by G tokens, every segment *after* it must shift
-    // right by G. The emitted MoveOps are in right-to-left order so callers
-    // can apply them directly with memmove without overwriting source data.
-    //
-    // Zero-length segments (freshly-allocated sessions) emit no MoveOp —
-    // their `start_pos` is simply relocated to the correct offset so the
-    // subsequent KV write from the graph lands in the right place.
+    // For a session growing by G tokens, every segment after it shifts right
+    // by G. MoveOps are emitted right-to-left so callers can memmove them in
+    // order without overwriting live data. Zero-length segments emit no
+    // MoveOp — only their `start_pos` is updated so the upcoming KV write
+    // lands in the right place.
     std::vector<MoveOp> shiftForGrowth(
         const std::vector<std::pair<std::string, int>>& growth_list) {
         std::unordered_map<std::string, int> growth;
@@ -119,7 +101,8 @@ public:
             }
         }
 
-        // Position zero-length segments right after their predecessor's (start+length+growth).
+        // Zero-length segments have no data to move — seat them right after
+        // the predecessor's post-growth end so the next KV write lands there.
         for (size_t i = 0; i < segments_.size(); ++i) {
             if (segments_[i].length == 0) {
                 int pos = 0;
@@ -135,14 +118,12 @@ public:
         return moves;
     }
 
-    // Build position IDs for the concatenated input tokens.
+    // Build position IDs for the concatenated input.
     //
-    // Session i's tokens at input positions [in_start, in_start + in_len)
-    // receive positions [kv_length_i, kv_length_i + in_len). Positions for
-    // padding slots are left at 0 — graphs must ignore them via the mask.
+    // Session i's input tokens get positions [kv_length_i, kv_length_i + in_len).
+    // Padding slots stay 0 and must be ignored via the attention mask.
     //
-    // `out_pos_ids` is resized to `padded_len`. Returns the total number of
-    // valid input tokens (sum of in_lens).
+    // Resizes `out_pos_ids` to `padded_len`; returns the total valid token count.
     static int getPositionIds(const std::vector<KVCacheSegment>& segs,
                               const std::vector<std::pair<int, int>>& in_segs,
                               int padded_len,
@@ -159,15 +140,14 @@ public:
     }
 
     // Block-diagonal causal attention mask for concatenated sessions.
+    // Required for correctness: without it, session A would attend to B's
+    // KV cache.
     //
     // Layout (flat [seq_len * (kv_len + seq_len)]):
     //          KV cache columns     Current input columns
     //          A-seg    B-seg       A-input    B-input
     //  A row: [ allow    block       causal     block   ]
     //  B row: [ block    allow       block      causal  ]
-    //
-    // Without this mask, session A's tokens would attend to session B's KV
-    // cache, producing garbage.
     static void getAttentionMask(const std::vector<KVCacheSegment>& kv_segs,
                                  const std::vector<std::pair<int, int>>& in_segs,
                                  int seq_len, int kv_len,
@@ -181,11 +161,7 @@ public:
 
             for (int r = 0; r < in_l; ++r) {
                 float* row = out_mask.data() + (in_s + r) * W;
-
-                // Past KV positions belonging to this session.
                 for (int c = kv.start_pos; c < kv.start_pos + kv.length; ++c) row[c] = 0.f;
-
-                // Causal window within this session's current input tokens.
                 for (int c = 0; c <= r; ++c) row[kv_len + in_s + c] = 0.f;
             }
         }
@@ -199,7 +175,7 @@ public:
 
     const std::vector<KVCacheSegment>& segments() const { return segments_; }
 
-    // Total KV positions currently in use (end of the rightmost segment).
+    // End of the rightmost segment, i.e. the first free offset.
     int totalUsed() const {
         int end = 0;
         for (const auto& seg : segments_) end = std::max(end, seg.start_pos + seg.length);

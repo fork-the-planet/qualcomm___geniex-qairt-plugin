@@ -23,22 +23,18 @@
 namespace geniex {
 namespace cb {
 
-// ────────────────────────────────────────────────────────────────────────────
-// CBLLMModel
+// Continuous-batching LLMModel. Concatenates inputs from multiple sessions
+// along the sequence dimension and always runs the prefill graph (phase=0);
+// during decode each active session contributes a single token.
 //
-// LLMModel subclass that implements continuous batching by concatenating
-// inputs from multiple sessions along the sequence dimension. Always uses
-// the prefill graph (phase=0, seq_len=seq_len_prefill). During decode each
-// active session contributes 1 token to the concatenated input.
+// Owns the model-agnostic loop — scheduling, KV bookkeeping, attention
+// mask, buffer moves, per-session KV copy, CL promotion, sampling.
+// Model-specific tensor writes (token-ids / embeddings / RoPE cos/sin)
+// are injected via CBInputProvider implementations registered with
+// addCBProvider().
 //
-// Model-agnostic pieces (scheduler, KV manager, attention mask, buffer
-// moves, KV-per-session copy, CL promotion) live here. Model-specific
-// pieces (token-id / embedding writes, RoPE cos/sin writes) are supplied
-// by the model as CBInputProvider implementations via addCBProvider().
-//
-// Usage pattern:
-//
-//   auto model = mymodel::makeCBModel();   // returns CBLLMModel with providers
+// Usage:
+//   auto model = mymodel::makeCBModel();
 //   model.initialize(runtime_cfg, model_cfg);
 //
 //   Scheduler       sched;
@@ -48,7 +44,6 @@ namespace cb {
 //
 //   model.generateBatch(sched, kv_mgr,
 //       [&](const std::string& sid, int32_t tok) { /* stream */ });
-// ────────────────────────────────────────────────────────────────────────────
 class CBLLMModel : public LLMModel {
 public:
     explicit CBLLMModel(LLMSpec spec) : LLMModel(std::move(spec)) {}
@@ -57,8 +52,7 @@ public:
         cb_providers_.push_back(std::move(provider));
     }
 
-    // ── Multi-session generation ───────────────────────────────────────────
-    // Drives all sessions until every one hits EOS or max_tokens.
+    // Drives all scheduled sessions until each hits EOS or max_tokens.
     void generateBatch(
         Scheduler& scheduler,
         KVCacheManager& kv_mgr,
@@ -66,19 +60,18 @@ public:
         const int seq_len = static_cast<int>(spec_.seq_len_prefill);
 
         while (scheduler.hasActiveSessions()) {
-            // ── 1. Scheduler: pick sessions for this step ──────────────────
+            // 1. Pick sessions for this step.
             std::vector<Session*> batch;
             const int count = scheduler.getNextBatch(batch, seq_len);
             if (count == 0) break;
 
-            // Per-session input tokens and their segment lengths.
             std::vector<std::vector<int32_t>> per_session_tokens(batch.size());
             std::vector<int>                  seg_lengths(batch.size());
             for (size_t i = 0; i < batch.size(); ++i) {
                 Session& s = *batch[i];
                 if (s.processed_length < s.query_len) {
-                    // Prefill: next chunk of unprocessed prompt, fitted into whatever
-                    // sequence budget the preceding sessions left unused.
+                    // Prefill: take as much of the remaining prompt as fits
+                    // in the sequence budget left by earlier sessions.
                     const int rem          = s.query_len - s.processed_length;
                     int       already_used = 0;
                     for (size_t j = 0; j < i; ++j) already_used += seg_lengths[j];
@@ -93,7 +86,7 @@ public:
                 }
             }
 
-            // ── 2. KV manager: allocate new sessions, shift for growth ─────
+            // 2. Allocate new sessions, promote CL if needed, shift for growth.
             for (size_t i = 0; i < batch.size(); ++i) {
                 if (!kv_mgr.getSegment(batch[i]->id)) kv_mgr.allocate(batch[i]->id, 0);
             }
@@ -115,7 +108,7 @@ public:
             auto shift_moves = kv_mgr.shiftForGrowth(growth_list);
             for (const auto& m : shift_moves) moveKVBuffer(m.src, m.dst, m.len);
 
-            // ── 3. Build step context ──────────────────────────────────────
+            // 3. Build step context for the providers.
             CBStepContext ctx;
             ctx.sessions = batch;
             ctx.seq_len  = seq_len;
@@ -132,11 +125,11 @@ public:
             ctx.concat_tokens.resize(seq_len, 0);
             for (auto* s : batch) ctx.kv_segs.push_back(*kv_mgr.getSegment(s->id));
 
-            // ── 4. Attention mask (model-agnostic, built once) ────────────
+            // 4. Attention mask — block-diagonal causal, shared across shards.
             std::vector<float> mask;
             KVCacheManager::getAttentionMask(ctx.kv_segs, ctx.in_segs, seq_len, kv_len, mask);
 
-            // ── 5. Run all shards ─────────────────────────────────────────
+            // 5. Run all shards.
             for (size_t s = 0; s < shard_count_; ++s) {
                 Graph& g = graph(graphIndex(/*phase=*/0, s, active_cl_idx_));
 
@@ -158,13 +151,13 @@ public:
                     applyConnections({shard_hidden_state_[active_cl_idx_][s]});
             }
 
-            // ── 6. Update scheduler + KV lengths ──────────────────────────
+            // 6. Update scheduler + KV lengths.
             for (size_t i = 0; i < batch.size(); ++i) {
                 scheduler.updateSession(batch[i]->id, seg_lengths[i]);
                 kv_mgr.extend(batch[i]->id, seg_lengths[i]);
             }
 
-            // ── 7. Sample next token per session that finished prefill ────
+            // 7. Sample for each session whose prefill just finished.
             int logit_off = 0;
             for (size_t i = 0; i < batch.size(); ++i) {
                 Session&   s            = *batch[i];
@@ -192,7 +185,7 @@ public:
                 logit_off += seg_lengths[i];
             }
 
-            // ── 8. Release completed sessions and defragment ──────────────
+            // 8. Release completed sessions and defragment the KV buffer.
             for (auto& s : scheduler.sessions()) {
                 if (s.status == SessionStatus::COMPLETED && kv_mgr.getSegment(s.id)) {
                     kv_mgr.release(s.id);
@@ -203,9 +196,8 @@ public:
         }
     }
 
-    // Single-session generate (delegates to generateBatch) so CBLLMModel
-    // remains a drop-in LLMModel. Providers must therefore cover the same
-    // inputs as the non-CB InputProviders for single-session mode to work.
+    // Drop-in LLMModel::generate override — wraps a 1-session batch so
+    // CBLLMModel can be used anywhere an LLMModel is expected.
     std::vector<int32_t> generate(
         const std::vector<int32_t>& prompt_tokens,
         const GenerationConfig& gen_cfg = {},
@@ -230,7 +222,8 @@ protected:
     }
 
 private:
-    // ── CL selection (same policy as single-session prefill) ──────────────
+    // Same promotion policy as single-session prefill: pick the smallest CL
+    // that fits required_kv, then reshape every shard's KV tensors in place.
     void selectCL(int required_kv, int seq_len, int n_valid) {
         if (num_cl_ <= 1) return;
 
@@ -250,9 +243,10 @@ private:
         }
     }
 
-    // Memmove-safe relocation of KV data inside the shared buffer.
-    // Key   [num_kv_heads, 1, head_dim, kv_len]
-    // Value [num_kv_heads, 1, kv_len,   head_dim]
+    // Memmove-safe relocation of KV data inside the shared buffer, per
+    // layer and both K/V. Tensor layouts:
+    //   Key   [num_kv_heads, 1, head_dim, kv_len]
+    //   Value [num_kv_heads, 1, kv_len,   head_dim]
     void moveKVBuffer(int src_start, int dst_start, int length) {
         if (src_start == dst_start || length == 0) return;
 
@@ -264,8 +258,7 @@ private:
 
             for (const auto& lr : ranges) {
                 for (size_t l = lr.begin; l <= lr.end; ++l) {
-                    // Key
-                    {
+                    {  // Key
                         auto  name = fmtPattern(kv_block.key_in_pattern, l);
                         auto* buf  = static_cast<uint8_t*>(g.inputPtr(name));
                         const auto&  sp     = g.inputSpec(name);
@@ -277,8 +270,7 @@ private:
                                          buf + (r * stride + src_start) * es,
                                          static_cast<size_t>(length) * es);
                     }
-                    // Value
-                    {
+                    {  // Value
                         auto  name = fmtPattern(kv_block.value_in_pattern, l);
                         auto* buf  = static_cast<uint8_t*>(g.inputPtr(name));
                         const auto&  sp      = g.inputSpec(name);
@@ -296,8 +288,8 @@ private:
         }
     }
 
-    // Per-session copy of new KV tokens from the shard's output tensors into
-    // the end of each session's segment inside the shared input buffer.
+    // Append this step's new KV tokens to each session's segment in the
+    // shared input buffer, reading from the shard's K/V output tensors.
     void copyNewKV(size_t shard,
                    const std::vector<Session*>& batch,
                    const std::vector<KVCacheSegment>& batch_kv_segs,

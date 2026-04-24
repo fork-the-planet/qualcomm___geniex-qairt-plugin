@@ -37,8 +37,6 @@ static int getTerminalWidth() {
 }
 #endif
 
-// ── Argument parsing ─────────────────────────────────────────────────────────
-
 struct Args {
     int32_t max_tokens = 512;
     bool    verbose    = false;
@@ -65,11 +63,8 @@ static bool parseArgs(int argc, char** argv, Args& args) {
     return true;
 }
 
-// ── Chat template (Llama 3.2 Instruct) ───────────────────────────────────────
-//
-// Per-session prompt: first-turn format (with begin_of_text + system) is used
-// for every CB session since each one is a fresh request.
-
+// Llama 3.2 Instruct first-turn format (begin_of_text + system). Every CB
+// session is a fresh request, so the first-turn prefix applies each time.
 static std::string applyTemplate(const std::string& user_text) {
     return "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
            "You are a helpful AI assistant<|eot_id|>"
@@ -77,8 +72,6 @@ static std::string applyTemplate(const std::string& user_text) {
            + user_text
            + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
 }
-
-// ── Main ─────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -111,7 +104,6 @@ int main(int argc, char** argv) {
               << "\033[0m"
               << "\033[1;33m  Continuous Batching (Llama-3.2-3B)\033[0m\n\n";
 
-    // Initialise model.
     std::cout << "\033[1;36mLoading model...\033[0m\n";
     auto model = geniex::llama3_2_cb::llama3_2_3b::makeModel();
     try {
@@ -125,10 +117,8 @@ int main(int argc, char** argv) {
     }
     std::cout << "\033[1;32mModel loaded.\033[0m\n\n";
 
-    // Load tokenizer.
     auto tokenizer = geniex::Tokenizer::from_file(model_cfg.tokenizer_path);
 
-    // Collect prompts for continuous batching.
     std::cout << "=== Continuous Batching Mode ===\n"
               << "Enter multiple prompts (one per line). Type 'go' to start generation.\n"
               << "Type 'exit' to quit.\n\n";
@@ -140,7 +130,6 @@ int main(int argc, char** argv) {
         pending.clear();
         model.resetKVCache();
 
-        // Collect prompts.
         while (true) {
             std::cout << "Prompt " << (pending.size() + 1) << " (or 'go'/'exit'): ";
             std::string input;
@@ -155,7 +144,6 @@ int main(int argc, char** argv) {
 
         if (pending.empty()) continue;
 
-        // Build scheduler and KV cache manager.
         geniex::cb::Scheduler scheduler;
         geniex::cb::KVCacheManager kv_mgr;
         std::vector<std::string> session_ids;
@@ -165,7 +153,6 @@ int main(int argc, char** argv) {
             scheduler.addSession(sid, pending[i].second, args.max_tokens);
         }
 
-        // Print session info.
         std::cout << "\n\033[1;36m--- Starting " << pending.size() << " sessions ---\033[0m\n";
         for (size_t i = 0; i < pending.size(); ++i) {
             std::cout << "  [" << session_ids[i] << "] \""
@@ -174,7 +161,8 @@ int main(int argc, char** argv) {
         }
         std::cout << "\n";
 
-        // ── Streaming display with pre-allocated area ──────────────────
+        // Streaming display: reserve a fixed line budget per session so the
+        // area never grows and wrapped output doesn't trigger reflows.
         const size_t n_sessions = pending.size();
         const int term_width = getTerminalWidth();
         const int prefix_len = 5;  // "[sN] " label width
@@ -185,7 +173,6 @@ int main(int argc, char** argv) {
 
         std::vector<std::string> output_text(n_sessions);
 
-        // Print the reserved area (empty lines).
         for (size_t i = 0; i < n_sessions; ++i) {
             std::cout << "\033[1;33m[" << session_ids[i] << "]\033[0m\n";
             for (int l = 0; l < lines_per_session; ++l)
@@ -193,7 +180,8 @@ int main(int argc, char** argv) {
         }
         std::cout << std::flush;
 
-        // Split text into terminal rows, respecting embedded newlines and width wrapping.
+        // Split text into rows, honouring both embedded newlines and the
+        // terminal width.
         auto textToRows = [&](const std::string& text) -> std::vector<std::string> {
             std::vector<std::string> rows;
             size_t pos = 0;
@@ -218,6 +206,9 @@ int main(int argc, char** argv) {
             return rows;
         };
 
+        // Redraw the whole reserved area from the current text. Shows only
+        // the last `lines_per_session` rows so output scrolls within the
+        // fixed area instead of pushing it down.
         auto redraw = [&]() {
             std::cout << "\033[" << total_display_lines << "A";
 

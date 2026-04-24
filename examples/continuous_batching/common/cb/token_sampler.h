@@ -9,18 +9,17 @@
 namespace geniex {
 namespace cb {
 
-// Result of sampling one step for a single session.
 struct TokenResult {
     std::string session_id;
     int32_t     next_token_id;
 };
 
-// Greedy argmax on float32 logits laid out as [total_seq_len, vocab_size].
+// Greedy argmax over an already-dequantised float32 logits buffer
+// [total_seq_len, vocab_size], picking each session's last-position row.
 //
-// For each session, reads the logit row at the last position of that
-// session's concatenated input segment. Useful if you already have the
-// dequantised logits buffer in hand; CBLLMModel otherwise uses
-// sampleNextToken() which handles the graph's native output dtype.
+// Not used by CBLLMModel — it samples through sampleNextToken() which
+// handles the graph's native output dtype. Kept for callers that already
+// have a float logits buffer in hand.
 inline std::vector<TokenResult> extractNextTokens(
     const float* logits,
     const std::vector<Session*>& sessions,

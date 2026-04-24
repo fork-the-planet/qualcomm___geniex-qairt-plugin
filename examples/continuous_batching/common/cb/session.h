@@ -7,13 +7,10 @@
 namespace geniex {
 namespace cb {
 
-// Lifecycle state of a single continuous-batching session.
 enum class SessionStatus { WAITING, RUNNING, COMPLETED };
 
-// One concurrent user request tracked by the Scheduler.
-// Generation config (max_tokens) and running state (processed_length,
-// generated tokens, last sampled token) are all kept here so the Scheduler
-// and CBLLMModel share a single source of truth.
+// One concurrent user request. Holds both generation config and running
+// state so Scheduler and CBLLMModel share a single source of truth.
 struct Session {
     std::string          id;
     std::vector<int32_t> query_tokens;

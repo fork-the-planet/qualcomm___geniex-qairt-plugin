@@ -10,18 +10,13 @@
 namespace geniex {
 namespace cb {
 
-// ────────────────────────────────────────────────────────────────────────────
-// Scheduler
+// Selects which sessions run in each forward pass and advances their
+// processed length afterward.
 //
-// Model-agnostic session bookkeeping for continuous batching. Selects which
-// sessions participate in each forward pass and advances their processed
-// length after the pass completes.
-//
-// Packing policy: sessions are visited in insertion order. Each session
-// either contributes its unprocessed prefill tokens (capped so the total
-// does not exceed `max_tokens_in_batch`) or a single decode token. Packing
-// stops as soon as the next session cannot fit.
-// ────────────────────────────────────────────────────────────────────────────
+// Packing policy: insertion order, first-fit. A session contributes either
+// its next prefill chunk (capped by the remaining sequence budget) or a
+// single decode token; packing stops as soon as the next session would
+// exceed `max_tokens_in_batch`.
 class Scheduler {
 public:
     void addSession(const std::string& session_id,
@@ -35,8 +30,7 @@ public:
         sessions_.push_back(std::move(s));
     }
 
-    // Fills `out` with pointers to sessions that should run this step.
-    // Returns the number of selected sessions.
+    // Fills `out` with sessions to run this step and returns the count.
     int getNextBatch(std::vector<Session*>& out, int max_tokens_in_batch) {
         out.clear();
         int total = 0;

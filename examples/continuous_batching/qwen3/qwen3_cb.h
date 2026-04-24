@@ -1,17 +1,13 @@
 #pragma once
 
-// Continuous-batching adapter for Qwen3-4B Instruct 2507 (AI Hub export).
-//
-// This example reuses the existing single-session spec from `models/qwen3/qwen3.h`
-// (`qwen3_4b_instruct_2507_aihub::makeSpec`) — no architecture duplication.
-// The only Qwen3-specific code here is:
-//   1. Qwen3CBTokenIdProvider — writes concatenated `input_ids` to shard 0.
-//   2. Qwen3CBRoPEProvider    — builds per-session positions and writes cos/sin.
+// Continuous-batching adapter for Qwen3. Reuses the single-session spec
+// from models/qwen3/qwen3.h — the only Qwen3-specific code here is the
+// token-id writer and the RoPE cos/sin writer.
 
 #include "cb/cb.h"
 #include "llm/llm_utils.h"
 #include "pipeline/chat_template.h"
-#include "qwen3.h"  // models/qwen3/qwen3.h — reused spec
+#include "qwen3.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -25,10 +21,8 @@ namespace qwen3_cb {
 static constexpr size_t kHeadDim   = 128;
 static constexpr float  kRopeTheta = 1000000.0f;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Token-id writer: writes the concatenated, zero-padded input_ids buffer
-// verbatim into shard 0's `input_ids` tensor. Silently no-ops on other shards.
-// ────────────────────────────────────────────────────────────────────────────
+// Writes the concatenated, zero-padded input_ids buffer into shard 0.
+// No-ops on shards that don't take `input_ids`.
 class Qwen3CBTokenIdProvider : public cb::CBInputProvider {
 public:
     explicit Qwen3CBTokenIdProvider(std::string tensor_name = "input_ids",
@@ -54,14 +48,9 @@ private:
     int32_t     pad_token_id_;
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// RoPE writer: builds per-session position IDs from the CB step context and
-// writes the resulting cos/sin tables into the RoPE tensors.
-//
-// Each session's positions run [kv_length, kv_length + in_len) rather than a
-// single global [n_past, n_past + curr_len) range — this is the only semantic
-// difference from single-session RoPEInputProvider.
-// ────────────────────────────────────────────────────────────────────────────
+// Builds per-session position IDs and writes the RoPE cos/sin tables.
+// Each session's positions start at its own kv_length rather than a single
+// global n_past — the only semantic difference vs. RoPEInputProvider.
 class Qwen3CBRoPEProvider : public cb::CBInputProvider {
 public:
     Qwen3CBRoPEProvider(size_t head_dim, float theta,
@@ -92,13 +81,10 @@ private:
 
 inline ChatTemplateFunc chatTemplate = chatMLTemplate;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Per-variant CB namespaces. Each mirrors the matching single-session
-// namespace in models/qwen3/qwen3.h (qwen3_4b_instruct_2507_aihub, qwen3_8b,
-// …) and exposes a `makeModel()` factory. To add a new variant, add a new
-// inner namespace with its own `makeModel()` that reuses the corresponding
-// spec (and the right head_dim / theta constants, if they differ).
-// ────────────────────────────────────────────────────────────────────────────
+// Per-variant CB namespaces mirror the single-session namespaces in
+// models/qwen3/qwen3.h 1:1. To add a new variant, add an inner namespace
+// with a `makeModel()` that reuses the matching spec (and the right
+// head_dim / theta, if they differ).
 
 namespace qwen3_4b_instruct_2507_aihub {
 inline cb::CBLLMModel makeModel() {

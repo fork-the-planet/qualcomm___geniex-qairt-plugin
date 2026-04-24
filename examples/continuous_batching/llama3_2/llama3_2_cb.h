@@ -1,21 +1,16 @@
 #pragma once
 
 // Continuous-batching adapter for the Llama-3.2 family (1B / 3B / …).
-//
-// This file reuses the existing single-session specs from
-// `models/llama3_2/llama3_2.h` (namespaces `llama3_2_1b`, `llama3_2_3b`, …) —
-// no architecture duplication. The only Llama-3.2-specific code here is:
-//   1. Llama32CBTokenIdProvider — writes concatenated `input_ids` to shard 0.
-//   2. Llama32CBRoPEProvider    — builds per-session positions and writes cos/sin.
-//
-// Llama 3.2 uses standard RoPE (no frequency scaling), so the providers are
-// identical in structure to the Qwen3 CB providers — only the head_dim and
-// theta constants differ per size.
+// Reuses the single-session specs from models/llama3_2/llama3_2.h — the
+// only Llama-3.2-specific code here is the token-id writer and the RoPE
+// cos/sin writer. Llama 3.2 uses standard RoPE with no frequency scaling,
+// so providers are structurally identical to Qwen3's; only head_dim and
+// theta differ per size.
 
 #include "cb/cb.h"
 #include "llm/llm_utils.h"
 #include "pipeline/chat_template.h"
-#include "llama3_2.h"  // models/llama3_2/llama3_2.h — reused specs
+#include "llama3_2.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -26,13 +21,11 @@
 namespace geniex {
 namespace llama3_2_cb {
 
-// Default pad token for Llama-3 (EOS "end_of_text" 128001).
+// Pad with Llama-3 EOS ("end_of_text"); unused positions are masked out.
 static constexpr int32_t kPadTokenId = 128001;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Token-id writer: writes the concatenated, zero-padded input_ids buffer
-// verbatim into shard 0's `input_ids` tensor. Silently no-ops on other shards.
-// ────────────────────────────────────────────────────────────────────────────
+// Writes the concatenated, zero-padded input_ids buffer into shard 0.
+// No-ops on shards that don't take `input_ids`.
 class Llama32CBTokenIdProvider : public cb::CBInputProvider {
 public:
     explicit Llama32CBTokenIdProvider(std::string tensor_name = "input_ids",
@@ -58,10 +51,7 @@ private:
     int32_t     pad_token_id_;
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// RoPE writer: builds per-session position IDs from the CB step context and
-// writes the resulting cos/sin tables into the RoPE tensors.
-// ────────────────────────────────────────────────────────────────────────────
+// Builds per-session position IDs and writes the RoPE cos/sin tables.
 class Llama32CBRoPEProvider : public cb::CBInputProvider {
 public:
     Llama32CBRoPEProvider(size_t head_dim, float theta,
@@ -92,12 +82,9 @@ private:
 
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
-// ────────────────────────────────────────────────────────────────────────────
-// Per-size CB namespaces. Each mirrors the matching single-session namespace
-// in models/llama3_2/llama3_2.h (llama3_2_1b, llama3_2_3b, …) and exposes a
-// `makeModel()` factory. To add a new size, add a new inner namespace with
-// its own `makeModel()` that reuses the corresponding spec.
-// ────────────────────────────────────────────────────────────────────────────
+// Per-size CB namespaces mirror the single-session namespaces in
+// models/llama3_2/llama3_2.h 1:1. Add a new size by adding an inner
+// namespace with its own `makeModel()` that reuses the matching spec.
 
 namespace llama3_2_3b {
 inline cb::CBLLMModel makeModel() {
