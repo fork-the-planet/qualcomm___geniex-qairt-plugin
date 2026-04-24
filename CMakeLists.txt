@@ -206,6 +206,9 @@ if(BUILD_EXAMPLES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2_ssd)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_1)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/falcon3)
+
+    # Continuous-batching demos (see examples/continuous_batching/README.md).
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/examples/continuous_batching)
 endif()
 
 if(GENIEX_BUILD_VLM)
