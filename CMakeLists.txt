@@ -49,11 +49,11 @@ endif()
 
 # ── Common include paths ──────────────────────────────────────────────────────
 set(GENIEX_INCLUDE_DIRS
-    ${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/include/QNN
-    ${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/include/QNN/HTP
-    ${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/src/qnn-api
-    ${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/src/qnn-api/config
-    ${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/src/MmappedFile/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/qnn-api/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/qnn-api/include/HTP
+    ${CMAKE_CURRENT_SOURCE_DIR}/qnn-api/include/System
+    ${CMAKE_CURRENT_SOURCE_DIR}/qnn-api/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/qnn-api/src/config
     ${CMAKE_CURRENT_SOURCE_DIR}/third-party/qairt/src/qualla/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third-party/qairt/src/trace/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third-party/geniex-proc/include
@@ -62,8 +62,7 @@ set(GENIEX_INCLUDE_DIRS
 )
 
 # ── qnn-api sources ───────────────────────────────────────────────────────────
-file(GLOB_RECURSE QNN_API_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/src/qnn-api/*.cpp")
-file(GLOB_RECURSE MMAPPEDFILE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/geniex-app/src/MmappedFile/src/*.cpp")
+file(GLOB_RECURSE QNN_API_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/qnn-api/src/*.cpp")
 
 # Exclude Linux-specific DMA allocator sources on Windows.
 if(WIN32)
@@ -94,15 +93,12 @@ set(CORE_SOURCES
 # ════════════════════════════════════════════════════════════════════════════
 add_library(geniex_core SHARED
     ${QNN_API_SOURCES}
-    ${MMAPPEDFILE_SOURCES}
     ${CORE_SOURCES}
 )
 
 target_include_directories(geniex_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/granite4
     ${CMAKE_CURRENT_SOURCE_DIR}/models/phi3_5
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/phi4
     ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3
     ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5
     ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3
@@ -115,7 +111,10 @@ target_include_directories(geniex_core PUBLIC
 target_compile_definitions(geniex_core PUBLIC ${GENIEX_COMPILE_DEFS})
 target_include_directories(geniex_core PUBLIC
     $<TARGET_PROPERTY:geniex-proc,INTERFACE_INCLUDE_DIRECTORIES>)
-target_link_libraries(geniex_core PRIVATE geniex-proc Version Shlwapi)
+target_link_libraries(geniex_core PRIVATE geniex-proc)
+if(WIN32)
+    target_link_libraries(geniex_core PRIVATE Version Shlwapi)
+endif()
 
 set_target_properties(geniex_core PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
@@ -199,9 +198,7 @@ endif()
 
 # ── examples (one per model folder) ──────────────────────────────────────────
 if(BUILD_EXAMPLES)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/granite4)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/phi3_5)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/phi4)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/llama3)
@@ -215,7 +212,7 @@ if(BUILD_EXAMPLES)
 endif()
 
 if(GENIEX_BUILD_VLM)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2-omni)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5_vl)
 endif()
 
 # ── HTP runtime libraries ─────────────────────────────────────────────────────

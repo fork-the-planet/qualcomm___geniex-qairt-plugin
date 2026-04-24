@@ -8,48 +8,34 @@
 namespace geniex {
 
 // Configuration for Self-Speculative Decoding (SSD).
-//
-// SSD accelerates autoregressive generation by speculatively drafting multiple
-// candidate tokens in a tree structure, verifying them in a single forward pass
-// using a larger AR variant (e.g. AR-32), and accepting as many as match.
-//
-// The same model is used for both drafting and verification — no separate draft
-// model is required. Forecast tokens (special token IDs beyond the vocabulary)
-// allow the model to produce logits for future speculation positions.
+// Drafts a tree of candidates in a single AR-32 pass, verifies greedily, and
+// accepts as many as match — no separate draft model required.
 struct SSDConfig {
-    // Tree branching factor per draft level. Array length = number of draft
-    // levels. Each element = number of child branches per parent node at that
-    // level.
-    //
-    // Example: branches = {3, 2} → 2-level draft tree:
-    //   root → 3 candidates → 2 children each = 10 nodes total.
-    //   Each node gets `draft_levels` forecast positions → 20 forecast tokens.
-    //   Total tokens per SSD iteration = 10 + 20 = 30.
+    // Branching factor per level: branches[d] = children per parent at depth d.
+    // branches={3,2} → root→3→2 = 10 nodes; 10*2 = 20 forecast tokens; 30 total per pass.
     std::vector<size_t> branches = {3, 2};
 
-    // Number of pre-computed KV entries for forecast tokens, loaded from disk
-    // at initialization. The KV cache starts at this position.
+    // Number of pre-computed KV entries for forecast tokens, loaded from disk at init.
+    // The KV cache is pre-filled to this offset before the first prefill.
     size_t forecast_prefix = 16;
 
     // Full path to the forecast prefix KV cache file.
     std::string forecast_prefix_path;
 
     // RoPE base frequency for tree-based position encoding during SSD decode.
-    // head_dim is taken from LLMSpec.
     float rope_theta = 500000.0f;
 };
 
-// Binary file header for the Genie KV cache format.
-// Used to load forecast prefix KV entries from disk.
+// Binary file header for the Genie KV cache format used to load the forecast prefix.
 #pragma pack(push, 1)
 struct KVCacheFileHeader {
-    uint32_t num_tensors;   // Number of K+V tensors (2× per layer)
-    uint32_t magic;         // Magic number: 0xC0DE
-    uint8_t  dtype;         // Data type (0=uint8, 1=float16, 2=float32)
+    uint32_t num_tensors;   // K+V tensors (2 per layer)
+    uint32_t magic;         // 0xC0DE
+    uint8_t  dtype;         // 0=uint8, 1=float16, 2=float32
     uint8_t  pad;
-    uint16_t n_heads;       // Number of KV heads
-    uint16_t embed_dim;     // Embedding dimension per head (head_dim)
-    uint16_t update_size;   // Number of KV entries stored
+    uint16_t n_heads;       // KV heads
+    uint16_t embed_dim;     // head_dim
+    uint16_t update_size;   // KV entries stored
 };
 #pragma pack(pop)
 static_assert(sizeof(KVCacheFileHeader) == 16, "KVCacheFileHeader must be 16 bytes");

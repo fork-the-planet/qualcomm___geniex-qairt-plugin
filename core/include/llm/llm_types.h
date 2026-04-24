@@ -119,7 +119,7 @@ struct LLMSpec {
     // Name of the attention mask input tensor; written by runShard() on every shard.
     std::string attention_mask_name = "attention_mask";
 
-    std::vector<int32_t> eos_token_ids; // set of valid EOS tokens
+    std::vector<int32_t> eos_token_ids;
 };
 
 } // namespace geniex

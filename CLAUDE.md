@@ -50,7 +50,7 @@ LLMPipeline                     — high-level API: tokenizer + chat template + 
 - `core/` — framework library (Model, Graph, LLMModel, LLMPipeline, InputProviders)
 - `models/` — per-model specs (`.h`) and example executables (`.cpp`)
 - `modelfiles/` — tokenizer configs, embedding tables, HTP configs per model
-- `geniex-app/` — QNN SDK headers (`include/QNN/`) and API wrappers (`src/qnn-api/`)
+- `qnn-api/` — QNN SDK headers (`include/QNN/`) and API wrappers (`src/qnn-api/`)
 - `third-party/geniex-proc/` — git submodule for tokenizer and preprocessing
 - `docs/` — detailed architecture docs, xtensor development workflow guides
 
@@ -66,7 +66,7 @@ cmake -B build -A ARM64
 cmake --build build --config Release -j32
 
 # Build a single model target
-cmake --build build --config Release --target qwen3_4b_aihub -j32
+cmake --build build --config Release --target qwen3_4b -j32
 ```
 
 Executables output to `build/bin/Release/`.
@@ -123,9 +123,9 @@ Example (3-shard model with embedding shard + 2 KV shards):
 
 - **`TokenIdInputProvider`** — for Genie/AI Hub exports where embedding runs on-device (shard 0 takes `input_ids`).
 - **`EmbeddingInputProvider`** — for custom exports with CPU-side embedding table (requires `model_cfg.embedding_path`).
-- **`RoPEInputProvider`** — standard RoPE (no scaling). Used by Qwen3, Falcon3, Granite4, etc.
+- **`RoPEInputProvider`** — standard RoPE (no scaling). Used by Qwen3, Falcon3, etc.
 - **`LongRoPEInputProvider`** — long-rope with dynamic scaling and per-dimension extension factors. Caller passes `ext_factors` as a `std::vector<float>`. Used by Phi3.5.
-- **`PartialRoPEInputProvider`** — partial-dimension RoPE with post-scale. Caller passes `rope_fraction` and `scale`. Used by Phi4 (`rope_fraction=0.75`, `scale=1.19023807`).
+- **`PartialRoPEInputProvider`** — partial-dimension RoPE with post-scale. Caller passes `rope_fraction` and `scale`.
 - **`Llama3RoPEInputProvider`** — Llama 3 frequency-dependent RoPE scaling. Used by Llama 3.1/3.2. Pay attention to the `factor` parameter: Llama 3.2 uses factor=32, Llama 3.1 uses factor=8.
 
 ### Pitfalls when adding new models
@@ -134,7 +134,7 @@ Example (3-shard model with embedding shard + 2 KV shards):
 - **Graph name patterns**: In practice, all Genie-exported models seen so far use `prompt_`/`token_` prefixes requiring `graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}"` — even when the metadata.yaml omits the prefix. Always set this pattern for Genie exports.
 - **Tensor dtypes**: Some model exports use float16 tensors (e.g. Genie w4 exports), others use float32 or quantized types. `Graph::write(float*)` and `Graph::read(float*)` handle float32, float16, ufixed8/16, and int32.
 - **Linker**: Example executables must link `geniex-proc` in addition to `geniex_core` because `geniex_core` links `geniex-proc` as PRIVATE, so the tokenizer symbols don't propagate transitively.
-- **HTP version**: The bundled runtime libs in `third-party/` are QAIRT v2.43.1.260218 (`windows`, `android`, `linux-gcc11.2`). Runtime version is backward compatible with compile version, so models compiled with an older QAIRT (e.g. v2.42) will run fine. When adding a new model, verify its compile version from the `buildId` field in the shard `.json` config files and ensure the `dsp_arch` in `htp_backend_ext_config.json` matches the target `third-party/` folder (e.g. `v73` → `windows`).
+- **HTP version**: The bundled runtime libs in `third-party/` are QAIRT v2.45.0.260326 (`windows`, `android`, `linux-gcc11.2`). Runtime version is backward compatible with compile version, so models compiled with an older QAIRT (e.g. v2.42) will run fine. When adding a new model, verify its compile version from the `buildId` field in the shard `.json` config files and ensure the `dsp_arch` in `htp_backend_ext_config.json` matches the target `third-party/` folder (e.g. `v73` → `windows`).
 
 ### Development workflow: xtensor prototyping
 

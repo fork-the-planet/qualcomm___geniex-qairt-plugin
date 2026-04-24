@@ -8,8 +8,6 @@
 
 namespace geniex {
 
-// ── IEEE 754 float16 ↔ float32 conversion ──────────────────────────────────
-
 static uint16_t floatToHalf(float f) {
     uint32_t x;
     std::memcpy(&x, &f, 4);

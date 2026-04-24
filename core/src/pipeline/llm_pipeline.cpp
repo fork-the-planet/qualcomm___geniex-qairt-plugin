@@ -10,7 +10,6 @@
 
 namespace geniex {
 
-// ── LLMPipeline::Impl ──────────────────────────────────────────────────────
 
 struct LLMPipeline::Impl {
     std::unique_ptr<LLMModel>              model;
@@ -20,8 +19,6 @@ struct LLMPipeline::Impl {
     bool first_turn = true;
     bool ready      = false;
 };
-
-// ── Lifecycle ───────────────────────────────────────────────────────────────
 
 LLMPipeline::LLMPipeline()  : impl_(std::make_unique<Impl>()) {}
 LLMPipeline::~LLMPipeline() = default;
@@ -75,13 +72,9 @@ void LLMPipeline::reset() {
     impl_->first_turn = true;
 }
 
-// ── System prompt ───────────────────────────────────────────────────────────
-
 void LLMPipeline::setSystemPrompt(const std::string& prompt) {
     impl_->system_prompt = prompt;
 }
-
-// ── Chat template ───────────────────────────────────────────────────────────
 
 std::string LLMPipeline::applyChatTemplate(
     const std::string& user_message,
@@ -90,8 +83,6 @@ std::string LLMPipeline::applyChatTemplate(
     return impl_->chat_template(user_message, impl_->system_prompt,
                                 impl_->first_turn, enable_thinking);
 }
-
-// ── Generation ──────────────────────────────────────────────────────────────
 
 GenerateResult LLMPipeline::generate(
     const std::string& prompt_utf8,
@@ -119,7 +110,7 @@ GenerateResult LLMPipeline::generate(
     auto output_tokens = impl_->model->generate(
         input_ids,
         gen_cfg,
-        [&](int32_t tok) {
+        [&](int32_t tok) -> bool {
             if (!got_first) {
                 t_first_token = Clock::now();
                 got_first     = true;
@@ -129,9 +120,12 @@ GenerateResult LLMPipeline::generate(
             full_text << piece;
 
             if (on_token && !piece.empty()) {
-                if (!on_token(piece.c_str()))
+                if (!on_token(piece.c_str())) {
                     user_stopped = true;
+                    return false;
+                }
             }
+            return !user_stopped;
         });
 
     auto t_end = Clock::now();
@@ -164,8 +158,6 @@ GenerateResult LLMPipeline::generate(
 
     return result;
 }
-
-// ── KV cache persistence ────────────────────────────────────────────────────
 
 void LLMPipeline::saveKVCache(const std::string& path) const {
     if (impl_->model) impl_->model->saveKVCacheToFile(path);

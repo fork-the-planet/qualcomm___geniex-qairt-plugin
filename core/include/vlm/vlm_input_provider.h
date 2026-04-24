@@ -16,12 +16,31 @@ namespace geniex {
 // Embedding provider for VLMs. Owns the embedding table and operates in two modes:
 //   Prefill: write() slices from a pre-computed buffer (set via setBuffer()).
 //   Decode:  write() falls back to per-token table lookup.
+//
+// The embedding table is loaded automatically by onInitialized() from
+// `model_cfg.embedding_path`, or explicitly by the caller via loadTable().
+// Two on-disk formats are supported, auto-detected by file extension:
+//   * `.npy` — numpy array [vocab_size, hidden_size] (float32); shape read
+//              from the header. vocab_size / hidden_size arguments (if
+//              non-zero) are validated against the header.
+//   * other  — flat row-major float32 binary with no header. vocab_size and
+//              hidden_size must be known either from the caller (loadTable)
+//              or from the owning LLMSpec (onInitialized).
 class GENIEX_VLM_API PrecomputedEmbeddingProvider : public InputProvider {
 public:
     explicit PrecomputedEmbeddingProvider(std::string tensor_name = "input_embeds");
 
-    bool loadTable(const std::string& path, size_t vocab_size, size_t hidden_size);
-    void onInitialized(const ModelConfig& model_cfg) override;
+    // Loads the embedding table from `path`.
+    //  * `.npy`  — shape is read from the header; vocab_size/hidden_size are
+    //              optional and, if non-zero, validated against it.
+    //  * other   — flat row-major float32 binary; both vocab_size and
+    //              hidden_size must be non-zero and match the file size.
+    // Idempotent: does nothing if a table is already loaded.
+    void loadTable(const std::string& path,
+                   size_t             vocab_size  = 0,
+                   size_t             hidden_size = 0);
+
+    void onInitialized(const ModelConfig& model_cfg, const LLMSpec& spec) override;
 
     // Returns flat [token_ids.size() * hidden_size] embeddings for the given tokens.
     std::vector<float> lookupBatch(const std::vector<int32_t>& token_ids) const;
@@ -44,8 +63,6 @@ private:
     size_t             buffer_offset_ = 0;  // absolute KV position where buffer[0] starts (= n_past at setBuffer time)
 };
 
-// ── MRoPEInputProvider ────────────────────────────────────────────────────────
-
 // How the three position dimensions (temporal, height, width) map onto the head dimension:
 //   BLOCK  — contiguous segments: [0:S0] from temporal, [S0:S0+S1] from height,
 //            [S0+S1:] from width.
@@ -67,10 +84,9 @@ public:
                        std::string        cos_name = "position_ids_cos",
                        std::string        sin_name = "position_ids_sin");
 
-    // Pre-compute cos/sin tables from full-sequence 3D position IDs.
-    // position_ids: flat [3 * seq_len] row-major: [temporal..., height..., width...].
-    // Tables cover the current round's tokens only (not full history),
-    // so n_past_offset anchors them to the correct absolute KV position.
+    // Pre-computes cos/sin tables from full-sequence 3D position IDs.
+    // position_ids: flat [3 * seq_len], layout [temporal..., height..., width...].
+    // n_past_offset anchors the table to the correct absolute KV position.
     void setPositionIds(const std::vector<int32_t>& position_ids, size_t seq_len, size_t n_past_offset = 0);
 
     // Clear tables; write() falls back to sequential 1D positions (decode phase).
@@ -100,9 +116,7 @@ private:
     std::vector<float>   sin_table_;     // flat [current_round_seq_len * half_dim_]; prefill only
     size_t               seq_len_  = 0;
     size_t               position_offset_ = 0;  // absolute KV position where table[0] starts (= n_past at setPositionIds time)
-    // Whether full-sequence position tables have been precomputed for the current prefill pass.
-    // Controls whether write() slices from cos_table_/sin_table_ or computes positions on the fly.
-    bool                 has_prefill_positions_ = false;
+    bool                 has_prefill_positions_ = false;  // set by setPositionIds(), cleared by clearPositionIds()
 
     std::vector<int32_t> mrope_deltas_;  // flat [3], initialised to {0, 0, 0}
 };

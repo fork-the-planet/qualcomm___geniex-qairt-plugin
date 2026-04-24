@@ -23,8 +23,6 @@ static void enable_utf8_io() {
 }
 #endif
 
-// ── Argument parsing ──────────────────────────────────────────────────────────
-
 struct Args {
     int32_t max_tokens = 1024;
     bool    verbose    = false;
@@ -51,8 +49,6 @@ static bool parseArgs(int argc, char** argv, Args& args) {
     return true;
 }
 
-// ── Chat template (Llama 3.2 Instruct) ──────────────────────────────────────
-
 static std::string applyTemplate(const std::string& user_text, bool first_turn) {
     std::string prompt;
     if (first_turn) {
@@ -64,8 +60,6 @@ static std::string applyTemplate(const std::string& user_text, bool first_turn) 
             + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
     return prompt;
 }
-
-// ── Main ──────────────────────────────────────────────────────────────────────
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
@@ -110,7 +104,6 @@ int main(int argc, char** argv) {
               << "\\____/\\___/_/ /_/_/\\___/_/|_| \n"
               << "\033[0m\n";
 
-    // Initialise model.
     std::cout << "\033[1;36mLoading Llama-3.2-3B-Instruct-SSD...\033[0m\n";
     geniex::SSDModel model = geniex::llama3_2_3b_ssd::makeModel(
         (model_dir / "forecast-prefix" / "kv-cache.primary.qnn-htp").string());
@@ -126,10 +119,8 @@ int main(int argc, char** argv) {
     }
     std::cout << "\033[1;32mModel loaded (SSD: branches=[3,2], forecast_prefix=16).\033[0m\n\n";
 
-    // Load tokenizer.
     auto tokenizer = tokenizers::Tokenizer::FromJSON(model_cfg.tokenizer_path);
 
-    // Chat loop.
     bool first_turn = true;
     while (true) {
         std::cout << "Enter your prompt (type 'exit' to quit): ";
@@ -142,7 +133,6 @@ int main(int argc, char** argv) {
         auto encoded = tokenizer->Encode(prompt_text);
         const std::vector<int32_t> prompt_tokens(encoded.begin(), encoded.end());
 
-        // ── Generate ──────────────────────────────────────────────────────────
         const auto t_start = std::chrono::high_resolution_clock::now();
         std::chrono::high_resolution_clock::time_point t_first_token;
         bool got_first_token = false;
@@ -159,6 +149,7 @@ int main(int argc, char** argv) {
                         got_first_token = true;
                     }
                     std::cout << tokenizer->Decode({tok}) << std::flush;
+                    return true;
                 });
         } catch (const std::exception& e) {
             std::cout << "\033[0m\n";

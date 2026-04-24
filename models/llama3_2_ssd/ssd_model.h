@@ -12,26 +12,17 @@
 
 namespace geniex {
 
-// Self-Speculative Decoding model.
-//
-// Subclasses LLMModel to override the decode loop with tree-based speculative
-// generation. Prefill is inherited unchanged from LLMModel.
-//
-// The SSD model uses two AR variants per shard:
-//   - AR-128 (seq_len_prefill): standard prompt prefill
-//   - AR-32  (seq_len_decode):  SSD tree verification (draft tree + forecast tokens)
-//
-// The decode loop builds a draft tree from forecast logits, runs all candidates
-// through the AR-32 variant in one forward pass, verifies greedily, and commits
-// only accepted KV positions — typically producing 2-3 tokens per iteration.
+// Decode loop override that performs tree-based self-speculative decoding.
+// Drafts a candidate tree in a single AR-32 pass, then verifies and accepts greedily;
+// typically yields 2-3 tokens per forward pass without a separate draft model.
 class SSDModel : public LLMModel {
 public:
     SSDModel(LLMSpec spec, SSDConfig ssd_cfg);
 
-    // Overrides the standard generate() to use SSD decode loop.
+    // Return false from the callback to stop early.
     std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
                                   const GenerationConfig& gen_cfg = {},
-                                  std::function<void(int32_t)> token_callback = nullptr) override;
+                                  std::function<bool(int32_t)> token_callback = nullptr) override;
 
     void resetKVCache() override;
 
@@ -39,76 +30,49 @@ protected:
     bool onInitialized() override;
 
 private:
-    // ── SSD decode loop ──────────────────────────────────────────────────────
-
-    // Builds the static attention map from the branch configuration.
-    // Returns a flat array of parent indices encoding the draft tree structure
-    // and forecast token links. Also populates num_draft_nodes_,
-    // samples_per_draft_level_, and nodes_per_draft_level_.
-    // Called once from the constructor.
+    // Returns flat parent-index array encoding the draft tree + forecast links.
+    // Also populates num_draft_nodes_, samples_per_draft_level_, nodes_per_draft_level_.
     std::vector<int32_t> genAttentionMap();
 
-    // Generates forecast token IDs repeated `repeat` times.
-    // Forecast tokens are [vocab_size, vocab_size + draft_levels - 1].
+    // Forecast token IDs are [vocab_size, vocab_size + draft_levels - 1].
     std::vector<int32_t> genForecastTokens(size_t repeat) const;
 
-    // Builds a draft tree from the forecast logits of the previous iteration.
-    // Reads logits on-demand from the graph output at start_offset.
     std::vector<int32_t> buildSampleTree(int32_t last_token,
                                          size_t phase,
                                          size_t start_offset) const;
 
-    // Verifies the draft tree against verified logits. Reads logits on-demand.
-    // Returns:
-    //   first:  accepted token IDs (in tree-walk order)
-    //   second: accepted node indices within the draft tree
     std::pair<std::vector<int32_t>, std::vector<int32_t>>
     verifyDraftTree(const std::vector<int32_t>& draft_tree,
                     size_t phase) const;
 
-     // Reads logits for a single position directly from the quantized output buffer.
-    // Dequantizes only the requested row (vocab_size elements).
+    // Dequantizes only the requested logit row (vocab_size elements).
     void readLogitsAt(size_t phase, size_t position, float* dst) const;
 
-    // Argmax over a single logit row.
     int32_t argmaxLogits(const float* logits_row) const;
 
-    // Top-k sampling from a single logit row. Returns k token IDs sorted by
-    // descending logit value.
     std::vector<int32_t> topKLogits(const float* logits_row, size_t k) const;
 
-    // Builds a tree-structured attention mask for SSD decode.
-    // The mask is shaped [num_tokens, kv_len + num_tokens] where num_tokens
-    // is the total draft tree + forecast tokens.
-    // kv_prefix_offset: token positions < offset skip the forecast prefix KV
-    // entries [0, forecast_prefix); positions >= offset attend to the prefix.
+    // Mask shape [num_tokens, kv_len + num_tokens].
+    // Positions < kv_prefix_offset skip forecast prefix KV [0, forecast_prefix).
     std::vector<float> buildTreeAttentionMask(size_t n_past, size_t num_tokens,
                                               size_t seq_len, size_t kv_len,
                                               size_t kv_prefix_offset) const;
 
-    // Selectively commits KV cache entries for accepted positions only.
-    // selected[i] = true means position i should be kept.
     void selectiveKVUpdate(const std::vector<bool>& selected, size_t n_accepted);
 
-    // Loads the forecast prefix KV cache from disk into the graph input buffers.
     bool loadForecastPrefix();
 
-    // Runs all shards for a given phase with tree attention mask override.
-    // kv_prefix_offset: positions < offset skip forecast prefix in attention;
-    //                   positions >= offset attend to the full KV including prefix.
+    // kv_prefix_offset: positions < offset skip forecast prefix; >= offset attend to it.
     void runShardsWithTreeMask(const std::vector<int32_t>& tokens,
                                size_t phase, size_t n_past,
                                size_t kv_prefix_offset);
 
-    // Computes tree-depth-based position IDs for SSD tokens.
-    // Each node's position = parent's position + 1.
-    // Root position = n_past - forecast_prefix (matching Genie's logic).
+    // Root position = n_past - forecast_prefix; each child = parent + 1.
     std::vector<int32_t> computeTreePositionIds(size_t n_past,
                                                  size_t num_tokens) const;
 
-    // ── SSD state ────────────────────────────────────────────────────────────
     SSDConfig ssd_cfg_;
-    RotaryEmbedding rope_;  // for tree-based RoPE override during SSD decode
+    RotaryEmbedding rope_;  // overrides standard RoPE with tree-based position IDs during SSD decode
 
     size_t draft_levels_ = 0;           // = branches.size()
     size_t num_draft_nodes_ = 0;        // total nodes in draft tree (including root)
@@ -116,8 +80,7 @@ private:
     std::vector<size_t> samples_per_draft_level_; // top-k count per level
     std::vector<size_t> nodes_per_draft_level_;   // node count per level
 
-    // ── Pre-cached KV tensor info (populated at onInitialized) ───────────────
-    // Avoids re-parsing tensor names and looking up specs on every SSD iteration.
+    // Pre-cached KV tensor pointers, populated in onInitialized() to avoid per-iteration lookups.
     struct KVTensorInfo {
         size_t shard;
         size_t layer;

@@ -8,8 +8,6 @@
 
 namespace geniex {
 
-// ── Falcon3 chat template ──────────────────────────────────────────────────────────
-
 // Falcon3 instruct format: <|system|>\n...\n<|user|>\n...\n<|assistant|>\n
 inline std::string falcon3ChatTemplate(const std::string& user_message,
                                        const std::string& system_prompt,
@@ -76,8 +74,6 @@ inline LLMSpec makeSpec() {
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and standard RoPE.
-// Falcon3 uses standard RoPE (no scaling), head_dim=256, theta=1000042.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 11));
@@ -85,7 +81,6 @@ inline LLMModel makeModel() {
     return m;
 }
 
-// Chat template and pipeline factory.
 inline ChatTemplateFunc chatTemplate = falcon3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,

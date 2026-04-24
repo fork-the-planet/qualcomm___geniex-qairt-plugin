@@ -7,12 +7,12 @@
 #include "pipeline/llm_pipeline.h"
 
 namespace geniex {
-namespace qwen3_4b {
+namespace qwen3_4b_xtensor {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 1000000.0f;
 
-// Returns the architecture spec for Qwen3-4B (2 shards, CL 4096).
+// Returns the architecture spec for Qwen3-4B weight-sharing export (2 shards, CL 4096).
 inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
@@ -22,8 +22,6 @@ inline LLMSpec makeSpec() {
         .state_blocks = {
             makeKVOnlyStateBlock({LayerRange{0, 17}, LayerRange{18, 35}}),
         },
-
-        // Default KV patterns match the model export.
 
         .seq_len_prefill = 128,
         .seq_len_decode  = 1,
@@ -40,8 +38,6 @@ inline LLMSpec makeSpec() {
     };
 }
 
-// Returns a fully configured LLMModel with embedding and RoPE providers.
-// The embedding table is loaded from model_cfg.embedding_path in onInitialized().
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<EmbeddingInputProvider>());
@@ -59,16 +55,80 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
+} // namespace qwen3_4b_xtensor
+
+namespace qwen3_4b {
+
+static constexpr size_t  kHeadDim    = 128;
+static constexpr float   kRopeTheta  = 1000000.0f;
+
+// Returns the architecture spec for Qwen3-4B (4 shards, 5 CL variants, on-device embedding).
+//
+// Shard layout:
+//   shard 0 : embedding only   – input_ids → embeddings  (no KV cache)
+//   shard 1 : layers  0 – 11   – embeddings → hidden     (KV layers 0–11)
+//   shard 2 : layers 12 – 23   – hidden → hidden         (KV layers 12–23)
+//   shard 3 : layers 24 – 35   – hidden → logits         (KV layers 24–35)
+inline LLMSpec makeSpec() {
+    return LLMSpec{
+        .shards = {
+            {"input_ids",
+             "_model_model_embed_tokens_Gather_output_0"},
+            {"_model_model_embed_tokens_Gather_output_0",
+             "_model_model_layers_11_Add_1_output_0"},
+            {"_model_model_layers_11_Add_1_output_0",
+             "_model_model_layers_23_Add_1_output_0"},
+            {"_model_model_layers_23_Add_1_output_0",
+             "logits"},
+        },
+        .state_blocks = {
+            makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 11}, LayerRange{12, 23}, LayerRange{24, 35}}),
+        },
+
+        .seq_len_prefill = 128,
+        .seq_len_decode  = 1,
+
+        .hidden_size   = 2560,
+        .num_heads     = 32,
+        .num_kv_heads  = 8,
+        .head_dim      = kHeadDim,
+        .vocab_size    = 151936,
+
+        .context_lengths = {512, 1024, 2048, 3072, 4096},
+
+        .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
+
+        .eos_token_ids = {151645},
+    };
+}
+
+inline LLMModel makeModel() {
+    LLMModel m(makeSpec());
+    m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 151645));
+    m.addInputProvider(std::make_unique<RoPEInputProvider>(kHeadDim, kRopeTheta));
+    return m;
+}
+
+inline ChatTemplateFunc chatTemplate = chatMLTemplate;
+
+inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
+                                               const ModelConfig& model_cfg) {
+    LLMPipeline pipe;
+    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg))
+        return std::nullopt;
+    return pipe;
+}
+
 } // namespace qwen3_4b
 
-namespace qwen3_4b_aihub {
+namespace qwen3_4b_instruct_2507 {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 1000000.0f;
 
-// Returns the architecture spec for Qwen3-4B AI Hub export (4 shards, 5 CL variants).
+// Returns the architecture spec for Qwen3-4B Instruct 2507 (4 shards, 5 CL variants).
 //
-// Shard layout (per the AI Hub export):
+// Shard layout (same as qwen3_4b):
 //   shard 0 : embedding only   – input_ids → embeddings  (no KV cache)
 //   shard 1 : layers  0 – 11   – embeddings → hidden     (KV layers 0–11)
 //   shard 2 : layers 12 – 23   – hidden → hidden         (KV layers 12–23)
@@ -100,15 +160,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {512, 1024, 2048, 3072, 4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {151645},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
-// No CPU-side embedding table needed – the first shard does embedding on-device.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 151645));
@@ -126,73 +183,7 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace qwen3_4b_aihub
-
-namespace qwen3_4b_instruct_2507_aihub {
-
-static constexpr size_t  kHeadDim    = 128;
-static constexpr float   kRopeTheta  = 1000000.0f;
-
-// Returns the architecture spec for Qwen3-4B Instruct 2507 AI Hub export (4 shards, 5 CL variants).
-//
-// Shard layout (same as qwen3_4b_aihub):
-//   shard 0 : embedding only   – input_ids → embeddings  (no KV cache)
-//   shard 1 : layers  0 – 11   – embeddings → hidden     (KV layers 0–11)
-//   shard 2 : layers 12 – 23   – hidden → hidden         (KV layers 12–23)
-//   shard 3 : layers 24 – 35   – hidden → logits         (KV layers 24–35)
-inline LLMSpec makeSpec() {
-    return LLMSpec{
-        .shards = {
-            {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0"},
-            {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_11_Add_1_output_0"},
-            {"_model_model_layers_11_Add_1_output_0",
-             "_model_model_layers_23_Add_1_output_0"},
-            {"_model_model_layers_23_Add_1_output_0",
-             "logits"},
-        },
-        .state_blocks = {
-            makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 11}, LayerRange{12, 23}, LayerRange{24, 35}}),
-        },
-
-        .seq_len_prefill = 128,
-        .seq_len_decode  = 1,
-
-        .hidden_size   = 2560,
-        .num_heads     = 32,
-        .num_kv_heads  = 8,
-        .head_dim      = kHeadDim,
-        .vocab_size    = 151936,
-
-        .context_lengths = {512, 1024, 2048, 3072, 4096},
-
-        // AI Hub graph names use prompt_/token_ prefix.
-        .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
-
-        .eos_token_ids = {151645},
-    };
-}
-
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
-inline LLMModel makeModel() {
-    LLMModel m(makeSpec());
-    m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 151645));
-    m.addInputProvider(std::make_unique<RoPEInputProvider>(kHeadDim, kRopeTheta));
-    return m;
-}
-
-inline ChatTemplateFunc chatTemplate = chatMLTemplate;
-
-inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig& model_cfg) {
-    LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg))
-        return std::nullopt;
-    return pipe;
-}
-
-} // namespace qwen3_4b_instruct_2507_aihub
+} // namespace qwen3_4b_instruct_2507
 
 namespace qwen3_8b {
 
@@ -233,7 +224,6 @@ inline LLMSpec makeSpec() {
     };
 }
 
-// Returns a fully configured LLMModel with embedding and RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<EmbeddingInputProvider>());

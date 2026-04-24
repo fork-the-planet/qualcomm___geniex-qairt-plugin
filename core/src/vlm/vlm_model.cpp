@@ -44,22 +44,19 @@ void VLMModel::clearPositions() {}
 std::vector<int32_t> VLMModel::generate(const std::vector<int32_t>& prompt_tokens,
                                           const VLMInput&              vlm_input,
                                           const GenerationConfig&      gen_cfg,
-                                          std::function<void(int32_t)> token_callback) {
+                                          std::function<bool(int32_t)> token_callback) {
     if (!emb_provider_) {
         throw std::runtime_error("VLMModel: no embedding provider registered");
     }
 
-    // Build full text embeddings; placeholder tokens get dummy rows replaced below.
     auto text_embeds = emb_provider_->lookupBatch(prompt_tokens);
     const size_t hidden_size = text_embeds.size() / prompt_tokens.size();
 
-    // Inject vision embeddings at image placeholder positions.
     if (!vlm_input.pixel_data.pixel_values.empty()) {
         auto vision_embeds = encodeVision(vlm_input.pixel_data);
         maskedScatter(text_embeds, vision_embeds, prompt_tokens, image_token_id_, hidden_size);
     }
 
-    // Inject audio embeddings at audio placeholder positions.
     if (audio_encoder_) {
         const auto* audio_input = dynamic_cast<const AudioVLMInput*>(&vlm_input);
         if (audio_input) {

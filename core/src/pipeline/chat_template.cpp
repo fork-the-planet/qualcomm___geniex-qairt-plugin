@@ -2,8 +2,6 @@
 
 namespace geniex {
 
-// ── ChatML (Qwen3, Qwen2.5, etc.) ──────────────────────────────────────────
-
 std::string chatMLTemplate(const std::string& user_message,
                            const std::string& system_prompt,
                            bool first_turn, bool enable_thinking) {
@@ -16,8 +14,6 @@ std::string chatMLTemplate(const std::string& user_message,
         result += "<think>\n\n</think>\n\n";
     return result;
 }
-
-// ── Phi3.5 / Phi4 ──────────────────────────────────────────────────────────
 
 std::string phiChatTemplate(const std::string& user_message,
                             const std::string& system_prompt,

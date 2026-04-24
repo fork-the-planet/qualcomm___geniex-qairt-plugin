@@ -3,42 +3,93 @@
 
 #include "xtensor/io/xnpy.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <fstream>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 
 namespace geniex {
 
-// ── PrecomputedEmbeddingProvider ──────────────────────────────────────────────
+namespace {
+
+bool endsWithICase(const std::string& path, const std::string& suffix) {
+    if (path.size() < suffix.size()) return false;
+    return std::equal(
+        suffix.rbegin(), suffix.rend(), path.rbegin(),
+        [](char a, char b) { return std::tolower(a) == std::tolower(b); });
+}
+
+} // namespace
+
 
 PrecomputedEmbeddingProvider::PrecomputedEmbeddingProvider(std::string tensor_name)
     : tensor_name_(std::move(tensor_name)) {}
 
-bool PrecomputedEmbeddingProvider::loadTable(const std::string& path,
+void PrecomputedEmbeddingProvider::loadTable(const std::string& path,
                                               size_t             vocab_size,
                                               size_t             hidden_size) {
-    auto arr = xt::load_npy<float>(path);
-    if (arr.size() != vocab_size * hidden_size) {
-        throw std::runtime_error(
-            "PrecomputedEmbeddingProvider: table size mismatch in " + path);
+    if (!table_.empty()) return;          // idempotent
+
+    if (endsWithICase(path, ".npy")) {
+        auto arr = xt::load_npy<float>(path);
+        if (arr.dimension() != 2) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: expected 2-D npy, got " +
+                std::to_string(arr.dimension()) + "-D in " + path);
+        }
+        const size_t npy_vocab  = arr.shape(0);
+        const size_t npy_hidden = arr.shape(1);
+        if ((vocab_size  && vocab_size  != npy_vocab) ||
+            (hidden_size && hidden_size != npy_hidden)) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: shape mismatch in " + path +
+                " (npy is [" + std::to_string(npy_vocab) + "," +
+                std::to_string(npy_hidden) + "], expected [" +
+                std::to_string(vocab_size) + "," +
+                std::to_string(hidden_size) + "])");
+        }
+        hidden_size_ = npy_hidden;
+        table_.assign(arr.begin(), arr.end());
+    } else {
+        // Headerless raw float32: both dims must be provided by the caller.
+        if (vocab_size == 0 || hidden_size == 0) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: raw embedding file " + path +
+                " requires non-zero (vocab_size, hidden_size)");
+        }
+        std::ifstream f(path, std::ios::binary | std::ios::ate);
+        if (!f) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: cannot open " + path);
+        }
+        const std::streamsize expected = static_cast<std::streamsize>(
+            vocab_size * hidden_size * sizeof(float));
+        if (f.tellg() != expected) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: size mismatch for " + path +
+                " (expected " + std::to_string(expected) + " bytes, got " +
+                std::to_string(f.tellg()) + ")");
+        }
+        f.seekg(0, std::ios::beg);
+        table_.assign(vocab_size * hidden_size, 0.0f);
+        f.read(reinterpret_cast<char*>(table_.data()), expected);
+        if (!f) {
+            throw std::runtime_error(
+                "PrecomputedEmbeddingProvider: failed to read " + path);
+        }
+        hidden_size_ = hidden_size;
     }
-    table_.assign(arr.begin(), arr.end());
-    hidden_size_ = hidden_size;
-    return true;
 }
 
-void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg) {
-    if (!table_.empty()) return;
+void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg,
+                                                  const LLMSpec&     spec) {
+    if (!table_.empty()) return;          // idempotent
     if (model_cfg.embedding_path.empty()) return;
 
-    auto arr = xt::load_npy<float>(model_cfg.embedding_path);
-    if (arr.dimension() != 2) {
-        throw std::runtime_error(
-            "PrecomputedEmbeddingProvider: expected 2-D npy, got " +
-            std::to_string(arr.dimension()) + "-D");
-    }
-    hidden_size_ = arr.shape(1);
-    table_.assign(arr.begin(), arr.end());
+    loadTable(model_cfg.embedding_path, spec.vocab_size, spec.hidden_size);
 }
 
 std::vector<float> PrecomputedEmbeddingProvider::lookupBatch(
@@ -60,19 +111,15 @@ void PrecomputedEmbeddingProvider::write(Graph& g, const LLMRunContext& ctx) {
     if (!g.hasInput(tensor_name_)) return;
 
     if (!buffer_.empty() && ctx.phase == 0) {
-        // Prefill: slice from pre-computed buffer by token offset relative to buffer start.
         const size_t local_offset = ctx.n_past - buffer_offset_;
         const float* src = buffer_.data() + local_offset * hidden_size_;
         g.write(tensor_name_, src, ctx.curr_len * hidden_size_);
     } else {
-        // Decode: per-token table lookup.
         if (table_.empty()) return;
         auto embeds = tokensToEmbedding(ctx.token_ids, table_.data(), hidden_size_);
         g.write(tensor_name_, embeds.data(), embeds.size());
     }
 }
-
-// ── MRoPEInputProvider ────────────────────────────────────────────────────────
 
 MRoPEInputProvider::MRoPEInputProvider(std::vector<int>  mrope_section,
                                        float             theta,
@@ -127,8 +174,7 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
                                      size_t                       seq_len,
                                      std::vector<float>&          out_cos,
                                      std::vector<float>&          out_sin) const {
-    // freqs[dim][t][i] = position_ids[dim * seq_len + t] * inv_freq_[i]
-    // Laid out as flat [3 * seq_len * half_dim_]
+    // freqs: flat [3 * seq_len * half_dim_], freqs[dim][t][i] = pos * inv_freq_[i]
     std::vector<float> freqs(3 * seq_len * half_dim_);
     for (int dim = 0; dim < 3; ++dim) {
         for (size_t t = 0; t < seq_len; ++t) {
@@ -144,7 +190,6 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
     out_sin.resize(seq_len * half_dim_);
 
     if (style_ == MRoPEInterleaving::BLOCK) {
-        // Contiguous segments: [0:S0] from temporal, [S0:S0+S1] from height, etc.
         size_t off = 0;
         for (size_t dim = 0; dim < mrope_section_.size() && off < half_dim_; ++dim) {
             const size_t len = std::min<size_t>(mrope_section_[dim], half_dim_ - off);
@@ -161,8 +206,6 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
         }
     } else {
         // STRIDE: temporal fills all, then height/width override at stride-3 offsets.
-
-        // Step 1: fill all positions from temporal (dim=0)
         for (size_t t = 0; t < seq_len; ++t) {
             const float* src = freqs.data() + t * half_dim_;  // dim=0
             float* cos_row   = out_cos.data() + t * half_dim_;
@@ -173,7 +216,6 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids,
             }
         }
 
-        // Step 2: override height (dim=1) and width (dim=2) at stride-3 offsets
         for (int dim = 1; dim < 3 && dim < static_cast<int>(mrope_section_.size()); ++dim) {
             const int offset = dim;
             const int length = mrope_section_[dim] * 3;
@@ -194,15 +236,13 @@ void MRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     if (!has_cos && !has_sin) return;
 
     if (has_prefill_positions_ && ctx.phase == 0) {
-        // Prefill: slice from pre-computed tables for [n_past - offset, n_past - offset + curr_len)
         const size_t local_offset = (ctx.n_past - position_offset_) * half_dim_;
         const size_t count  = ctx.curr_len * half_dim_;
         if (has_cos) g.write(cos_name_, cos_table_.data() + local_offset, count);
         if (has_sin) g.write(sin_name_, sin_table_.data() + local_offset, count);
     } else {
-        // Decode fallback: sequential positions offset by accumulated mrope_deltas.
-        // mrope_deltas_ is synced from the model after each prefill, so decode tokens
-        // continue from the correct position even after multimodal (image/audio) prefill.
+        // Decode: sequential positions offset by accumulated mrope_deltas_.
+        // mrope_deltas_ keeps decode tokens aligned with image/audio-expanded positions.
         const int32_t base = static_cast<int32_t>(ctx.n_past);
         std::vector<int32_t> pos3d(3 * ctx.curr_len);
         for (size_t t = 0; t < ctx.curr_len; ++t) {

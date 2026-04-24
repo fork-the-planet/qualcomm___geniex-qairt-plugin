@@ -12,8 +12,6 @@
 
 namespace geniex {
 
-// ── Constructor ───────────────────────────────────────────────────────────────
-
 SSDModel::SSDModel(LLMSpec spec, SSDConfig ssd_cfg)
     : LLMModel(std::move(spec)), ssd_cfg_(std::move(ssd_cfg)),
       rope_(spec_.head_dim, ssd_cfg_.rope_theta) {
@@ -21,12 +19,10 @@ SSDModel::SSDModel(LLMSpec spec, SSDConfig ssd_cfg)
     attention_map_ = genAttentionMap();
 }
 
-// ── onInitialized ─────────────────────────────────────────────────────────────
-
 bool SSDModel::onInitialized() {
     if (!LLMModel::onInitialized()) return false;
 
-    // ── Pre-cache KV tensor pointers and specs ───────────────────────────────
+    // Pre-cache KV tensor pointers and layout to avoid repeated graph lookups during generation.
     {
         const auto& kv_block = spec_.state_blocks[kv_state_block_idx_];
         kv_tensor_cache_.clear();
@@ -73,11 +69,10 @@ bool SSDModel::onInitialized() {
         }
     }
 
-    // Load the forecast prefix KV cache from disk.
-    // FIX 1: Load into the PREFILL graph (phase=0) which has the smaller kv_len
-    // stride. The data will be shared with the decode graph via QNN's shared
-    // buffer mechanism. Loading into decode graph (phase=1) uses a larger stride
-    // that gets corrupted when reshapeKV is called during prefill→decode transition.
+    // Load into the prefill graph (phase=0), not decode. The decode graph uses a
+    // larger kv_len stride that gets corrupted when reshapeKV is called during the
+    // prefill→decode transition. All phase/CL variants share physical buffers via
+    // QNN's shared-buffer mechanism, so loading once into phase=0 is sufficient.
     if (!ssd_cfg_.forecast_prefix_path.empty()) {
         if (!loadForecastPrefix()) {
             fprintf(stderr, "Warning: Failed to load forecast prefix KV cache.\n");
@@ -86,14 +81,11 @@ bool SSDModel::onInitialized() {
         }
     }
 
-    // FIX 2: Set n_past_ to forecast_prefix after initialization so that
-    // prefill starts writing KV after the pre-loaded forecast prefix entries.
+    // Prefill must start writing KV after the pre-loaded forecast prefix entries.
     n_past_ = ssd_cfg_.forecast_prefix;
 
     return true;
 }
-
-// ── Attention map generation ──────────────────────────────────────────────────
 
 std::vector<int32_t> SSDModel::genAttentionMap() {
     std::vector<int32_t> tree = {-1};
@@ -143,8 +135,6 @@ std::vector<int32_t> SSDModel::genForecastTokens(size_t repeat) const {
     return result;
 }
 
-// ── Draft tree building ───────────────────────────────────────────────────────
-
 std::vector<int32_t> SSDModel::topKLogits(const float* logits_row, size_t k) const {
     std::vector<int32_t> indices(spec_.vocab_size);
     std::iota(indices.begin(), indices.end(), 0);
@@ -174,7 +164,6 @@ std::vector<int32_t> SSDModel::buildSampleTree(int32_t last_token,
     std::vector<int32_t> samples;
     size_t sample_idx = 0;
 
-    // Reusable buffer for one logit row.
     std::vector<float> row_buf(V);
 
     for (size_t cur_idx = 1; draft_level < draft_levels_; ++cur_idx) {
@@ -203,17 +192,13 @@ std::vector<int32_t> SSDModel::buildSampleTree(int32_t last_token,
     return tree;
 }
 
-// ── Draft tree verification ───────────────────────────────────────────────────
-
 std::pair<std::vector<int32_t>, std::vector<int32_t>>
 SSDModel::verifyDraftTree(const std::vector<int32_t>& draft_tree,
                           size_t phase) const {
     const size_t V = spec_.vocab_size;
 
-    // Reusable buffer for one logit row.
     std::vector<float> row_buf(V);
 
-    // Sample root node.
     readLogitsAt(phase, 0, row_buf.data());
     std::vector<int32_t> accepted_ids = {0};
     std::vector<int32_t> accepted_tokens = {argmaxLogits(row_buf.data())};
@@ -242,13 +227,9 @@ SSDModel::verifyDraftTree(const std::vector<int32_t>& draft_tree,
     return {accepted_tokens, accepted_ids};
 }
 
-// ── Tree attention mask (with forecast-prefix support) ────────────────────────
-
 std::vector<float> SSDModel::buildTreeAttentionMask(size_t n_past, size_t num_tokens,
                                                      size_t seq_len, size_t kv_len,
                                                      size_t kv_prefix_offset) const {
-    // Mask shape: [seq_len, kv_len + seq_len]
-    // But we only fill [num_tokens, kv_len + num_tokens] within that.
     const size_t row_len = kv_len + seq_len;
     const size_t fp = ssd_cfg_.forecast_prefix;
     std::vector<float> mask(seq_len * row_len, -1e9f);
@@ -262,21 +243,17 @@ std::vector<float> SSDModel::buildTreeAttentionMask(size_t n_past, size_t num_to
         float* row = mask.data() + i * row_len;
 
         if (i < kv_prefix_offset) {
-            // Draft tree token: skip prefix, attend to [fp, n_past).
             for (size_t j = fp; j < n_past; ++j) {
                 row[j] = 0.0f;
             }
         } else {
-            // Forecast token: skip undone, attend to ALL past [0, n_past).
             for (size_t j = 0; j < n_past; ++j) {
                 row[j] = 0.0f;
             }
         }
 
-        // Attend to self.
         row[kv_len + i] = 0.0f;
 
-        // Attend to ancestors in the tree.
         int32_t ancestor = attention_map_[i];
         while (ancestor >= 0) {
             row[kv_len + static_cast<size_t>(ancestor)] = 0.0f;
@@ -287,8 +264,6 @@ std::vector<float> SSDModel::buildTreeAttentionMask(size_t n_past, size_t num_to
     return mask;
 }
 
-// ── Read logits at a single position (on-demand dequantization) ───────────────
-
 void SSDModel::readLogitsAt(size_t phase, size_t position, float* dst) const {
     const size_t V = spec_.vocab_size;
     const size_t last_shard = spec_.shards.size() - 1;
@@ -298,13 +273,10 @@ void SSDModel::readLogitsAt(size_t phase, size_t position, float* dst) const {
     g.read(spec_.shards.back().out_state_name, dst, V, position * V);
 }
 
-// ── Optimized selective KV update ─────────────────────────────────────────────
-// Uses pre-cached tensor pointers and batches consecutive accepted positions
-// into single memcpy calls instead of per-element copies.
-
+// Batches consecutive accepted KV positions into single memcpy calls using
+// pre-cached tensor pointers, avoiding per-element copies.
 void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
                                   size_t n_accepted) {
-    // Pre-compute copy runs: consecutive accepted positions → single memcpy.
     struct CopyRun { size_t src_start; size_t count; };
     std::vector<CopyRun> runs;
     runs.reserve(n_accepted);
@@ -318,9 +290,8 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
         }
     }
 
-    // Apply copy runs to all cached KV tensors (all shards, all layers).
     for (const auto& info : kv_tensor_cache_) {
-        // ── Key: [H, 1, hd, kv_len] input ← [H, 1, hd, seq_len] output ─────
+        // Key layout: [H, 1, hd, kv_len] input ← [H, 1, hd, seq_len] output
         {
             auto* dst = static_cast<uint8_t*>(info.key_in_ptr);
             const auto* src = static_cast<const uint8_t*>(info.key_out_ptr);
@@ -340,7 +311,7 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
             }
         }
 
-        // ── Value: [H, 1, kv_len, hd] input ← [H, 1, seq_len, hd] output ───
+        // Value layout: [H, 1, kv_len, hd] input ← [H, 1, seq_len, hd] output
         {
             auto* dst = static_cast<uint8_t*>(info.val_in_ptr);
             const auto* src = static_cast<const uint8_t*>(info.val_out_ptr);
@@ -362,13 +333,9 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
     }
 }
 
-// ── Tree-depth-based position IDs ─────────────────────────────────────────────
-// Mirrors Genie's AttentionMask::m_cached_attention_counts logic.
-// Each node's position = parent's position + 1.
-// Root position = n_past - forecast_prefix (subtracting the pre-loaded prefix
-// entries that occupy KV slots but are not "real" past tokens for position
-// numbering purposes).
-
+// Mirrors Genie's AttentionMask::m_cached_attention_counts: each node's
+// position = parent's position + 1. The root is n_past - forecast_prefix
+// because prefix entries occupy KV slots but don't count as real past tokens.
 std::vector<int32_t> SSDModel::computeTreePositionIds(size_t n_past,
                                                        size_t num_tokens) const {
     const size_t fp = ssd_cfg_.forecast_prefix;
@@ -376,12 +343,8 @@ std::vector<int32_t> SSDModel::computeTreePositionIds(size_t n_past,
 
     for (size_t i = 0; i < num_tokens; ++i) {
         if (attention_map_[i] < 0) {
-            // Root node: position = n_past - forecast_prefix
-            // (The -1 in attention_map encodes root; Genie uses
-            //  n_past - |parent_value| - skip + 1, where |parent_value|=1, skip=fp)
             pos_ids[i] = static_cast<int32_t>(n_past - fp);
         } else {
-            // Child node: parent's position + 1
             const size_t parent_idx = static_cast<size_t>(attention_map_[i]);
             pos_ids[i] = pos_ids[parent_idx] + 1;
         }
@@ -390,8 +353,6 @@ std::vector<int32_t> SSDModel::computeTreePositionIds(size_t n_past,
     return pos_ids;
 }
 
-// ── Run shards with tree mask ─────────────────────────────────────────────────
-
 void SSDModel::runShardsWithTreeMask(const std::vector<int32_t>& tokens,
                                       size_t phase, size_t n_past,
                                       size_t kv_prefix_offset) {
@@ -399,10 +360,7 @@ void SSDModel::runShardsWithTreeMask(const std::vector<int32_t>& tokens,
     const size_t kv_len = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
     const size_t seq_len = spec_.seq_len_decode;
 
-    // Build tree attention mask with integrated prefix-skip.
     auto mask = buildTreeAttentionMask(n_past, num_tokens, seq_len, kv_len, kv_prefix_offset);
-
-    // Compute tree-based position IDs and RoPE cos/sin.
     auto tree_pos = computeTreePositionIds(n_past, num_tokens);
     auto [cos_vec, sin_vec] = rope_.forward(tree_pos);
 
@@ -416,18 +374,16 @@ void SSDModel::runShardsWithTreeMask(const std::vector<int32_t>& tokens,
             g.write(spec_.attention_mask_name, mask.data(), mask.size());
         }
 
-        // Write inputs via providers (token IDs, etc.).
         for (auto& provider : input_providers_) {
             provider->write(g, ctx);
         }
 
-        // Override RoPE with tree-based position IDs (after providers write sequential ones).
+        // Override RoPE with tree-based position IDs (providers write sequential ones first).
         if (g.hasInput("position_ids_cos"))
             g.write("position_ids_cos", cos_vec.data(), cos_vec.size());
         if (g.hasInput("position_ids_sin"))
             g.write("position_ids_sin", sin_vec.data(), sin_vec.size());
 
-        // Execute the graph.
         TimeLog tl;
         if (!g.execute(tl)) {
             throw std::runtime_error(
@@ -444,8 +400,6 @@ void SSDModel::runShardsWithTreeMask(const std::vector<int32_t>& tokens,
         }
     }
 }
-
-// ── Forecast prefix loading ───────────────────────────────────────────────────
 
 bool SSDModel::loadForecastPrefix() {
     const std::string& path = ssd_cfg_.forecast_prefix_path;
@@ -498,10 +452,6 @@ bool SSDModel::loadForecastPrefix() {
         }
     }
 
-    // Load key data: for each layer, read H*hd rows of n_valid elements.
-    // Use the prefill graph (phase=0) as handle — all phase/CL variants share
-    // the same physical buffer.  Data must be loaded at prefill stride so that
-    // the subsequent reshapeKV(prefill→decode) converts it together with prompt KV.
     for (const auto& [shard, layer] : all_layers) {
         const std::string key_in_name = fmtPat(kv_block.key_in_pattern, layer);
 
@@ -562,8 +512,6 @@ bool SSDModel::loadForecastPrefix() {
     return true;
 }
 
-// ── resetKVCache ──────────────────────────────────────────────────────────────
-
 void SSDModel::resetKVCache() {
     LLMModel::resetKVCache();
 
@@ -573,16 +521,10 @@ void SSDModel::resetKVCache() {
     n_past_ = ssd_cfg_.forecast_prefix;
 }
 
-// ── generate (SSD override) ───────────────────────────────────────────────────
-
 std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_tokens,
                                          const GenerationConfig& gen_cfg,
-                                         std::function<void(int32_t)> token_callback) {
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 1: Prefill (uses AR-128 graphs, with kv-prefix-skip)
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Prompt tokens must NOT attend to the forecast prefix KV [0, fp).
-    // We write a custom mask that skips positions [0, forecast_prefix).
+                                         std::function<bool(int32_t)> token_callback) {
+    // Prefill: prompt tokens must not attend to the forecast prefix KV [0, fp).
     const size_t fp = ssd_cfg_.forecast_prefix;
     size_t tokens_processed = 0;
     const size_t total_tokens = prompt_tokens.size();
@@ -601,23 +543,20 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
         const size_t prefill_seq_len = spec_.seq_len_prefill;
         const size_t row_len = prefill_kv_len + prefill_seq_len;
 
-        // Build causal mask that skips forecast prefix [0, fp).
+        // Causal mask that skips forecast prefix [0, fp).
         std::vector<float> mask(prefill_seq_len * row_len, -1e9f);
         for (size_t row = 0; row < chunk_size; ++row) {
             float* row_ptr = mask.data() + row * row_len;
-            // Attend to past KV positions [fp, n_past_) — skip prefix.
-            for (size_t col = fp; col < n_past_; ++col)
+                for (size_t col = fp; col < n_past_; ++col)
                 row_ptr[col] = 0.0f;
-            // Causal positions in the current chunk.
             for (size_t col = 0; col <= row; ++col)
                 row_ptr[prefill_kv_len + col] = 0.0f;
         }
 
-        // Position IDs: offset by -fp so prompt starts at position 0.
+        // Offset position IDs by -fp so prompt starts at position 0.
         const size_t rope_n_past = n_past_ - fp;
         const LLMRunContext ctx{chunk, n_past_, chunk_size, /*phase=*/0};
 
-        // Compute RoPE with prefix-adjusted positions.
         std::vector<int32_t> prefill_pos(chunk_size);
         for (size_t i = 0; i < chunk_size; ++i)
             prefill_pos[i] = static_cast<int32_t>(rope_n_past + i);
@@ -627,12 +566,10 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
             const size_t gi = graphIndex(0, s, active_cl_idx_);
             Graph& g = graph(gi);
 
-            // Write our custom mask (skipping prefix).
             if (g.hasInput(spec_.attention_mask_name)) {
                 g.write(spec_.attention_mask_name, mask.data(), mask.size());
             }
 
-            // Write inputs via providers.
             for (auto& provider : input_providers_) {
                 provider->write(g, ctx);
             }
@@ -643,7 +580,6 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
             if (g.hasInput("position_ids_sin"))
                 g.write("position_ids_sin", pf_sin.data(), pf_sin.size());
 
-            // Execute.
             TimeLog tl;
             if (!g.execute(tl)) {
                 throw std::runtime_error(
@@ -660,7 +596,6 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
         tokens_processed += chunk_size;
     }
 
-    // Reshape KV: prefill kv_len → decode kv_len.
     {
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
@@ -668,7 +603,6 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
             reshapeKV(s, prefill_kv, decode_kv, n_past_);
     }
 
-    // Sample first token from prefill logits.
     const size_t last_chunk_offset = last_chunk_size - 1;
     int32_t first_token = sampleNextToken(/*phase=*/0, last_chunk_offset);
 
@@ -684,100 +618,88 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
 
     std::vector<int32_t> output_tokens;
     output_tokens.push_back(first_token);
-    if (token_callback) token_callback(first_token);
+    bool user_stop_early = token_callback && !token_callback(first_token);
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 2: Initial SSD inference
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Run [first_token, forecast_0, forecast_1] through AR-32.
-    // kv_prefix_offset = 1: the real token (pos 0) skips the forecast prefix,
-    // forecast tokens (pos >= 1) attend to the prefix. Matches Genie's behavior.
-    {
-        std::vector<int32_t> init_tokens = {first_token};
-        for (size_t i = 0; i < draft_levels_; ++i) {
-            init_tokens.push_back(static_cast<int32_t>(spec_.vocab_size + i));
-        }
-
-        // kv_prefix_offset=1: position 0 (real token) skips prefix,
-        // forecast tokens (positions >= 1) attend to prefix.
-        runShardsWithTreeMask(init_tokens, /*phase=*/1, n_past_,
-                              /*kv_prefix_offset=*/1);
-
-        // Commit only the real token (position 0).
-        for (size_t s = 0; s < spec_.shards.size(); ++s) {
-            updateKV(s, /*phase=*/1, n_past_, /*n_tok=*/1);
-        }
-        n_past_ += 1;
-    }
-
-    // Read logits from the initial inference and build first draft tree.
-    // Only need to read forecast logit positions (1..draft_levels_), not all.
-    int32_t last_accepted_token = first_token;
-    auto draft_tree = buildSampleTree(last_accepted_token, /*phase=*/1, /*start_offset=*/1);
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 3: SSD Generation Loop
-    // ═══════════════════════════════════════════════════════════════════════════
-    const auto forecast_tokens = genForecastTokens(num_draft_nodes_);
-    const size_t total_ssd_tokens = num_draft_nodes_ + forecast_tokens.size();
-
-    // Pre-allocate reusable buffers.
-    std::vector<int32_t> tokens;
-    tokens.reserve(total_ssd_tokens);
-    std::vector<bool> selected(total_ssd_tokens, false);
-
-    for (int step = 0; step < gen_cfg.max_tokens; ++step) {
-        if (n_past_ + total_ssd_tokens > spec_.context_lengths[active_cl_idx_]) {
-            fprintf(stderr, "SSD: Context limit reached (%zu + %zu > %zu)\n",
-                    n_past_, total_ssd_tokens, spec_.context_lengths[active_cl_idx_]);
-            break;
-        }
-
-        // Concatenate draft tree + forecast tokens.
-        tokens.clear();
-        tokens.insert(tokens.end(), draft_tree.begin(), draft_tree.end());
-        tokens.insert(tokens.end(), forecast_tokens.begin(), forecast_tokens.end());
-
-        // Run all shards with tree attention mask (AR-32 variant).
-        // Draft tree positions [0, num_draft_nodes_) skip prefix;
-        // forecast positions [num_draft_nodes_, ...) attend to prefix.
-        runShardsWithTreeMask(tokens, /*phase=*/1, n_past_,
-                              /*kv_prefix_offset=*/num_draft_nodes_);
-
-        // Verify the draft tree (reads logits on-demand, only for accepted path).
-        auto [accepted_tokens, accepted_ids] = verifyDraftTree(draft_tree, /*phase=*/1);
-
-        // Selective KV update with pre-cached pointers and batched copies.
-        std::fill(selected.begin(), selected.end(), false);
-        for (int32_t id : accepted_ids) {
-            selected[static_cast<size_t>(id)] = true;
-        }
-
-        selectiveKVUpdate(selected, accepted_tokens.size());
-        n_past_ += accepted_tokens.size();
-
-        // Emit accepted tokens.
-        bool hit_eos = false;
-        for (const int32_t tok : accepted_tokens) {
-            for (int32_t eos_id : spec_.eos_token_ids) {
-                if (tok == eos_id) { hit_eos = true; break; }
+    if (!user_stop_early) {
+        // Initial SSD inference: run [first_token, forecast_0, forecast_1].
+        // kv_prefix_offset=1: the real token (pos 0) skips the forecast prefix;
+        // forecast tokens (pos >= 1) attend to it. Matches Genie's behavior.
+        {
+            std::vector<int32_t> init_tokens = {first_token};
+            for (size_t i = 0; i < draft_levels_; ++i) {
+                init_tokens.push_back(static_cast<int32_t>(spec_.vocab_size + i));
             }
-            if (hit_eos) break;
-            output_tokens.push_back(tok);
-            if (token_callback) token_callback(tok);
+
+            runShardsWithTreeMask(init_tokens, /*phase=*/1, n_past_,
+                                  /*kv_prefix_offset=*/1);
+
+            for (size_t s = 0; s < spec_.shards.size(); ++s) {
+                updateKV(s, /*phase=*/1, n_past_, /*n_tok=*/1);
+            }
+            n_past_ += 1;
         }
 
-        if (hit_eos) break;
-        if (static_cast<int>(output_tokens.size()) >= gen_cfg.max_tokens) break;
+        int32_t last_accepted_token = first_token;
+        auto draft_tree = buildSampleTree(last_accepted_token, /*phase=*/1, /*start_offset=*/1);
 
-        // Build next draft tree from the forecast logits of the last accepted node.
-        const size_t next_draft_offset =
-            num_draft_nodes_ + static_cast<size_t>(accepted_ids.back()) * draft_levels_;
-        last_accepted_token = accepted_tokens.back();
-        draft_tree = buildSampleTree(last_accepted_token, /*phase=*/1, next_draft_offset);
+        const auto forecast_tokens = genForecastTokens(num_draft_nodes_);
+        const size_t total_ssd_tokens = num_draft_nodes_ + forecast_tokens.size();
+
+        std::vector<int32_t> tokens;
+        tokens.reserve(total_ssd_tokens);
+        std::vector<bool> selected(total_ssd_tokens, false);
+
+        for (int step = 0; step < gen_cfg.max_tokens; ++step) {
+            if (n_past_ + total_ssd_tokens > spec_.context_lengths[active_cl_idx_]) {
+                fprintf(stderr, "SSD: Context limit reached (%zu + %zu > %zu)\n",
+                        n_past_, total_ssd_tokens, spec_.context_lengths[active_cl_idx_]);
+                break;
+            }
+
+            tokens.clear();
+            tokens.insert(tokens.end(), draft_tree.begin(), draft_tree.end());
+            tokens.insert(tokens.end(), forecast_tokens.begin(), forecast_tokens.end());
+
+            // Draft tree positions [0, num_draft_nodes_) skip prefix;
+            // forecast positions [num_draft_nodes_, ...) attend to prefix.
+            runShardsWithTreeMask(tokens, /*phase=*/1, n_past_,
+                                  /*kv_prefix_offset=*/num_draft_nodes_);
+
+            auto [accepted_tokens, accepted_ids] = verifyDraftTree(draft_tree, /*phase=*/1);
+
+            std::fill(selected.begin(), selected.end(), false);
+            for (int32_t id : accepted_ids) {
+                selected[static_cast<size_t>(id)] = true;
+            }
+
+            selectiveKVUpdate(selected, accepted_tokens.size());
+            n_past_ += accepted_tokens.size();
+
+            bool hit_eos = false;
+            bool user_stop = false;
+            for (const int32_t tok : accepted_tokens) {
+                for (int32_t eos_id : spec_.eos_token_ids) {
+                    if (tok == eos_id) { hit_eos = true; break; }
+                }
+                if (hit_eos) break;
+                output_tokens.push_back(tok);
+                if (token_callback && !token_callback(tok)) {
+                    user_stop = true;
+                    break;
+                }
+            }
+
+            if (hit_eos || user_stop) break;
+            if (static_cast<int>(output_tokens.size()) >= gen_cfg.max_tokens) break;
+
+            const size_t next_draft_offset =
+                num_draft_nodes_ + static_cast<size_t>(accepted_ids.back()) * draft_levels_;
+            last_accepted_token = accepted_tokens.back();
+            draft_tree = buildSampleTree(last_accepted_token, /*phase=*/1, next_draft_offset);
+        }
     }
 
-    // Reshape KV back: decode kv_len → prefill kv_len.
+    // Restore prefill stride so the next call can use AR-128 graphs.
     {
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;

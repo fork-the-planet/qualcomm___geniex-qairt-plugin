@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
 
     const auto root      = std::filesystem::current_path();
     const auto htp_dir   = root / "third-party" / "windows";
-    const auto model_dir = root / "modelfiles" / "qwen3_4b";
+    const auto model_dir = root / "modelfiles" / "qwen3_4b_xtensor";
 
     geniex::QnnRuntimeConfig runtime_cfg;
     runtime_cfg.backend_path    = (htp_dir / "QnnHtp.dll").string();
@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
     // Initialize model (LLMModel handles QNN setup and graph ordering).
     // No input providers added — all tensor management is done manually.
     std::cout << "\033[1;36mLoading model...\033[0m\n";
-    geniex::LLMModel model(geniex::qwen3_4b::makeSpec());
+    geniex::LLMModel model(geniex::qwen3_4b_xtensor::makeSpec());
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";

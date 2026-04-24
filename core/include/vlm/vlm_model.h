@@ -14,37 +14,32 @@
 
 namespace geniex {
 
-// LLMModel subclass that prepends modality encoding before the LLM generate loop.
-// Subclasses implement encodeVision() and optionally encodeAudio() /
-// preparePositions() / clearPositions().
+// LLMModel subclass that encodes multimodal inputs and injects their embeddings
+// before calling the LLM generate loop.
 class GENIEX_VLM_API VLMModel : public LLMModel {
 public:
     explicit VLMModel(LLMSpec spec);
 
-    // Encodes multimodal inputs, injects embeddings, then calls LLMModel::generate().
+    // Return false from the callback to stop generation early.
     std::vector<int32_t> generate(const std::vector<int32_t>& prompt_tokens,
                                   const VLMInput&              vlm_input,
                                   const GenerationConfig&      gen_cfg = {},
-                                  std::function<void(int32_t)> token_callback = nullptr);
+                                  std::function<bool(int32_t)> token_callback = nullptr);
 
 protected:
     bool onInitialized() override;
 
-    // Returns flat [num_image_tokens * hidden_size] embeddings.
     virtual std::vector<float> encodeVision(const PixelData& pixel_data) = 0;
 
-    // Returns flat [num_audio_tokens * hidden_size] embeddings.
     // Default returns empty (no audio encoding).
     virtual std::vector<float> encodeAudio(const AudioData& audio_data);
 
     // Called after embedding injection, before LLMModel::generate().
-    // Subclasses override to configure position providers for the current input.
     virtual void preparePositions(const std::vector<int32_t>& input_ids,
                                   const VLMInput&             vlm_input,
                                   size_t                      n_past);
 
-    // Called after LLMModel::generate() returns.
-    // Subclasses override to reset any position provider state set in preparePositions().
+    // Called after LLMModel::generate() returns to reset position provider state.
     virtual void clearPositions();
 
     // Overwrites rows in input_embeds where input_ids == target_token_id
@@ -55,7 +50,6 @@ protected:
                               int32_t                     target_token_id,
                               size_t                      hidden_size);
 
-    // Registers the embedding provider and adds it to input_providers_.
     // Must be called before initialize().
     void setEmbeddingProvider(std::unique_ptr<PrecomputedEmbeddingProvider> provider);
 

@@ -16,7 +16,7 @@ MRoPEPositions computeMRoPEPositions(
 
     const size_t seq_len = input_ids.size();
 
-    // Output: flat [3 * seq_len], layout [temporal..., height..., width...]
+    // flat [3 * seq_len], layout [temporal..., height..., width...]
     std::vector<int32_t> pos(3 * seq_len, 0);
     int32_t* temporal = pos.data();
     int32_t* height   = pos.data() + seq_len;
@@ -31,11 +31,9 @@ MRoPEPositions computeMRoPEPositions(
 
         if (tok == vision_start_token_id &&
             image_idx < static_cast<int>(image_grids.size())) {
-            // vision_start token: sequential position in all 3 dims
             temporal[i] = height[i] = width[i] = st++;
             ++i;
 
-            // Consume all image tokens for this image
             const auto& thw = image_grids[image_idx];
             const int T     = thw[0], H = thw[1], W = thw[2];
             const int llm_h = H / spatial_merge_size;
@@ -58,7 +56,6 @@ MRoPEPositions computeMRoPEPositions(
 
         } else if (tok == audio_start_token_id &&
                    audio_idx < static_cast<int>(audio_segments.size())) {
-            // audio_start token: sequential position
             temporal[i] = height[i] = width[i] = st++;
             ++i;
 
@@ -73,13 +70,11 @@ MRoPEPositions computeMRoPEPositions(
             ++audio_idx;
 
         } else {
-            // Regular text token: same sequential position in all 3 dims
             temporal[i] = height[i] = width[i] = st++;
             ++i;
         }
     }
 
-    // mrope_deltas: difference between final position and seq_len
     const int32_t max_pos = (seq_len > 0)
         ? *std::max_element(temporal, temporal + seq_len) : 0;
     const int32_t delta = max_pos + 1 - static_cast<int32_t>(seq_len);

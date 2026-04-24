@@ -1,4 +1,4 @@
-foreach(EXAMPLE_NAME phi3_5_aihub)
+foreach(EXAMPLE_NAME phi3_5)
     add_executable(${EXAMPLE_NAME} ${EXAMPLE_NAME}_example.cpp)
     target_link_libraries(${EXAMPLE_NAME} PRIVATE geniex_core geniex-proc)
     set_target_properties(${EXAMPLE_NAME} PROPERTIES

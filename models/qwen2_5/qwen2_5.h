@@ -7,12 +7,12 @@
 #include "pipeline/llm_pipeline.h"
 
 namespace geniex {
-namespace qwen2_5_7b_instruct_aihub {
+namespace qwen2_5_7b_instruct {
 
 static constexpr size_t kHeadDim   = 128;
 static constexpr float  kRopeTheta = 1000000.0f;
 
-// Returns the architecture spec for Qwen2.5-7B-Instruct AI Hub export (6 shards).
+// Returns the architecture spec for Qwen2.5-7B-Instruct (6 shards).
 //
 // Shard layout:
 //   shard 0 : embedding only   – input_ids → embeddings  (no KV cache)
@@ -52,15 +52,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {151643, 151645},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
-// No CPU-side embedding table needed - the first shard does embedding on-device.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 151643));
@@ -78,5 +75,5 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace qwen2_5_7b_instruct_aihub
+} // namespace qwen2_5_7b_instruct
 } // namespace geniex

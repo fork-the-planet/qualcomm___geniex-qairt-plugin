@@ -8,8 +8,6 @@
 
 namespace geniex {
 
-// ── Llama3 chat template ────────────────────────────────────────────────────────────
-
 // Llama3 header-id format: <|start_header_id|>role<|end_header_id|>...<|eot_id|>
 // Used by Llama 3, Llama 3.1, and Llama 3.2 model families.
 inline std::string llama3ChatTemplate(const std::string& user_message,
@@ -29,14 +27,14 @@ inline std::string llama3ChatTemplate(const std::string& user_message,
     return out + user_message + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n";
 }
 
-namespace llama_v3_8b_instruct_aihub {
+namespace llama_v3_8b_instruct {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 500000.0f;
 
-// Returns the architecture spec for Llama 3 8B Instruct AI Hub export (5 shards, CL 4096).
+// Returns the architecture spec for Llama 3 8B Instruct (5 shards, CL 4096).
 //
-// Shard layout (per the AI Hub export):
+// Shard layout:
 //   shard 0 : embedding only   – input_ids → embeddings                     (no KV cache)
 //   shard 1 : layers  0 –  8   – embeddings → hidden                       (KV layers 0–8)
 //   shard 2 : layers  9 – 17   – hidden → hidden                           (KV layers 9–17)
@@ -71,15 +69,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
-// No CPU-side embedding table needed – the first shard does embedding on-device.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 128001));
@@ -87,7 +82,6 @@ inline LLMModel makeModel() {
     return m;
 }
 
-// Chat template and pipeline factory.
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
@@ -98,17 +92,17 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace llama_v3_8b_instruct_aihub
+} // namespace llama_v3_8b_instruct
 
-namespace llama_v3_elyza_jp_8b_aihub {
+namespace llama_v3_elyza_jp_8b {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 500000.0f;
 
-// Returns the architecture spec for Llama 3 Elyza JP 8B AI Hub export (5 shards, CL 4096).
-// Same architecture as llama3_8b_instruct_aihub.
+// Returns the architecture spec for Llama 3 Elyza JP 8B (5 shards, CL 4096).
+// Same architecture as llama_v3_8b_instruct.
 //
-// Shard layout (per the AI Hub export):
+// Shard layout:
 //   shard 0 : embedding only   – input_ids → embeddings                     (no KV cache)
 //   shard 1 : layers  0 –  8   – embeddings → hidden                       (KV layers 0–8)
 //   shard 2 : layers  9 – 17   – hidden → hidden                           (KV layers 9–17)
@@ -143,14 +137,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 128001));
@@ -158,7 +150,6 @@ inline LLMModel makeModel() {
     return m;
 }
 
-// Chat template and pipeline factory.
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
@@ -169,17 +160,17 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace llama_v3_elyza_jp_8b_aihub
+} // namespace llama_v3_elyza_jp_8b
 
-namespace llama_v3_taide_8b_chat_aihub {
+namespace llama_v3_taide_8b_chat {
 
 static constexpr size_t  kHeadDim    = 128;
 static constexpr float   kRopeTheta  = 500000.0f;
 
-// Returns the architecture spec for Llama V3 TAIDE 8B Chat AI Hub export (5 shards, CL 4096).
-// Same architecture as llama_v3_8b_instruct_aihub.
+// Returns the architecture spec for Llama V3 TAIDE 8B Chat (5 shards, CL 4096).
+// Same architecture as llama_v3_8b_instruct.
 //
-// Shard layout (per the AI Hub export):
+// Shard layout:
 //   shard 0 : embedding only   – input_ids → embeddings                     (no KV cache)
 //   shard 1 : layers  0 –  8   – embeddings → hidden                       (KV layers 0–8)
 //   shard 2 : layers  9 – 17   – hidden → hidden                           (KV layers 9–17)
@@ -214,14 +205,12 @@ inline LLMSpec makeSpec() {
 
         .context_lengths = {4096},
 
-        // AI Hub graph names use prompt_/token_ prefix.
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
         .eos_token_ids = {128001, 128008, 128009},
     };
 }
 
-// Returns a fully configured LLMModel with on-device embedding and RoPE providers.
 inline LLMModel makeModel() {
     LLMModel m(makeSpec());
     m.addInputProvider(std::make_unique<TokenIdInputProvider>("input_ids", 128001));
@@ -229,7 +218,6 @@ inline LLMModel makeModel() {
     return m;
 }
 
-// Chat template and pipeline factory.
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
@@ -240,5 +228,5 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     return pipe;
 }
 
-} // namespace llama_v3_taide_8b_chat_aihub
+} // namespace llama_v3_taide_8b_chat
 } // namespace geniex
