@@ -8,3 +8,4 @@
 # CMakeLists.txt and add it below. See README.md for the full recipe.
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/qwen3)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/llama3_2)

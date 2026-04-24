@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "geniex-proc/tokenizer.h"
-#include "qwen3_cb.h"
+#include "llama3_2_cb.h"
 #include "types.h"
 
 #ifdef _WIN32
@@ -65,10 +65,17 @@ static bool parseArgs(int argc, char** argv, Args& args) {
     return true;
 }
 
-// ── Chat template ────────────────────────────────────────────────────────────
+// ── Chat template (Llama 3.2 Instruct) ───────────────────────────────────────
+//
+// Per-session prompt: first-turn format (with begin_of_text + system) is used
+// for every CB session since each one is a fresh request.
 
 static std::string applyTemplate(const std::string& user_text) {
-    return "<|im_start|>user\n" + user_text + "<|im_end|>\n<|im_start|>assistant\n";
+    return "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+           "You are a helpful AI assistant<|eot_id|>"
+           "<|start_header_id|>user<|end_header_id|>\n\n"
+           + user_text
+           + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -82,17 +89,15 @@ int main(int argc, char** argv) {
     if (!parseArgs(argc, argv, args)) return 1;
 
     const auto model_dir = std::filesystem::current_path() /
-                           "modelfiles" / "qwen3-4b-instruct-weights" /
-                           "qwen3_4b_instruct_2507_aihub";
+                           "modelfiles" / "llama_v3_2_3b_instruct_exported_cb";
 
     geniex::QnnRuntimeConfig runtime_cfg;
 
     geniex::ModelConfig model_cfg;
     model_cfg.model_paths = {
-        (model_dir / "qwen3_4b_instruct_2507_part_1_of_4.bin").string(),
-        (model_dir / "qwen3_4b_instruct_2507_part_2_of_4.bin").string(),
-        (model_dir / "qwen3_4b_instruct_2507_part_3_of_4.bin").string(),
-        (model_dir / "qwen3_4b_instruct_2507_part_4_of_4.bin").string(),
+        (model_dir / "llama_v3_2_3b_instruct_part_1_of_3.bin").string(),
+        (model_dir / "llama_v3_2_3b_instruct_part_2_of_3.bin").string(),
+        (model_dir / "llama_v3_2_3b_instruct_part_3_of_3.bin").string(),
     };
     model_cfg.tokenizer_path  = (model_dir / "tokenizer.json").string();
     model_cfg.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
@@ -104,11 +109,11 @@ int main(int argc, char** argv) {
               << "/ /_/ /  __/ / / / /  __/   |  \n"
               << "\\____/\\___/_/ /_/_/\\___/_/|_| \n"
               << "\033[0m"
-              << "\033[1;33m  Continuous Batching\033[0m\n\n";
+              << "\033[1;33m  Continuous Batching (Llama-3.2-3B)\033[0m\n\n";
 
     // Initialise model.
     std::cout << "\033[1;36mLoading model...\033[0m\n";
-    auto model = geniex::qwen3_cb::qwen3_4b_instruct_2507_aihub::makeModel();
+    auto model = geniex::llama3_2_cb::llama3_2_3b::makeModel();
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";
@@ -170,8 +175,6 @@ int main(int argc, char** argv) {
         std::cout << "\n";
 
         // ── Streaming display with pre-allocated area ──────────────────
-        // Reserve a fixed number of terminal lines per session so the
-        // display area never grows and text wrapping doesn't cause reflows.
         const size_t n_sessions = pending.size();
         const int term_width = getTerminalWidth();
         const int prefix_len = 5;  // "[sN] " label width
@@ -190,8 +193,7 @@ int main(int argc, char** argv) {
         }
         std::cout << std::flush;
 
-        // Helper: split text into terminal rows, respecting both embedded
-        // newlines and terminal-width wrapping.
+        // Split text into terminal rows, respecting embedded newlines and width wrapping.
         auto textToRows = [&](const std::string& text) -> std::vector<std::string> {
             std::vector<std::string> rows;
             size_t pos = 0;
@@ -216,18 +218,13 @@ int main(int argc, char** argv) {
             return rows;
         };
 
-        // Helper: redraw the entire reserved area from the current text.
         auto redraw = [&]() {
-            // Move cursor up to the top of the reserved area.
             std::cout << "\033[" << total_display_lines << "A";
 
             for (size_t i = 0; i < n_sessions; ++i) {
-                // Label line.
                 std::cout << "\r\033[K\033[1;33m[" << session_ids[i] << "]\033[0m\n";
 
                 auto rows = textToRows(output_text[i]);
-                // Show the last lines_per_session rows so the most recent
-                // output is always visible (scrolls within the reserved area).
                 size_t start_row = (rows.size() > static_cast<size_t>(lines_per_session))
                     ? rows.size() - static_cast<size_t>(lines_per_session) : 0;
                 int printed_lines = 0;
@@ -261,10 +258,8 @@ int main(int argc, char** argv) {
 
         const auto t_end = std::chrono::high_resolution_clock::now();
 
-        // Final redraw to make sure everything is up to date.
         redraw();
 
-        // Summary below the reserved area.
         std::cout << "\n\033[1;36m--- Results ---\033[0m\n";
         size_t total_gen = 0;
         for (size_t i = 0; i < pending.size(); ++i) {

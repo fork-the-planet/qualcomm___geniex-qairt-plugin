@@ -213,31 +213,48 @@ private:
 };
 ```
 
-### Step 3 — Write `makeModel()`
+### Step 3 — Write `makeModel()` factories (one per size)
 
-Reuse the spec from `models/<name>/<name>.h` — **do not duplicate it.**
+Mirror the layout of `models/<name>/<name>.h`: it has one inner namespace per
+size/variant (e.g. `llama3_2_1b`, `llama3_2_3b`), each with its own
+`makeSpec()`. Do the same here — one CB inner namespace per size, each with
+its own `makeModel()` that reuses the matching spec. Shared providers and
+the chat template live in the outer `<name>_cb` namespace.
 
 ```cpp
 #include "cb/cb.h"
-#include "<name>.h"  // pulls <name>::makeSpec() from models/<name>/
+#include "<name>.h"  // pulls <name>_<size>::makeSpec() from models/<name>/
 
 namespace geniex { namespace <name>_cb {
 
+// Shared providers (token-id writer, RoPE writer, …) and chat template here.
+// ...
+
+namespace <name>_<size_a> {
 inline cb::CBLLMModel makeModel() {
-    cb::CBLLMModel m(<name>::makeSpec());
+    cb::CBLLMModel m(geniex::<name>_<size_a>::makeSpec());
     m.addCBProvider(std::make_unique<MyCBTokenIdProvider>(/* ... */));
-    m.addCBProvider(std::make_unique<MyCBRoPEProvider>(/* head_dim, theta */));
+    m.addCBProvider(std::make_unique<MyCBRoPEProvider>(
+        geniex::<name>_<size_a>::kHeadDim,
+        geniex::<name>_<size_a>::kRopeTheta));
     return m;
 }
+}  // namespace <name>_<size_a>
+
+// Add more size namespaces (<name>_<size_b>, …) the same way.
 
 }}  // namespace
 ```
 
+Callers invoke `geniex::<name>_cb::<name>_<size>::makeModel()` — the call
+pattern mirrors `geniex::<name>_<size>::makeSpec()` exactly.
+
 ### Step 4 — Write the example executable
 
-Pattern-match `qwen3/qwen3_cb_example.cpp`: parse args, build
-`QnnRuntimeConfig` + `ModelConfig`, call `makeModel().initialize(...)`,
-drive a `cb::Scheduler` + `cb::KVCacheManager` through `generateBatch`.
+Pattern-match `qwen3/qwen3_cb_example.cpp` or `llama3_2/llama3_2_cb_example.cpp`:
+parse args, build `QnnRuntimeConfig` + `ModelConfig`, call
+`geniex::<name>_cb::<name>_<size>::makeModel().initialize(...)`, drive a
+`cb::Scheduler` + `cb::KVCacheManager` through `generateBatch`.
 
 ### Step 5 — Add `CMakeLists.txt`
 
