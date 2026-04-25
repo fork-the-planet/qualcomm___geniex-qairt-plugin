@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: Apache-2.0
+
 #include "ssd_model.h"
 #include "llm/llm_utils.h"
 #include "utils.h"

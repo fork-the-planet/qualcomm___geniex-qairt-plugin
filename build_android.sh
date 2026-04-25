@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: Apache-2.0
+
 
 # Create a log directory
 LOG_DIR="build_logs"

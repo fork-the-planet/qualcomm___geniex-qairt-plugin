@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: Apache-2.0
+
 add_executable(falcon3_7b falcon3_7b_example.cpp)
 target_link_libraries(falcon3_7b PRIVATE geniex_core geniex-proc)
 set_target_properties(falcon3_7b PROPERTIES

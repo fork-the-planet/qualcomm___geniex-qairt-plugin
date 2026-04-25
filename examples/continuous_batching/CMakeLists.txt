@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: Apache-2.0
+
 # ── examples/continuous_batching ─────────────────────────────────────────────
 #
 # Demos of continuous batching on top of geniex_core. The shared CB library

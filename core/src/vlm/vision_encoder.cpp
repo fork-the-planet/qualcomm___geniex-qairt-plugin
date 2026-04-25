@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: Apache-2.0
+
 #include "vlm/vision_encoder.h"
 
 namespace geniex {

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: Apache-2.0
+
 #include "model.h"
 #include "logging.h"
 #include "runtime.h"
