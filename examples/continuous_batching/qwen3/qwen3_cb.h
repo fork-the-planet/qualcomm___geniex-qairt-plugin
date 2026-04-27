@@ -89,14 +89,14 @@ inline ChatTemplateFunc chatTemplate = chatMLTemplate;
 // with a `makeModel()` that reuses the matching spec (and the right
 // head_dim / theta, if they differ).
 
-namespace qwen3_4b_instruct_2507_aihub {
+namespace qwen3_4b_instruct_2507 {
 inline cb::CBLLMModel makeModel() {
-    cb::CBLLMModel m(geniex::qwen3_4b_instruct_2507_aihub::makeSpec());
+    cb::CBLLMModel m(geniex::qwen3_4b_instruct_2507::makeSpec());
     m.addCBProvider(std::make_unique<Qwen3CBTokenIdProvider>("input_ids", 151645));
     m.addCBProvider(std::make_unique<Qwen3CBRoPEProvider>(kHeadDim, kRopeTheta));
     return m;
 }
-}  // namespace qwen3_4b_instruct_2507_aihub
+}  // namespace qwen3_4b_instruct_2507
 
 }  // namespace qwen3_cb
 }  // namespace geniex
