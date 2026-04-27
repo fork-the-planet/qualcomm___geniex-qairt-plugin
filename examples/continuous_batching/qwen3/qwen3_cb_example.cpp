@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
 
     const auto model_dir = std::filesystem::current_path() /
                            "modelfiles" / "qwen3-4b-instruct-weights" /
-                           "qwen3_4b_instruct_2507_aihub";
+                           "qwen3_4b_instruct_2507";
 
     geniex::QnnRuntimeConfig runtime_cfg;
 
@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
               << "\033[1;33m  Continuous Batching\033[0m\n\n";
 
     std::cout << "\033[1;36mLoading model...\033[0m\n";
-    auto model = geniex::qwen3_cb::qwen3_4b_instruct_2507_aihub::makeModel();
+    auto model = geniex::qwen3_cb::qwen3_4b_instruct_2507::makeModel();
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";
