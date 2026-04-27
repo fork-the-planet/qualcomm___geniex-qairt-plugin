@@ -144,7 +144,7 @@ expectations.
 ## License
 
 Geniex-QAIRT-plugin is licensed under the
-[Apache-2.0 License](https://spdx.org/licenses/Apache-2.0.html). See
+[BSD 3-Clause License](https://spdx.org/licenses/BSD-3-Clause.html). See
 [LICENSE.txt](LICENSE.txt) for the full license text.
 
 This project also ships vendored third-party components (the QAIRT SDK

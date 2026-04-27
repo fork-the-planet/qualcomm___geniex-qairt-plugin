@@ -1,7 +1,7 @@
 # qnn-api/
 
 This directory contains files **extracted verbatim from the Qualcomm AI
-Runtime (QAIRT) SDK**. They are *not* part of the Apache-2.0 licensed
+Runtime (QAIRT) SDK**. They are *not* part of the BSD-3-Clause licensed
 portion of this project.
 
 ## Source
@@ -14,7 +14,7 @@ portion of this project.
 ## License
 
 These files are governed by the **QAIRT SDK End User License Agreement**
-shipped with the SDK download, not by this project's Apache-2.0 license.
+shipped with the SDK download, not by this project's BSD-3-Clause license.
 The original per-file Qualcomm copyright and "Confidential and Proprietary"
 markings are preserved intentionally — they accurately describe the
 licensing status of these files.

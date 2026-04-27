@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Geniex-QAIRT-plugin is licensed under the Apache License, Version 2.0 (see
+Geniex-QAIRT-plugin is licensed under the BSD 3-Clause License (see
 [`LICENSE.txt`](LICENSE.txt)). It ships with or depends on the following
 third-party components, each governed by its own license.
 
@@ -17,7 +17,7 @@ Version at time of extraction: v2.45.0.260326.
 **License:** Qualcomm AI Runtime SDK End User License Agreement (EULA)
 as distributed with the SDK download. These files are proprietary
 Qualcomm Technologies, Inc. code and are **not** relicensed under
-Apache-2.0. The original per-file copyright and "Confidential and
+BSD-3-Clause. The original per-file copyright and "Confidential and
 Proprietary" markings are preserved.
 
 See [`qnn-api/README.md`](qnn-api/README.md) for refresh instructions.

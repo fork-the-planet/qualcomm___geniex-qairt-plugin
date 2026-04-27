@@ -1,5 +1,5 @@
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BSD-3-Clause
 
 foreach(EXAMPLE_NAME llama3_2_1b llama3_2_3b)
     add_executable(${EXAMPLE_NAME} ${EXAMPLE_NAME}_example.cpp)
