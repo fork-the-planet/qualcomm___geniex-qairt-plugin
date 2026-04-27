@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+
 add_executable(llama3_2_cb llama3_2_cb_example.cpp)
 
 # Include paths:

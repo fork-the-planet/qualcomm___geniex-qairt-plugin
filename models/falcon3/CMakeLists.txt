@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+
 add_executable(falcon3_7b falcon3_7b_example.cpp)
 target_link_libraries(falcon3_7b PRIVATE geniex_core geniex-proc)
 set_target_properties(falcon3_7b PROPERTIES
