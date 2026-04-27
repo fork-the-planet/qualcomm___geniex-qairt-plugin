@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+
 #include "vlm/vlm_input_provider.h"
 #include "llm/llm_utils.h"
 

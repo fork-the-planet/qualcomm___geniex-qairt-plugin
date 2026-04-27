@@ -126,3 +126,28 @@ The following models from [Qualcomm AI Hub](https://aihub.qualcomm.com/compute/m
 ├── third-party/         # HTP runtime libs + geniex-proc submodule (tokenizer, preprocessing)
 └── docs/                # Documentation
 ```
+
+## Getting in Contact
+
+- [Report an Issue on GitHub](../../issues)
+- [Open a Discussion on GitHub](../../discussions)
+
+For security-sensitive reports, see [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md)
+for the branching model, pull-request workflow, and DCO sign-off
+requirement, and [CODE-OF-CONDUCT.md](CODE-OF-CONDUCT.md) for community
+expectations.
+
+## License
+
+Geniex-QAIRT-plugin is licensed under the
+[BSD 3-Clause License](https://spdx.org/licenses/BSD-3-Clause.html). See
+[LICENSE.txt](LICENSE.txt) for the full license text.
+
+This project also ships vendored third-party components (the QAIRT SDK
+files under `qnn-api/` and the prebuilt runtime libraries under
+`third-party/`) that are governed by separate licenses. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.

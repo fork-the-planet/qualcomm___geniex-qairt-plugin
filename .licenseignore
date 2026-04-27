@@ -1,0 +1,21 @@
+# Files excluded from the copyright/license preflight check.
+#
+# Used by Qualcomm's reusable preflight workflow
+# (qualcomm/qcom-reusable-workflows, reusable-qcom-preflight-checks-orchestrator@v2)
+# to skip files that intentionally do not carry this project's
+# BSD-3-Clause header. Uses git-style wildcards. See THIRD_PARTY_NOTICES.md and
+# qnn-api/README.md for why each entry is excluded.
+
+# --- Vendored QAIRT SDK files (proprietary, preserve original headers) ---
+qnn-api/**
+
+# --- Vendored QAIRT SDK prebuilt runtime libraries + geniex-proc submodule ---
+third-party/**
+
+# --- Local-only reference clone of the Qualcomm OSS template ---
+qualcomm-repository-template/**
+
+# --- Build & local artifacts (not checked in, but defensive) ---
+build/**
+build-android/**
+modelfiles/**

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+
 # ── examples/continuous_batching ─────────────────────────────────────────────
 #
 # Demos of continuous batching on top of geniex_core. The shared CB library

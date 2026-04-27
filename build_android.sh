@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+
 
 # Create a log directory
 LOG_DIR="build_logs"
