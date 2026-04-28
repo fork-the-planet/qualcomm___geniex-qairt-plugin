@@ -10,8 +10,6 @@
 #include <string>
 #include <vector>
 
-#include "geniex-proc/qwen2vl.h"
-#include "pipeline/vlm_pipeline.h"
 #include "qwen2_5_vl.h"
 #include "types.h"
 
@@ -124,28 +122,12 @@ int main(int argc, char** argv) {
               << "\033[0m\n";
 
     std::cout << "\033[1;36mLoading Qwen2.5-VL-7B...\033[0m\n";
-    auto model = geniex::qwen2_5_vl_7b::makeModel(runtime_cfg, config);
-    if (!model) {
-        std::cerr << "Failed to initialize model.\n";
+    auto maybe_pipe = geniex::qwen2_5_vl_7b::makePipeline(runtime_cfg, config);
+    if (!maybe_pipe) {
+        std::cerr << "Failed to initialize pipeline.\n";
         return 1;
     }
-
-    geniex::qwen2vl::Qwen2VLConfig proc_cfg;
-    proc_cfg.fixed_height = geniex::qwen2_5_vl_7b::kImageHeight;
-    proc_cfg.fixed_width  = geniex::qwen2_5_vl_7b::kImageWidth;
-    auto processor = geniex::qwen2vl::Qwen2VLProcessor::create(
-        config.llm_config.tokenizer_path, proc_cfg);
-    if (!processor) {
-        std::cerr << "Failed to create processor.\n";
-        return 1;
-    }
-    auto& tokenizer = processor->tokenizer();
-
-    geniex::VLMPipeline pipe;
-    if (!pipe.create(std::move(model), std::move(processor), tokenizer)) {
-        std::cerr << "Failed to assemble VLMPipeline.\n";
-        return 1;
-    }
+    auto& pipe = *maybe_pipe;
     pipe.setSystemPrompt(args.system_prompt);
 
     std::cout << "\033[1;32mModel loaded.\033[0m\n\n";

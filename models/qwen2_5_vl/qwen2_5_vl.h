@@ -7,10 +7,13 @@
 #include "llm/llm_model.h"
 #include "llm/llm_types.h"
 #include "pipeline/chat_template.h"
+#include "pipeline/vlm_pipeline.h"
 #include "types.h"
 #include "vlm/vlm_input_provider.h"
 #include "vlm/vlm_model.h"
 #include "vlm/vision_encoder.h"
+
+#include "geniex-proc/qwen2vl.h"
 
 #include <cstdint>
 #include <memory>
@@ -149,6 +152,31 @@ inline LLMSpec makeSpec() {
 // Full Qwen2.5-VL-7B stack (vision encoder + LLM). Returns nullptr on failure.
 std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
                                          const Qwen25VLConfig&   config);
+
+// Convenience factory: builds the full pipeline (vision encoder + LLM + processor)
+// from a runtime config and a model config.  The processor is created with fixed
+// 336×504 image dimensions to match the compiled vision encoder graph.
+// Returns std::nullopt if any component fails to initialise.
+inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
+                                               const Qwen25VLConfig&   config) {
+    auto model = makeModel(runtime_cfg, config);
+    if (!model) return std::nullopt;
+
+    qwen2vl::Qwen2VLConfig proc_cfg;
+    proc_cfg.fixed_height = kImageHeight;
+    proc_cfg.fixed_width  = kImageWidth;
+
+    auto processor = qwen2vl::Qwen2VLProcessor::create(
+        config.llm_config.tokenizer_path, proc_cfg);
+    if (!processor) return std::nullopt;
+
+    Tokenizer& tok = processor->tokenizer();
+
+    VLMPipeline pipe;
+    if (!pipe.create(std::move(model), std::move(processor), tok))
+        return std::nullopt;
+    return pipe;
+}
 
 } // namespace qwen2_5_vl_7b
 } // namespace geniex
