@@ -101,6 +101,7 @@ add_library(geniex_core SHARED
 
 target_include_directories(geniex_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/models
     ${CMAKE_CURRENT_SOURCE_DIR}/models/phi3_5
     ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3
     ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5
