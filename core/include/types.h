@@ -122,14 +122,5 @@ struct PixelData {
     std::vector<std::array<int32_t, 3>> image_grid_thw;  // [{T, H, W}] per image
 };
 
-// Modality-native input for AudioEncoder::encode().
-// Decoupled from VLMInput so AudioEncoder can be used outside a VLM context.
-struct AudioData {
-    std::vector<float>   audio_features;        // flat [num_frames * num_mel_bins]
-    std::vector<int32_t> audio_attention_mask;  // [num_frames], 1 = valid, 0 = padding
-    int32_t              num_frames   = 0;
-    int32_t              num_mel_bins = 0;
-};
-
 } // namespace geniex
 

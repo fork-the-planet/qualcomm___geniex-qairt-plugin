@@ -21,10 +21,6 @@ void VLMModel::setEmbeddingProvider(std::unique_ptr<PrecomputedEmbeddingProvider
     addInputProvider(std::move(provider));
 }
 
-std::vector<float> VLMModel::encodeAudio(const AudioData&) {
-    return {};
-}
-
 void VLMModel::preparePositions(const std::vector<int32_t>&, const VLMInput&, size_t) {}
 void VLMModel::clearPositions() {}
 
@@ -58,14 +54,6 @@ std::vector<int32_t> VLMModel::generate(const std::vector<int32_t>& prompt_token
     if (!vlm_input.pixel_data.pixel_values.empty()) {
         auto vision_embeds = encodeVision(vlm_input.pixel_data);
         maskedScatter(text_embeds, vision_embeds, prompt_tokens, image_token_id_, hidden_size);
-    }
-
-    if (audio_encoder_) {
-        const auto* audio_input = dynamic_cast<const AudioVLMInput*>(&vlm_input);
-        if (audio_input) {
-            auto audio_embeds = encodeAudio(audio_input->audio_data);
-            maskedScatter(text_embeds, audio_embeds, prompt_tokens, audio_token_id_, hidden_size);
-        }
     }
 
     emb_provider_->setBuffer(std::move(text_embeds), nPast());
