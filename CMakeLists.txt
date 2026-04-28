@@ -14,7 +14,7 @@ endif()
 
 # ── Build options ─────────────────────────────────────────────────────────────
 option(GENIEX_BUILD_VLM   "Build geniex_vlm  (VLM/CV models, requires OpenCV)"           OFF)
-option(BUILD_EXAMPLES     "Build example executables"                                     ON)
+option(GENIEX_BUILD_EXAMPLES "Build example executables"                                   OFF)
 option(GENIEX_DEBUG       "Enable debug logging (includes file/line/func in log output)"  OFF)
 
 # ── Third-party dependencies ──────────────────────────────────────────────────
@@ -101,13 +101,7 @@ add_library(geniex_core SHARED
 
 target_include_directories(geniex_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/core/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/phi3_5
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_1
-    ${CMAKE_CURRENT_SOURCE_DIR}/models/falcon3
+    ${CMAKE_CURRENT_SOURCE_DIR}/models
     ${GENIEX_INCLUDE_DIRS}
 )
 
@@ -200,7 +194,7 @@ if(GENIEX_BUILD_OCR)
 endif()
 
 # ── examples (one per model folder) ──────────────────────────────────────────
-if(BUILD_EXAMPLES)
+if(GENIEX_BUILD_EXAMPLES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/phi3_5)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5)
