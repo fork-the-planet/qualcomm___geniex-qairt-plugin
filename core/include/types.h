@@ -47,6 +47,12 @@ struct ModelConfig {
     qnn::tools::netrun::PerfProfile perf_profile = qnn::tools::netrun::PerfProfile::BURST;
 };
 
+// Configuration for a VLM
+struct VLMConfig {
+    ModelConfig llm_config;
+    ModelConfig vision_config;
+};
+
 // Generation-time parameters passed to LLMModel::generate() / VLMModel::generate().
 struct GenerationConfig {
     int32_t max_tokens    = 512;

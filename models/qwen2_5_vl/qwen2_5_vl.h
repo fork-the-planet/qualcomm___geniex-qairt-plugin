@@ -58,14 +58,6 @@ inline const std::vector<int>& mRoPESection() {
     return kSec;
 }
 
-struct Qwen25VLConfig {
-    // Text backbone: 5 shards (part1_of_5.bin … part5_of_5.bin).
-    ModelConfig llm_config;
-
-    // Vision encoder: single graph (vision_encoder.bin).
-    ModelConfig vision_config;
-};
-
 // Single-graph QNN vision encoder.
 //
 // Inputs:
@@ -151,14 +143,14 @@ inline LLMSpec makeSpec() {
 
 // Full Qwen2.5-VL-7B stack (vision encoder + LLM). Returns nullptr on failure.
 std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
-                                         const Qwen25VLConfig&   config);
+                                         const VLMConfig&        config);
 
 // Convenience factory: builds the full pipeline (vision encoder + LLM + processor)
 // from a runtime config and a model config.  The processor is created with fixed
 // 336×504 image dimensions to match the compiled vision encoder graph.
 // Returns std::nullopt if any component fails to initialise.
 inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const Qwen25VLConfig&   config) {
+                                               const VLMConfig&        config) {
     auto model = makeModel(runtime_cfg, config);
     if (!model) return std::nullopt;
 

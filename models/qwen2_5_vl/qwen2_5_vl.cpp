@@ -171,7 +171,7 @@ void Qwen25VLModel::clearPositions() {
 }
 
 std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
-                                         const Qwen25VLConfig&   config) {
+                                         const VLMConfig&        config) {
     auto vis_enc = std::make_unique<Qwen25VLVisionEncoder>();
     if (!vis_enc->initialize(runtime_cfg, config.vision_config)) return nullptr;
 

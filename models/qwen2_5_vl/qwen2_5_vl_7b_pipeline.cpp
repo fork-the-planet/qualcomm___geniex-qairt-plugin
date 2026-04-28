@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
         std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl_7b";
 
     geniex::QnnRuntimeConfig runtime_cfg;
-    geniex::qwen2_5_vl_7b::Qwen25VLConfig config;
+    geniex::VLMConfig config;
 
     config.llm_config.model_paths = {
         (model_dir / "part1_of_5.bin").string(),
