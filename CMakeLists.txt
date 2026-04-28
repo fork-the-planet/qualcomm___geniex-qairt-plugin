@@ -14,7 +14,7 @@ endif()
 
 # ── Build options ─────────────────────────────────────────────────────────────
 option(GENIEX_BUILD_VLM   "Build geniex_vlm  (VLM/CV models, requires OpenCV)"           OFF)
-option(BUILD_EXAMPLES     "Build example executables"                                     ON)
+option(GENIEX_BUILD_EXAMPLES "Build example executables"                                   OFF)
 option(GENIEX_DEBUG       "Enable debug logging (includes file/line/func in log output)"  OFF)
 
 # ── Third-party dependencies ──────────────────────────────────────────────────
@@ -200,7 +200,7 @@ if(GENIEX_BUILD_OCR)
 endif()
 
 # ── examples (one per model folder) ──────────────────────────────────────────
-if(BUILD_EXAMPLES)
+if(GENIEX_BUILD_EXAMPLES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/phi3_5)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen3)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5)
