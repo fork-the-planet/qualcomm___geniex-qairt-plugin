@@ -17,8 +17,9 @@ Executables and `geniex_core` (shared library) are placed under the build tree; 
 | Option | Default | Description |
 |---|---|---|
 | `GENIEX_BUILD_VLM` | `OFF` | Build Vision-Language models (e.g. Qwen2.5-VL). |
+| `GENIEX_BUILD_EXAMPLES` | `OFF` | Build per-model example executables. |
+| `GENIEX_BUILD_TESTS` | `OFF` | Register CTest generation smoke tests. Requires a Snapdragon NPU host. |
 | `GENIEX_DEBUG` | `OFF` | Verbose logging with file/line/func info. |
-| `BUILD_EXAMPLES` | `ON` | Build per-model example executables. |
 
 ### Windows (native ARM64)
 
@@ -40,6 +41,28 @@ cmake --build build --config Release -j32
 ```
 
 Output: `build/bin/Release/*.exe` and `geniex_core.dll`.
+
+### Running the smoke tests (optional, requires NPU hardware)
+
+```shell
+# Build with tests enabled
+cmake -B build -A ARM64 -DGENIEX_BUILD_VLM=ON -DGENIEX_BUILD_TESTS=ON
+cmake --build build --config Release -j32
+
+# Run all registered tests (one per supported LLM + the VLM)
+ctest --test-dir build -C Release --output-on-failure
+
+# Filter by label
+ctest --test-dir build -C Release -L llm       # all LLM smoke tests
+ctest --test-dir build -C Release -L vlm       # all VLM smoke tests
+
+# Filter by name pattern
+ctest --test-dir build -C Release -R qwen3 -V
+```
+
+The tests invoke two dedicated binaries — `generation_smoke_llm` (dispatches over `llm_model_registry.h`) and `generation_smoke_vlm` — which drive `LLMPipeline` / `VLMPipeline` directly, independent of the interactive examples. Each test asserts that at least N tokens were generated (default 5 over `--max-tokens 32`).
+
+Model files must be present at `modelfiles/<name>/` (same layout the examples expect; `.bin` files are not committed). For the VLM test, drop any small JPEG at `tests/data/test_image.jpg` or pass `-DGENIEX_TEST_IMAGE=<path>` at configure time.
 
 ### Android (cross-compile from Linux/macOS)
 

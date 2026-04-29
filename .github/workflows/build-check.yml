@@ -1,0 +1,103 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Windows ARM64 build check for geniex_core + every example executable.
+#
+# Purpose:
+#   Verify that the full tree — `geniex_core`, `geniex_vlm`, and every
+#   LLM/VLM example registered in CMakeLists.txt — still compiles on
+#   every PR and push to `main`. Running the full build means that when
+#   a new model is added under `models/` and wired into the top-level
+#   CMakeLists it is automatically covered by CI without having to edit
+#   this workflow.
+#
+#   Runs on the GitHub-hosted Windows 11 ARM64 runner so the native
+#   toolchain already targets the production architecture — no cross-
+#   compile tricks needed.
+#
+#   This does NOT execute the binaries — the hosted runner has no NPU.
+#   End-to-end generation smoke tests live in CTest and must be run
+#   locally on a Snapdragon device; see README / CONTRIBUTING.
+
+name: Build Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-arm64:
+    name: Windows ARM64 (full build)
+    runs-on: windows-11-arm
+    timeout-minutes: 60
+
+    steps:
+      - name: Rewrite SSH submodule URLs to HTTPS
+        # The .gitmodules entry for third-party/geniex-proc uses a git@ URL,
+        # which requires SSH auth. GitHub Actions only has the HTTPS token,
+        # so rewrite submodule URLs globally before checkout fetches them.
+        shell: pwsh
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Rust toolchain
+        # third-party/geniex-proc/third_party/tokenizers-cpp compiles a Rust
+        # crate (HuggingFace tokenizer) as part of its CMake target, so
+        # cargo/rustc must be on PATH. The windows-11-arm image does not
+        # ship Rust by default.
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://win.rustup.rs/aarch64 -OutFile rustup-init.exe
+          .\rustup-init.exe -y --default-toolchain stable --profile minimal
+          # Expose cargo/rustc to subsequent steps
+          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Show environment
+        shell: pwsh
+        run: |
+          cmake --version
+          rustc --version
+          cargo --version
+          Write-Host "Runner OS:      $env:RUNNER_OS"
+          Write-Host "Processor arch: $env:PROCESSOR_ARCHITECTURE"
+
+      - name: Configure (ARM64, Release, examples + VLM)
+        shell: pwsh
+        run: |
+          cmake -B build -A ARM64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DGENIEX_BUILD_EXAMPLES=ON `
+            -DGENIEX_BUILD_VLM=ON
+
+      - name: Build all
+        # Builds geniex_core, geniex_vlm, and every example executable
+        # registered under GENIEX_BUILD_EXAMPLES / GENIEX_BUILD_VLM. This
+        # way a new model added to CMakeLists.txt is automatically covered
+        # by CI without having to touch this workflow.
+        shell: pwsh
+        run: |
+          cmake --build build --config Release -j
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-windows-arm64
+          path: |
+            build/**/*.log
+            build/CMakeFiles/CMakeOutput.log
+            build/CMakeFiles/CMakeError.log
+          if-no-files-found: ignore
+          retention-days: 7

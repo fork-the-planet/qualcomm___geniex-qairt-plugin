@@ -1,0 +1,7 @@
+# Local test data placeholder — JPEGs and other fixtures are not committed.
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.webp
+!README.md

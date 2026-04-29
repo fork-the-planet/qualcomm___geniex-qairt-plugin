@@ -4,3 +4,4 @@ This folder contains workflows that are helpful for maintaining a smooth and sec
 Workflows:
 1. `qcom-preflight-checks.yml` - This workflow runs several preflight checks, including copyight, email, repolinter, and security checks.  See [qualcomm/qcom-actions](https://github.com/qualcomm/qcom-actions)
 2. `stale-issues.yaml` - This workflow will periodically run every 30 days to check for stalled issues and PRs. If the workflow detects any stalled issues and/or PRs, it will automatically leave just a comment to draw attention.
+3. `build-check.yml` - On every PR and push to `main`, natively compiles the full tree — `geniex_core`, `geniex_vlm`, and every LLM/VLM example — on the GitHub-hosted `windows-11-arm` runner. Binaries are **not executed** (the hosted runner has no NPU), so this is a compile-only check. End-to-end generation smoke tests live in CTest (see [`tests/CMakeLists.txt`](../../tests/CMakeLists.txt)) and must be run locally on a Snapdragon device.
