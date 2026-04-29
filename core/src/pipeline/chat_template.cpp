@@ -7,9 +7,9 @@ namespace geniex {
 
 std::string chatMLTemplate(const std::string& user_message,
                            const std::string& system_prompt,
-                           bool first_turn, bool enable_thinking) {
+                           bool enable_thinking) {
     std::string result;
-    if (first_turn && !system_prompt.empty())
+    if (!system_prompt.empty())
         result += "<|im_start|>system\n" + system_prompt + "<|im_end|>\n";
     result += "<|im_start|>user\n" + user_message + "<|im_end|>\n";
     result += "<|im_start|>assistant\n";
@@ -20,14 +20,12 @@ std::string chatMLTemplate(const std::string& user_message,
 
 std::string phiChatTemplate(const std::string& user_message,
                             const std::string& system_prompt,
-                            bool first_turn, bool /*enable_thinking*/) {
+                            bool /*enable_thinking*/) {
     std::string result;
-    if (first_turn) {
-        std::string sys = system_prompt.empty()
-                              ? "You are a helpful assistant."
-                              : system_prompt;
-        result += "<|system|>" + sys + "<|end|>\n";
-    }
+    std::string sys = system_prompt.empty()
+                          ? "You are a helpful assistant."
+                          : system_prompt;
+    result += "<|system|>" + sys + "<|end|>\n";
     result += "<|user|>\n" + user_message + "<|end|>\n";
     result += "<|assistant|>\n";
     return result;

@@ -63,10 +63,15 @@ public:
     // Clears KV state and resets to the start of a new conversation.
     void reset();
 
+    // Sets a system prompt to be injected on the next applyChatTemplate() call.
+    // The prompt is consumed (cleared) once applyChatTemplate() is called, so
+    // it must be set again if needed for a subsequent turn. Typical usage is to
+    // call setSystemPrompt() once before the first turn of a conversation.
     void setSystemPrompt(const std::string& prompt);
 
-    // Formats a user message with the chat template. The system prompt is emitted
-    // only on the first call after create() / reset().
+    // Formats a user message with the chat template, injecting any pending
+    // system prompt set via setSystemPrompt(). The system prompt state is
+    // cleared after this call; call setSystemPrompt() again to re-inject it.
     std::string applyChatTemplate(
         const std::string& user_message,
         bool enable_thinking = true);

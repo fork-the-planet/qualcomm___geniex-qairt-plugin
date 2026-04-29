@@ -19,8 +19,7 @@ struct LLMPipeline::Impl {
     std::unique_ptr<geniex::Tokenizer>     tokenizer;
     ChatTemplateFunc                       chat_template = chatMLTemplate;
     std::string                            system_prompt;
-    bool first_turn = true;
-    bool ready      = false;
+    bool ready = false;
 };
 
 LLMPipeline::LLMPipeline()  : impl_(std::make_unique<Impl>()) {}
@@ -60,8 +59,7 @@ bool LLMPipeline::createImpl(ChatTemplateFunc chat_template,
         return false;
     }
 
-    impl_->first_turn = true;
-    impl_->ready      = true;
+    impl_->ready = true;
     return true;
 }
 
@@ -72,7 +70,6 @@ bool LLMPipeline::isReady() const {
 void LLMPipeline::reset() {
     if (impl_->model)
         impl_->model->resetKVCache();
-    impl_->first_turn = true;
 }
 
 void LLMPipeline::setSystemPrompt(const std::string& prompt) {
@@ -83,8 +80,9 @@ std::string LLMPipeline::applyChatTemplate(
     const std::string& user_message,
     bool enable_thinking)
 {
-    return impl_->chat_template(user_message, impl_->system_prompt,
-                                impl_->first_turn, enable_thinking);
+    std::string result = impl_->chat_template(user_message, impl_->system_prompt, enable_thinking);
+    impl_->system_prompt.clear();
+    return result;
 }
 
 GenerateResult LLMPipeline::generate(
@@ -156,8 +154,6 @@ GenerateResult LLMPipeline::generate(
         result.stop_reason = "length";
     else
         result.stop_reason = "eos";
-
-    impl_->first_turn = false;
 
     return result;
 }
