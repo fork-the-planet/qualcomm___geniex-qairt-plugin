@@ -12,6 +12,7 @@
 
 #include "qwen2_5_vl.h"
 #include "types.h"
+#include "geniex-proc/types.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -128,10 +129,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     auto& pipe = *maybe_pipe;
-    pipe.setSystemPrompt(args.system_prompt);
 
     std::cout << "\033[1;32mModel loaded.\033[0m\n\n";
 
+    bool first_turn = true;
     while (true) {
         std::cout << "Enter your prompt (type 'exit' to quit, 'reset' to clear): ";
         std::string input;
@@ -139,6 +140,7 @@ int main(int argc, char** argv) {
         if (input == "exit" || input == "quit") break;
         if (input == "reset") {
             pipe.reset();
+            first_turn = true;
             std::cout << "\033[1;36m[conversation reset]\033[0m\n\n";
             continue;
         }
@@ -147,6 +149,18 @@ int main(int argc, char** argv) {
         std::vector<std::string> image_paths;
         parseInput(input, prompt_text, image_paths);
 
+        // Build messages for this turn only.
+        std::vector<geniex::ChatMessage> messages;
+        if (first_turn && !args.system_prompt.empty())
+            messages.push_back({geniex::Role::System, args.system_prompt});
+        geniex::ChatMessage user_msg{geniex::Role::User, prompt_text};
+        for (const auto& img : image_paths)
+            user_msg.mm_content.push_back({geniex::Modality::Image, img});
+        messages.push_back(std::move(user_msg));
+
+        std::string formatted = pipe.applyChatTemplate(messages);
+        first_turn = false;
+
         std::cout << "\033[33m";
         auto on_token = [](const char* piece) -> bool {
             std::cout << piece << std::flush;
@@ -154,12 +168,13 @@ int main(int argc, char** argv) {
         };
 
         geniex::GenerateResult result =
-            pipe.generate(prompt_text, image_paths, gen_cfg, on_token);
+            pipe.generate(formatted, image_paths, gen_cfg, on_token);
         std::cout << "\033[0m\n";
 
         if (result.stop_reason == "error") {
             std::cerr << "Error during generation — resetting conversation.\n";
             pipe.reset();
+            first_turn = true;
             continue;
         }
 
