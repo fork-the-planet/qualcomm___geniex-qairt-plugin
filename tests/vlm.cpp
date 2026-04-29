@@ -1,0 +1,199 @@
+// Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// VLM test driver.
+//
+// One binary per modality dispatches on --mode to select the test type.
+// Currently implemented modes:
+//
+//     --mode generation   Run VLMPipeline::generate with an image + prompt
+//                         and assert that at least --min-tokens were produced.
+//
+// Invocation (via CTest):
+//     vlm_test --model <name> [--mode generation] [--prompt "<text>"] [--image <path>]
+//
+// Returns:
+//     0  success
+//     1  init / runtime error (model files missing, image missing, etc.)
+//     2  test assertion failure
+//
+// Model files are resolved from `./modelfiles/<name>/` relative to the
+// current working directory. CTest sets WORKING_DIRECTORY to the repo root.
+//
+// Only `qwen2_5_vl_7b` is wired up today. To add another VLM, add a new
+// branch to the dispatch in main() (or promote it to a vlm_model_registry.h
+// similar to llm_model_registry.h) and register an entry in
+// tests/CMakeLists.txt.
+
+#include <filesystem>
+#include <iostream>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "pipeline/vlm_pipeline.h"
+#include "qwen2_5_vl/qwen2_5_vl.h"
+#include "types.h"
+
+namespace fs = std::filesystem;
+
+// ─── CLI ─────────────────────────────────────────────────────────────────────
+struct Args {
+    std::string model      = "qwen2_5_vl_7b";
+    std::string mode       = "generation";
+    std::string prompt     = "What is in this image?";
+    // Default resolved relative to the current working directory (repo root
+    // when invoked via ctest). Override with --image.
+    fs::path    image_path = "modelfiles/assets/test_image.png";
+    int32_t     max_tokens = 32;
+    int32_t     min_tokens = 5;
+};
+
+static void printUsage(const char* prog) {
+    std::cout << "Usage: " << prog << " [OPTIONS]\n"
+              << "  --model <name>      VLM model id (default qwen2_5_vl_7b)\n"
+              << "  --mode <name>       Test mode (default: generation)\n"
+              << "                      modes: generation\n"
+              << "  --image <path>      [generation] Image file\n"
+              << "                      (default: modelfiles/assets/test_image.png)\n"
+              << "  --prompt <text>     [generation] Prompt to generate on\n"
+              << "  --max-tokens <n>    [generation] Max tokens to generate (default 32)\n"
+              << "  --min-tokens <n>    [generation] Fail with exit 2 if fewer tokens (default 5)\n"
+              << "  --help\n";
+}
+
+static bool parseArgs(int argc, char** argv, Args& args) {
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        auto next = [&]() -> std::string {
+            return (i + 1 < argc) ? argv[++i] : std::string{};
+        };
+        if      (a == "--model")      args.model      = next();
+        else if (a == "--mode")       args.mode       = next();
+        else if (a == "--prompt")     args.prompt     = next();
+        else if (a == "--image")      args.image_path = fs::path(next());
+        else if (a == "--max-tokens") args.max_tokens = std::stoi(next());
+        else if (a == "--min-tokens") args.min_tokens = std::stoi(next());
+        else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
+        else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
+    }
+    return true;
+}
+
+// ─── Test modes ──────────────────────────────────────────────────────────────
+// Runs VLMPipeline::generate with an image and asserts at least
+// --min-tokens were produced.
+static int runGeneration(const Args& args, geniex::VLMPipeline& pipe) {
+    if (args.image_path.empty()) {
+        std::cerr << "--image is required for mode=generation.\n";
+        return 1;
+    }
+    if (!fs::exists(args.image_path)) {
+        std::cerr << "Image not found: " << args.image_path << "\n"
+                  << "Pass --image <path> or drop a file at the default path.\n";
+        return 1;
+    }
+
+    std::cout << "[generation] prompt=\"" << args.prompt << "\""
+              << "  image=" << args.image_path
+              << "  max_tokens=" << args.max_tokens
+              << "  min_tokens=" << args.min_tokens << "\n";
+
+    geniex::GenerationConfig gen_cfg;
+    gen_cfg.max_tokens = args.max_tokens;
+
+    geniex::GenerateResult result;
+    try {
+        result = pipe.generate(args.prompt,
+                               std::vector<std::string>{args.image_path.string()},
+                               gen_cfg,
+                               /*on_token=*/nullptr);
+    } catch (const std::exception& e) {
+        std::cerr << "generate() threw: " << e.what() << "\n";
+        return 1;
+    }
+
+    std::cout << "[generation] generated_tokens=" << result.generated_tokens
+              << "  stop_reason=" << result.stop_reason
+              << "  tps=" << result.tokens_per_second << "\n";
+
+    if (static_cast<int32_t>(result.generated_tokens) < args.min_tokens) {
+        std::cerr << "Test FAILED: generated " << result.generated_tokens
+                  << " tokens, expected at least " << args.min_tokens << "\n";
+        return 2;
+    }
+    return 0;
+}
+
+// ─── main ────────────────────────────────────────────────────────────────────
+int main(int argc, char** argv) {
+    Args args;
+    if (!parseArgs(argc, argv, args)) return 1;
+
+    // Only qwen2_5_vl_7b is wired up today.
+    if (args.model != "qwen2_5_vl_7b") {
+        std::cerr << "Unknown VLM model '" << args.model
+                  << "' (only 'qwen2_5_vl_7b' is supported).\n";
+        return 1;
+    }
+
+    const fs::path model_dir =
+        fs::current_path() / "modelfiles" / "qwen2_5_vl_7b";
+
+    geniex::QnnRuntimeConfig runtime_cfg;  // auto-detect HTP paths
+
+    geniex::qwen2_5_vl_7b::Qwen25VLConfig config;
+    config.llm_config.model_paths = {
+        (model_dir / "part1_of_5.bin").string(),
+        (model_dir / "part2_of_5.bin").string(),
+        (model_dir / "part3_of_5.bin").string(),
+        (model_dir / "part4_of_5.bin").string(),
+        (model_dir / "part5_of_5.bin").string(),
+    };
+    config.llm_config.tokenizer_path  = (model_dir / "tokenizer.json").string();
+    config.llm_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
+    config.llm_config.embedding_path  = (model_dir / "embedding_weights.raw").string();
+
+    config.vision_config.model_paths     = {(model_dir / "vision_encoder.bin").string()};
+    config.vision_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
+
+    // Fail fast with a clear message if any required file is missing, so the
+    // failure mode is "files not staged" rather than a deep QNN init error.
+    for (const auto& p : config.llm_config.model_paths) {
+        if (!fs::exists(p)) {
+            std::cerr << "Missing shard: " << p << "\n"
+                      << "Stage model files under ./modelfiles/qwen2_5_vl_7b/ before running this test.\n";
+            return 1;
+        }
+    }
+    for (const auto& p : {config.llm_config.tokenizer_path,
+                          config.llm_config.htp_config_path,
+                          config.llm_config.embedding_path,
+                          config.vision_config.model_paths.front()}) {
+        if (!fs::exists(p)) {
+            std::cerr << "Missing VLM asset: " << p << "\n";
+            return 1;
+        }
+    }
+
+    std::cout << "[vlm_test] model=" << args.model
+              << "  mode=" << args.mode << "\n";
+
+    std::optional<geniex::VLMPipeline> pipe;
+    try {
+        pipe = geniex::qwen2_5_vl_7b::makePipeline(runtime_cfg, config);
+    } catch (const std::exception& e) {
+        std::cerr << "Pipeline construction threw: " << e.what() << "\n";
+        return 1;
+    }
+    if (!pipe) {
+        std::cerr << "Pipeline construction returned nullopt.\n";
+        return 1;
+    }
+
+    // Dispatch on --mode. Add new cases as new modes are implemented.
+    if (args.mode == "generation") return runGeneration(args, *pipe);
+
+    std::cerr << "Unknown --mode '" << args.mode << "'. Supported: generation\n";
+    return 1;
+}
