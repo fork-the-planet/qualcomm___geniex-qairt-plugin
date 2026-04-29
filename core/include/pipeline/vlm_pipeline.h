@@ -57,8 +57,8 @@ public:
     void reset();
 
     // Formats messages into a prompt string using the processor's chat template.
-    // Pure text — no image I/O is performed. Each image reference in
-    // `messages[i].mm_content_paths` is replaced by the processor's image marker.
+    // Pure text — no image I/O is performed. Each mm_content entry in each
+    // message is replaced by the processor's image marker.
     std::string applyChatTemplate(
         const std::vector<ChatMessage>& messages,
         bool add_generation_prompt = true) const;
