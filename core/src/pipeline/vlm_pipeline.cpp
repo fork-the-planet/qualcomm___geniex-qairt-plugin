@@ -42,9 +42,7 @@ struct VLMPipeline::Impl {
     std::unique_ptr<VLMModel>         model;
     std::unique_ptr<VisionProcessor>  processor;
     Tokenizer*                        tokenizer = nullptr;
-    std::string                       system_prompt;
-    bool                              first_turn = true;
-    bool                              ready      = false;
+    bool                              ready     = false;
 };
 
 VLMPipeline::VLMPipeline()  : impl_(std::make_unique<Impl>()) {}
@@ -57,11 +55,10 @@ bool VLMPipeline::create(std::unique_ptr<VLMModel>        model,
                          Tokenizer&                       tokenizer) {
     if (!model || !processor) return false;
 
-    impl_->model      = std::move(model);
-    impl_->processor  = std::move(processor);
-    impl_->tokenizer  = &tokenizer;
-    impl_->first_turn = true;
-    impl_->ready      = true;
+    impl_->model     = std::move(model);
+    impl_->processor = std::move(processor);
+    impl_->tokenizer = &tokenizer;
+    impl_->ready     = true;
     return true;
 }
 
@@ -71,47 +68,25 @@ bool VLMPipeline::isReady() const {
 
 void VLMPipeline::reset() {
     if (impl_->model) impl_->model->resetKVCache();
-    impl_->first_turn = true;
 }
 
-void VLMPipeline::setSystemPrompt(const std::string& prompt) {
-    impl_->system_prompt = prompt;
-}
-
-std::vector<int32_t> VLMPipeline::applyChatTemplate(
-    const std::string&              user_message,
-    const std::vector<std::string>& image_paths,
-    VLMInput&                       vlm_input) const
+std::string VLMPipeline::applyChatTemplate(
+    const std::vector<ChatMessage>& messages,
+    bool add_generation_prompt) const
 {
-    VisionProcessorInput pinput;
-    pinput.add_generation_prompt = true;
-
-    if (impl_->first_turn && !impl_->system_prompt.empty()) {
-        pinput.messages.push_back(
-            ChatMessage{"system", impl_->system_prompt, {}});
-    }
-
-    ChatMessage user_msg{"user", user_message, {}};
-    user_msg.mm_content_paths = image_paths;
-    pinput.messages.push_back(std::move(user_msg));
-
-    BatchFeatures bf = impl_->processor->process(pinput);
-    vlm_input.pixel_data = toPixelData(bf);
-
-    std::vector<int32_t> tokens(bf.input_ids.cbegin(), bf.input_ids.cend());
-    return tokens;
+    return impl_->processor->apply_chat_template(messages, add_generation_prompt);
 }
 
 GenerateResult VLMPipeline::generate(
-    const std::string&               user_message,
+    const std::string&               formatted_prompt,
     const GenerationConfig&          gen_cfg,
     std::function<bool(const char*)> on_token)
 {
-    return generate(user_message, /*image_paths=*/{}, gen_cfg, std::move(on_token));
+    return generate(formatted_prompt, /*image_paths=*/{}, gen_cfg, std::move(on_token));
 }
 
 GenerateResult VLMPipeline::generate(
-    const std::string&               user_message,
+    const std::string&               formatted_prompt,
     const std::vector<std::string>&  image_paths,
     const GenerationConfig&          gen_cfg,
     std::function<bool(const char*)> on_token)
@@ -122,15 +97,14 @@ GenerateResult VLMPipeline::generate(
         return result;
     }
 
-    const bool saved_first_turn = impl_->first_turn;
-
-    std::vector<int32_t> prompt_tokens;
     VLMInput             vlm_input;
+    std::vector<int32_t> prompt_tokens;
 
     try {
-        prompt_tokens = applyChatTemplate(user_message, image_paths, vlm_input);
+        BatchFeatures bf = impl_->processor->process(formatted_prompt, image_paths);
+        vlm_input.pixel_data = toPixelData(bf);
+        prompt_tokens.assign(bf.input_ids.cbegin(), bf.input_ids.cend());
     } catch (...) {
-        impl_->first_turn = saved_first_turn;
         result.stop_reason = "error";
         return result;
     }
@@ -198,7 +172,6 @@ GenerateResult VLMPipeline::generate(
     else
         result.stop_reason = "eos";
 
-    impl_->first_turn = false;
     return result;
 }
 
