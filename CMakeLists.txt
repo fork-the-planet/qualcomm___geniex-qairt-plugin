@@ -214,9 +214,6 @@ if(GENIEX_BUILD_VLM)
 endif()
 
 # ── Tests (CTest generation smoke tests; require NPU hardware) ───────────────
-# Enabled with -DGENIEX_BUILD_TESTS=ON. Tests only register if the matching
-# example targets were also built, so combining with GENIEX_BUILD_EXAMPLES=ON
-# (and GENIEX_BUILD_VLM=ON for the VLM test) is required.
 if(GENIEX_BUILD_TESTS)
     enable_testing()
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tests)
