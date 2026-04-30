@@ -7,7 +7,6 @@
 #include "vlm/vlm_types.h"
 #include "vlm/vlm_input_provider.h"
 #include "vlm/vision_encoder.h"
-#include "vlm/audio_encoder.h"
 #include "geniex_export.h"
 
 #include <cstdint>
@@ -34,9 +33,6 @@ protected:
 
     virtual std::vector<float> encodeVision(const PixelData& pixel_data) = 0;
 
-    // Default returns empty (no audio encoding).
-    virtual std::vector<float> encodeAudio(const AudioData& audio_data);
-
     // Called after embedding injection, before LLMModel::generate().
     virtual void preparePositions(const std::vector<int32_t>& input_ids,
                                   const VLMInput&             vlm_input,
@@ -57,10 +53,8 @@ protected:
     void setEmbeddingProvider(std::unique_ptr<PrecomputedEmbeddingProvider> provider);
 
     std::unique_ptr<VisionEncoder> vision_encoder_;
-    std::unique_ptr<AudioEncoder>  audio_encoder_;
 
     int32_t image_token_id_ = 0;
-    int32_t audio_token_id_ = 0;
 
 private:
     PrecomputedEmbeddingProvider* emb_provider_ = nullptr;  // non-owning; owned by input_providers_
