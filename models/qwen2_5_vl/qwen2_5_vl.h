@@ -142,8 +142,8 @@ inline LLMSpec makeSpec() {
 }
 
 // Full Qwen2.5-VL-7B stack (vision encoder + LLM). Returns nullptr on failure.
-std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
-                                         const VLMConfig&        config);
+GENIEX_VLM_API std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
+                                                         const VLMConfig&        config);
 
 // Convenience factory: builds the full pipeline (vision encoder + LLM + processor)
 // from a runtime config and a model config.  The processor is created with fixed

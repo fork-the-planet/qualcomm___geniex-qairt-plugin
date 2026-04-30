@@ -21,6 +21,7 @@ option(GENIEX_DEBUG       "Enable debug logging (includes file/line/func in log 
 if(GENIEX_BUILD_VLM)
     set(GENIEXPROC_ENABLE_VISION ON CACHE BOOL "" FORCE)
 endif()
+set(GENIEXPROC_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third-party/geniex-proc third-party/geniex-proc)
 
 # ── Compile definitions ───────────────────────────────────────────────────────
@@ -106,9 +107,7 @@ target_include_directories(geniex_core PUBLIC
 )
 
 target_compile_definitions(geniex_core PUBLIC ${GENIEX_COMPILE_DEFS})
-target_include_directories(geniex_core PUBLIC
-    $<TARGET_PROPERTY:geniex-proc,INTERFACE_INCLUDE_DIRECTORIES>)
-target_link_libraries(geniex_core PRIVATE geniex-proc)
+target_link_libraries(geniex_core PUBLIC geniex-proc)
 if(WIN32)
     target_link_libraries(geniex_core PRIVATE Version Shlwapi)
 endif()
@@ -139,7 +138,7 @@ if(GENIEX_BUILD_VLM)
         ${CMAKE_CURRENT_SOURCE_DIR}/models
     )
 
-    target_link_libraries(geniex_vlm PUBLIC geniex_core PRIVATE geniex-proc)
+    target_link_libraries(geniex_vlm PUBLIC geniex_core geniex-proc-vision)
 
     set_target_properties(geniex_vlm PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
