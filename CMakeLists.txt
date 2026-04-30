@@ -131,13 +131,13 @@ if(GENIEX_BUILD_VLM)
     file(GLOB_RECURSE VLM_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/core/src/vlm/*.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/core/src/pipeline/vlm_pipeline.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/models_ref/vlm/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/models/qwen2_5_vl/qwen2_5_vl.cpp"
     )
 
     add_library(geniex_vlm SHARED ${VLM_SOURCES})
 
     target_include_directories(geniex_vlm PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/models_ref/vlm
+        ${CMAKE_CURRENT_SOURCE_DIR}/models
     )
 
     target_link_libraries(geniex_vlm PUBLIC geniex_core PRIVATE geniex-proc)

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "geniex_export.h"
+#include "geniex-proc/types.h"         // ChatMessage
 #include "pipeline/llm_pipeline.h"   // GenerateResult
 #include "types.h"
 #include "vlm/vlm_model.h"
@@ -55,25 +56,25 @@ public:
     // Clears KV state and resets to the start of a new conversation.
     void reset();
 
-    void setSystemPrompt(const std::string& prompt);
+    // Formats messages into a prompt string using the processor's chat template.
+    // Pure text — no image I/O is performed. Each mm_content entry in each
+    // message is replaced by the processor's image marker.
+    std::string applyChatTemplate(
+        const std::vector<ChatMessage>& messages,
+        bool add_generation_prompt = true) const;
 
-    // Formats one turn into model-ready tokens and populates `vlm_input` with
-    // pixel_values / image_grid_thw.
-    std::vector<int32_t> applyChatTemplate(
-        const std::string&              user_message,
-        const std::vector<std::string>& image_paths,
-        VLMInput&                       vlm_input) const;
-
+    // Run inference on a pre-formatted prompt (output of applyChatTemplate).
+    // `image_paths` must match the image marker occurrences in `formatted_prompt`.
     // on_token is called with each decoded text piece; return false to stop early.
     GenerateResult generate(
-        const std::string&              user_message,
+        const std::string&              formatted_prompt,
         const std::vector<std::string>& image_paths = {},
         const GenerationConfig&         gen_cfg     = {},
         std::function<bool(const char*)> on_token   = nullptr);
 
     // Text-only convenience overload.
     GenerateResult generate(
-        const std::string&              user_message,
+        const std::string&              formatted_prompt,
         const GenerationConfig&         gen_cfg,
         std::function<bool(const char*)> on_token   = nullptr);
 
