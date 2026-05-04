@@ -133,7 +133,7 @@ inline LLMSpec makeSpec() {
         .head_dim     = kHeadDim,
         .vocab_size   = kVocabSize,
 
-        .context_lengths = {2048},
+        .context_lengths = {512, 1024, 2048},
 
         .graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}",
 
