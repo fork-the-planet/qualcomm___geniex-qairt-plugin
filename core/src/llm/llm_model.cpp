@@ -303,6 +303,27 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
     });
 }
 
+bool LLMModel::promoteCL(size_t required,
+                          size_t capacity_reserved_seq,
+                          size_t stride_reserved_seq) {
+    if (num_cl_ <= 1) return false;
+
+    size_t new_cl = active_cl_idx_;
+    while (new_cl + 1 < num_cl_ &&
+           spec_.context_lengths[new_cl] - capacity_reserved_seq < required) {
+        ++new_cl;
+    }
+    if (new_cl == active_cl_idx_) return false;
+
+    GENIEX_LOG_DEBUG("Upgrading CL from {} to {}", active_cl_idx_, new_cl);
+    const size_t old_kv = spec_.context_lengths[active_cl_idx_] - stride_reserved_seq;
+    const size_t new_kv = spec_.context_lengths[new_cl]          - stride_reserved_seq;
+    for (size_t s = 0; s < shard_count_; ++s)
+        reshapeKV(s, old_kv, new_kv, n_past_);
+    active_cl_idx_ = new_cl;
+    return true;
+}
+
 std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens,
                                          const GenerationConfig&      gen_cfg,
                                          std::function<bool(int32_t)> token_callback) {
@@ -319,23 +340,10 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         const size_t chunk_size  = std::min(remaining, spec_.seq_len_prefill);
         last_chunk_size = chunk_size;
 
-        // Promote to a larger CL variant if required (multi-CL models only).
-        if (num_cl_ > 1) {
-            const size_t required = n_past_ + chunk_size;
-            size_t new_cl = active_cl_idx_;
-            while (new_cl + 1 < num_cl_ &&
-                   spec_.context_lengths[new_cl] - spec_.seq_len_prefill < required) {
-                ++new_cl;
-            }
-            if (new_cl > active_cl_idx_) {
-                GENIEX_LOG_DEBUG("Upgrading CL from {} to {} for prefill", active_cl_idx_, new_cl);
-                const size_t old_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
-                const size_t new_kv = spec_.context_lengths[new_cl]          - spec_.seq_len_prefill;
-                for (size_t s = 0; s < shard_count_; ++s)
-                    reshapeKV(s, old_kv, new_kv, n_past_);
-                active_cl_idx_ = new_cl;
-            }
-        }
+        // Ensure the prefill KV buffer (CL - seq_len_prefill) can hold n_past + chunk_size after this chunk.
+        promoteCL(/*required=*/n_past_ + chunk_size,
+                  /*capacity_reserved_seq=*/spec_.seq_len_prefill,
+                  /*stride_reserved_seq=*/spec_.seq_len_prefill);
 
         const std::vector<int32_t> chunk(
             prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed),
@@ -383,24 +391,10 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             break;
         }
 
-        // Promote to a larger CL variant if decode KV capacity is exhausted.
-        if (num_cl_ > 1) {
-            size_t cur_decode_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
-            if (n_past_ >= cur_decode_kv) {
-                size_t new_cl = active_cl_idx_;
-                while (new_cl + 1 < num_cl_ &&
-                       spec_.context_lengths[new_cl] - spec_.seq_len_decode <= n_past_)
-                    ++new_cl;
-                if (new_cl > active_cl_idx_) {
-                    GENIEX_LOG_DEBUG("Upgrading CL from {} to {} for decode", active_cl_idx_, new_cl);
-                    const size_t old_kv = cur_decode_kv;
-                    const size_t new_kv = spec_.context_lengths[new_cl] - spec_.seq_len_decode;
-                    for (size_t s = 0; s < shard_count_; ++s)
-                        reshapeKV(s, old_kv, new_kv, n_past_);
-                    active_cl_idx_ = new_cl;
-                }
-            }
-        }
+        // Ensure the decode KV buffer (CL - seq_len_decode) has room for the write at offset n_past_.
+        promoteCL(/*required=*/n_past_ + 1,
+                  /*capacity_reserved_seq=*/spec_.seq_len_decode,
+                  /*stride_reserved_seq=*/spec_.seq_len_decode);
 
         const LLMRunContext ctx{{next_token}, n_past_, /*curr_len=*/1, /*phase=*/1};
 
@@ -417,22 +411,10 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     }
 
     // Restore prefill stride so the model is ready for the next generate() call.
-    if (num_cl_ > 1) {
-        size_t new_cl = active_cl_idx_;
-        while (new_cl + 1 < num_cl_ &&
-               spec_.context_lengths[new_cl] - spec_.seq_len_prefill < n_past_) {
-            ++new_cl;
-        }
-        if (new_cl > active_cl_idx_) {
-            GENIEX_LOG_DEBUG("Upgrading CL from {} to {} to preserve history for next prefill",
-                             active_cl_idx_, new_cl);
-            const size_t old_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
-            const size_t new_kv = spec_.context_lengths[new_cl]          - spec_.seq_len_decode;
-            for (size_t s = 0; s < shard_count_; ++s)
-                reshapeKV(s, old_kv, new_kv, n_past_);
-            active_cl_idx_ = new_cl;
-        }
-    }
+    // Promote first so the upcoming decode_kv → prefill_kv reshape doesn't truncate history when n_past_ > prefill_kv.
+    promoteCL(/*required=*/n_past_,
+              /*capacity_reserved_seq=*/spec_.seq_len_prefill,
+              /*stride_reserved_seq=*/spec_.seq_len_decode);
     {
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;

@@ -63,6 +63,12 @@ protected:
     // Expanding iterates backward; contracting forward to handle overlapping regions safely.
     void reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, size_t n_valid);
 
+    // Promotes active_cl_idx_ to the smallest CL where (CL - capacity_reserved_seq) >= required,
+    // restriding all KV layers from the current CL to the new CL at stride
+    bool promoteCL(size_t required,
+                   size_t capacity_reserved_seq,
+                   size_t stride_reserved_seq);
+
     LLMSpec spec_;
     std::vector<std::unique_ptr<InputProvider>> input_providers_;
 
