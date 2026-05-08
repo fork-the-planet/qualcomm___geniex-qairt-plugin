@@ -26,10 +26,28 @@ struct LayerRange {
     size_t end;  // inclusive
 };
 
+// Classification of a shard's role within the model.
+//
+//   Default        — generic / unspecified shard.
+//   Embedding      — embedding-layer shard.
+//   KVCache        — intermediate layers with KV cache, no LM head.
+//   KVCacheLMHead  — intermediate layers fused with LM head (common last shard).
+//   LMHead         — pure LM head.
+//   VisionEncoder  — vision encoder shard.
+enum class ShardKind {
+    Default,
+    Embedding,
+    KVCache,
+    KVCacheLMHead,
+    LMHead,
+    VisionEncoder,
+};
+
 // Per-shard descriptor for hidden-state wiring between adjacent shards.
 struct ShardSpec {
     std::string in_state_name;
     std::string out_state_name;
+    ShardKind   kind = ShardKind::Default;
 };
 
 enum class StateBlockKind {

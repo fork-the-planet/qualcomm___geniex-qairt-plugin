@@ -19,8 +19,10 @@ static constexpr float   kRopeTheta  = 1000000.0f;
 inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
-            {"input_embeds",         "_Add_88_Add_output_0"},
-            {"_Add_88_Add_output_0", "logits"},
+            {"input_embeds",         "_Add_88_Add_output_0",
+             ShardKind::KVCache},
+            {"_Add_88_Add_output_0", "logits",
+             ShardKind::KVCacheLMHead},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({LayerRange{0, 17}, LayerRange{18, 35}}),
@@ -76,13 +78,17 @@ inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
             {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0"},
+             "_model_model_embed_tokens_Gather_output_0",
+             ShardKind::Embedding},
             {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_11_Add_1_output_0"},
+             "_model_model_layers_11_Add_1_output_0",
+             ShardKind::KVCache},
             {"_model_model_layers_11_Add_1_output_0",
-             "_model_model_layers_23_Add_1_output_0"},
+             "_model_model_layers_23_Add_1_output_0",
+             ShardKind::KVCache},
             {"_model_model_layers_23_Add_1_output_0",
-             "logits"},
+             "logits",
+             ShardKind::KVCacheLMHead},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 11}, LayerRange{12, 23}, LayerRange{24, 35}}),
@@ -140,13 +146,17 @@ inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
             {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0"},
+             "_model_model_embed_tokens_Gather_output_0",
+             ShardKind::Embedding},
             {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_11_Add_1_output_0"},
+             "_model_model_layers_11_Add_1_output_0",
+             ShardKind::KVCache},
             {"_model_model_layers_11_Add_1_output_0",
-             "_model_model_layers_23_Add_1_output_0"},
+             "_model_model_layers_23_Add_1_output_0",
+             ShardKind::KVCache},
             {"_model_model_layers_23_Add_1_output_0",
-             "logits"},
+             "logits",
+             ShardKind::KVCacheLMHead},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 11}, LayerRange{12, 23}, LayerRange{24, 35}}),
@@ -203,10 +213,14 @@ static constexpr float   kRopeTheta  = 1000000.0f;
 inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
-            {"input_embeds",          "_Add_43_Add_output_0"},
-            {"_Add_43_Add_output_0",  "_Add_88_Add_output_0"},
-            {"_Add_88_Add_output_0",  "_Add_133_Add_output_0"},
-            {"_Add_133_Add_output_0", "logits"},
+            {"input_embeds",          "_Add_43_Add_output_0",
+             ShardKind::KVCache},
+            {"_Add_43_Add_output_0",  "_Add_88_Add_output_0",
+             ShardKind::KVCache},
+            {"_Add_88_Add_output_0",  "_Add_133_Add_output_0",
+             ShardKind::KVCache},
+            {"_Add_133_Add_output_0", "logits",
+             ShardKind::KVCacheLMHead},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({LayerRange{0, 8}, LayerRange{9, 17}, LayerRange{18, 26}, LayerRange{27, 35}}),

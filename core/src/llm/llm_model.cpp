@@ -339,6 +339,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         const size_t remaining   = total_tokens - tokens_processed;
         const size_t chunk_size  = std::min(remaining, spec_.seq_len_prefill);
         last_chunk_size = chunk_size;
+        const bool is_final_chunk = (tokens_processed + chunk_size >= total_tokens);
 
         // Ensure the prefill KV buffer (CL - seq_len_prefill) can hold n_past + chunk_size after this chunk.
         promoteCL(/*required=*/n_past_ + chunk_size,
@@ -349,13 +350,22 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed),
             prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed + chunk_size));
 
-        GENIEX_LOG_DEBUG("prefill chunk: tokens [{}, {}) cl_idx={}", tokens_processed, tokens_processed + chunk_size, active_cl_idx_);
+        GENIEX_LOG_DEBUG("prefill chunk: tokens [{}, {}) cl_idx={} final={}",
+            tokens_processed, tokens_processed + chunk_size, active_cl_idx_, is_final_chunk);
         const LLMRunContext ctx{chunk, n_past_, chunk_size, /*phase=*/0};
 
         for (size_t s = 0; s < shard_count_; ++s) {
+            // For non-final prefill chunks we only need the KV cache to be populated, so such shards can be skipped entirely.
+            if (!is_final_chunk && spec_.shards[s].kind == ShardKind::LMHead) {
+                GENIEX_LOG_DEBUG("skipping LMHead shard {} on non-final prefill chunk", s);
+                continue;
+            }
             runShard(s, /*phase=*/0, active_cl_idx_, ctx);
             updateKV(s, /*phase=*/0, n_past_, chunk_size);
             if (s + 1 < shard_count_) {
+                if (!is_final_chunk && spec_.shards[s + 1].kind == ShardKind::LMHead) {
+                    continue;
+                }
                 applyConnections({shard_hidden_state_[active_cl_idx_][s]});
             }
         }

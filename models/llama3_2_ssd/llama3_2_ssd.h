@@ -34,11 +34,14 @@ inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
             {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0"},
+             "_model_model_embed_tokens_Gather_output_0",
+             ShardKind::Embedding},
             {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_13_Add_1_output_0"},
+             "_model_model_layers_13_Add_1_output_0",
+             ShardKind::KVCache},
             {"_model_model_layers_13_Add_1_output_0",
-             "logits"},
+             "logits",
+             ShardKind::KVCacheLMHead},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 13}, LayerRange{14, 27}}),
