@@ -24,14 +24,11 @@ inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
             {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0",
-             ShardKind::Embedding},
+             "_model_model_embed_tokens_Gather_output_0"},
             {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_7_Add_1_output_0",
-             ShardKind::KVCache},
+             "_model_model_layers_7_Add_1_output_0"},
             {"_model_model_layers_7_Add_1_output_0",
-             "logits",
-             ShardKind::KVCacheLMHead},
+             "logits"},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 7}, LayerRange{8, 15}}),
@@ -91,14 +88,11 @@ inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
             {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0",
-             ShardKind::Embedding},
+             "_model_model_embed_tokens_Gather_output_0"},
             {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_13_Add_1_output_0",
-             ShardKind::KVCache},
+             "_model_model_layers_13_Add_1_output_0"},
             {"_model_model_layers_13_Add_1_output_0",
-             "logits",
-             ShardKind::KVCacheLMHead},
+             "logits"},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 13}, LayerRange{14, 27}}),
