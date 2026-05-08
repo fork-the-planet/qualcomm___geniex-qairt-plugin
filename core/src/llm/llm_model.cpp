@@ -335,6 +335,16 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     GENIEX_LOG_DEBUG("generate: prompt_tokens={}, n_past={}, max_tokens={}",
         total_tokens, n_past_, gen_cfg.max_tokens);
 
+    // Reject prompts that cannot fit in the largest available context length.
+    // context_lengths is sorted ascending, so the last entry is the max CL.
+    const size_t max_cl = spec_.context_lengths.back();
+    if (n_past_ + total_tokens > max_cl) {
+        throw std::runtime_error(
+            "geniex: prompt exceeds max context length (n_past=" + std::to_string(n_past_) +
+            " + prompt_tokens=" + std::to_string(total_tokens) + " = " +
+            std::to_string(n_past_ + total_tokens) + " > max_cl=" + std::to_string(max_cl) + ")");
+    }
+
     while (tokens_processed < total_tokens) {
         const size_t remaining   = total_tokens - tokens_processed;
         const size_t chunk_size  = std::min(remaining, spec_.seq_len_prefill);
@@ -399,6 +409,14 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         if (token_callback && !token_callback(next_token)) {
             GENIEX_LOG_DEBUG("token_callback requested stop at step {}", step);
             break;
+        }
+
+        // Stop and report when the next decode step would exceed the largest available CL.
+        if (n_past_ + 1 > max_cl) {
+            throw std::runtime_error(
+                "geniex: generation exceeds max context length (n_past=" + std::to_string(n_past_) +
+                " + 1 > max_cl=" + std::to_string(max_cl) + ", after " +
+                std::to_string(output_tokens.size()) + " generated tokens)");
         }
 
         // Ensure the decode KV buffer (CL - seq_len_decode) has room for the write at offset n_past_.
