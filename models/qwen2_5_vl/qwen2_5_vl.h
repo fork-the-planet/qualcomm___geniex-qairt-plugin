@@ -108,11 +108,11 @@ private:
 inline LLMSpec makeSpec() {
     return LLMSpec{
         .shards = {
-            {"inputs_embeds", "add_13335",     ShardKind::KVCache},
-            {"add_13335",     "add_25971",     ShardKind::KVCache},
-            {"add_25971",     "add_38607",     ShardKind::KVCache},
-            {"add_38607",     "add_51243",     ShardKind::KVCache},
-            {"add_51243",     "logits",        ShardKind::KVCacheLMHead},
+            {"inputs_embeds", "add_13335"},
+            {"add_13335",     "add_25971"},
+            {"add_25971",     "add_38607"},
+            {"add_38607",     "add_51243"},
+            {"add_51243",     "logits"},
         },
         .state_blocks = {
             makeKVOnlyStateBlock({

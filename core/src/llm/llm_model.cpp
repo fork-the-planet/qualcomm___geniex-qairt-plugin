@@ -356,14 +356,14 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
 
         for (size_t s = 0; s < shard_count_; ++s) {
             // For non-final prefill chunks we only need the KV cache to be populated, so such shards can be skipped entirely.
-            if (!is_final_chunk && spec_.shards[s].kind == ShardKind::LMHead) {
-                GENIEX_LOG_DEBUG("skipping LMHead shard {} on non-final prefill chunk", s);
+            if (!is_final_chunk && spec_.shards[s].lm_head_only) {
+                GENIEX_LOG_DEBUG("skipping LM-head-only shard {} on non-final prefill chunk", s);
                 continue;
             }
             runShard(s, /*phase=*/0, active_cl_idx_, ctx);
             updateKV(s, /*phase=*/0, n_past_, chunk_size);
             if (s + 1 < shard_count_) {
-                if (!is_final_chunk && spec_.shards[s + 1].kind == ShardKind::LMHead) {
+                if (!is_final_chunk && spec_.shards[s + 1].lm_head_only) {
                     continue;
                 }
                 applyConnections({shard_hidden_state_[active_cl_idx_][s]});
