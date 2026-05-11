@@ -6,10 +6,6 @@
 #include "logging.h"
 #include "utils.h"
 
-// geniex-proc drives the optional sampler chain.
-#include "geniex-proc/sampler.h"
-#include "geniex-proc/tokenizer.h"
-
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -59,12 +55,6 @@ void forEachLayerInRanges(const std::vector<LayerRange>& ranges, Fn&& fn) {
 
 LLMModel::LLMModel(LLMSpec spec)
     : spec_(std::move(spec)) {}
-
-LLMModel::~LLMModel() = default;
-
-// Move ops out-of-line so Sampler's full type is visible here.
-LLMModel::LLMModel(LLMModel&&) noexcept            = default;
-LLMModel& LLMModel::operator=(LLMModel&&) noexcept = default;
 
 bool LLMModel::onInitialized() {
     shard_count_ = spec_.shards.size();

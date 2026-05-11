@@ -13,11 +13,10 @@
 #include "QnnTypes.h"
 #include "IBackend.hpp"  // for qnn::tools::netrun::PerfProfile
 
-#include "geniex-proc/types.h"  // for GENIEX_DEFAULT_SEED
+#include "geniex-proc/types.h"      // for GENIEX_DEFAULT_SEED
+#include "geniex-proc/tokenizer.h"  // for Tokenizer
 
 namespace geniex {
-
-class Tokenizer;  // fwd-decl; full type only needed in LLMModel impl
 
 // QNN backend settings shared across all models.
 //

@@ -8,6 +8,7 @@
 #include "llm/llm_types.h"
 #include "llm/input_provider.h"
 #include "geniex_export.h"
+#include "geniex-proc/sampler.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -21,10 +22,6 @@
 
 namespace geniex {
 
-// Forward decl (full type in geniex-proc/sampler.h). Keeps tokenizers_cpp
-// out of consumers of this header.
-class Sampler;
-
 // Thrown by LLMModel::generate when the prompt or the in-flight generation
 class GENIEX_API ContextLengthExceededError : public std::runtime_error {
 public:
@@ -34,13 +31,6 @@ public:
 class GENIEX_API LLMModel : public Model {
 public:
     explicit LLMModel(LLMSpec spec);
-    ~LLMModel();  // out-of-line: Sampler is incomplete in this header
-
-    // Movable, not copyable. Move ops are out-of-line for the same reason as
-    // the destructor; without them the user-declared dtor suppresses implicit
-    // moves and Model's deleted copy ctor wins.
-    LLMModel(LLMModel&&) noexcept;
-    LLMModel& operator=(LLMModel&&) noexcept;
 
     // Returns generated token IDs (excluding the prompt).
     // token_callback is called with each sampled token; return false to stop early.
