@@ -6,6 +6,10 @@
 #include "logging.h"
 #include "utils.h"
 
+// geniex-proc drives the optional sampler chain.
+#include "geniex-proc/sampler.h"
+#include "geniex-proc/tokenizer.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -55,6 +59,12 @@ void forEachLayerInRanges(const std::vector<LayerRange>& ranges, Fn&& fn) {
 
 LLMModel::LLMModel(LLMSpec spec)
     : spec_(std::move(spec)) {}
+
+LLMModel::~LLMModel() = default;
+
+// Move ops out-of-line so Sampler's full type is visible here.
+LLMModel::LLMModel(LLMModel&&) noexcept            = default;
+LLMModel& LLMModel::operator=(LLMModel&&) noexcept = default;
 
 bool LLMModel::onInitialized() {
     shard_count_ = spec_.shards.size();
@@ -335,6 +345,11 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     GENIEX_LOG_DEBUG("generate: prompt_tokens={}, n_past={}, max_tokens={}",
         total_tokens, n_past_, gen_cfg.max_tokens);
 
+    // (Re)build & seed the sampler. No-op when sampling is disabled — in
+    // that case `sampler_` stays null and sampleNextToken() takes the greedy
+    // argmax fast path.
+    prepareSampler(gen_cfg, prompt_tokens);
+
     // Reject prompts that cannot fit in the largest available context length.
     // context_lengths is sorted ascending, so the last entry is the max CL.
     const size_t max_cl = spec_.context_lengths.back();
@@ -431,7 +446,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         }
 
         n_past_++;
-        next_token = sampleNextToken(/*phase=*/1);
+        next_token = sampleNextToken(/*phase=*/1, /*token_offset=*/0);
     }
 
     // Restore prefill stride so the model is ready for the next generate() call.
@@ -450,17 +465,108 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     return output_tokens;
 }
 
-int32_t LLMModel::sampleNextToken(size_t phase, size_t token_offset) const {
-    const size_t last_shard   = shard_count_ - 1;
-    const size_t g_idx        = graphIndex(phase, last_shard, active_cl_idx_);
-    const Graph& g            = graph(g_idx);
+int32_t LLMModel::sampleNextToken(size_t phase, size_t token_offset) {
+    std::vector<float> logits;
+    readLastLogits(phase, token_offset, logits);
 
-    std::vector<float> logits(spec_.vocab_size);
-    g.read(spec_.shards.back().out_state_name, logits.data(), spec_.vocab_size,
-           token_offset * spec_.vocab_size);
+    // Sampler path: run the chain and accept() so penalty / DRY advance.
+    if (sampler_) {
+        const int32_t tok = sampler_->sample(logits);
+        sampler_->accept(tok);
+        return tok;
+    }
 
+    // Greedy fast path — historical behaviour when sampling is disabled.
     return static_cast<int32_t>(
         std::max_element(logits.begin(), logits.end()) - logits.begin());
+}
+
+void LLMModel::readLastLogits(size_t phase, size_t token_offset, std::vector<float>& out) const {
+    const size_t last_shard = shard_count_ - 1;
+    const size_t g_idx      = graphIndex(phase, last_shard, active_cl_idx_);
+    const Graph& g          = graph(g_idx);
+
+    out.resize(spec_.vocab_size);
+    g.read(spec_.shards.back().out_state_name, out.data(), spec_.vocab_size,
+           token_offset * spec_.vocab_size);
+}
+
+namespace {
+
+// True when two configs agree on every field that affects the sampler chain.
+bool samplerCfgEqual(const GenerationConfig& a, const GenerationConfig& b) {
+    return a.enable_sampling     == b.enable_sampling
+        && a.temperature         == b.temperature
+        && a.top_p               == b.top_p
+        && a.min_p               == b.min_p
+        && a.top_k               == b.top_k
+        && a.repetition_penalty  == b.repetition_penalty
+        && a.presence_penalty    == b.presence_penalty
+        && a.frequency_penalty   == b.frequency_penalty
+        && a.penalty_last_n      == b.penalty_last_n
+        && a.seed                == b.seed
+        && a.grammar_str         == b.grammar_str
+        && a.grammar_root        == b.grammar_root;
+}
+
+}  // namespace
+
+void LLMModel::prepareSampler(const GenerationConfig& gen_cfg,
+                                const std::vector<int32_t>& prompt_tokens) {
+    // Sampling off → drop any cached sampler so sampleNextToken() goes greedy.
+    if (!gen_cfg.enable_sampling) {
+        sampler_.reset();
+        sampler_cfg_valid_ = false;
+        return;
+    }
+
+    // Reuse iff config is unchanged — keeps penalty / DRY history alive
+    // across multi-turn calls. `prompt_tokens` is just the new turn's prompt
+    // (prior turns live in the KV cache); we append it to the running
+    // sampler history below.
+    const bool can_reuse = sampler_ && sampler_cfg_valid_ && samplerCfgEqual(sampler_cfg_, gen_cfg);
+    if (!can_reuse) {
+        geniex_sampler_params sp;
+        sp.seed             = gen_cfg.seed;
+        sp.temp             = gen_cfg.temperature;
+        sp.top_k            = gen_cfg.top_k;
+        sp.top_p            = gen_cfg.top_p;
+        sp.min_p            = gen_cfg.min_p;
+        sp.penalty_repeat   = gen_cfg.repetition_penalty;
+        sp.penalty_freq     = gen_cfg.frequency_penalty;
+        sp.penalty_present  = gen_cfg.presence_penalty;
+        sp.penalty_last_n   = gen_cfg.penalty_last_n;
+        sp.no_perf          = true;
+
+        // EOG tokens come from the model spec so Sampler::is_eog() works.
+        sp.eog_tokens.assign(spec_.eos_token_ids.begin(), spec_.eos_token_ids.end());
+
+        sampler_ = std::make_unique<Sampler>(sp);
+
+        // Grammar needs a tokenizer (for the vocab interface). The pipeline
+        // injects one via gen_cfg.tokenizer; if missing, warn and skip.
+        if (!gen_cfg.grammar_str.empty()) {
+            if (gen_cfg.tokenizer) {
+                try {
+                    sampler_->set_grammar(std::make_unique<Grammar>(
+                        gen_cfg.grammar_str, *gen_cfg.tokenizer, gen_cfg.grammar_root));
+                } catch (const std::exception& e) {
+                    GENIEX_LOG_WARN("grammar init failed, continuing without grammar: {}", e.what());
+                }
+            } else {
+                GENIEX_LOG_WARN("grammar_str set but no tokenizer provided — grammar disabled");
+            }
+        }
+
+        sampler_cfg_       = gen_cfg;
+        sampler_cfg_valid_ = true;
+    }
+
+    // Append this turn's prompt; subsequent generated tokens are accept()ed
+    // inside sampleNextToken().
+    if (!prompt_tokens.empty()) {
+        sampler_->init(prompt_tokens);
+    }
 }
 
 std::unordered_set<std::string> LLMModel::buildKVInputNameSet() const {
@@ -479,6 +585,10 @@ std::unordered_set<std::string> LLMModel::buildKVInputNameSet() const {
 void LLMModel::resetKVCache() {
     n_past_        = 0;
     active_cl_idx_ = 0;
+
+    // Drop sampler state too; penalty / DRY shouldn't leak across resets.
+    sampler_.reset();
+    sampler_cfg_valid_ = false;
 
     const auto kv_names = buildKVInputNameSet();
     const size_t total_graphs = 2 * shard_count_ * num_cl_;

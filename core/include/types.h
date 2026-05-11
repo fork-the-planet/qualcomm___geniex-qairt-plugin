@@ -13,7 +13,11 @@
 #include "QnnTypes.h"
 #include "IBackend.hpp"  // for qnn::tools::netrun::PerfProfile
 
+#include "geniex-proc/types.h"  // for GENIEX_DEFAULT_SEED
+
 namespace geniex {
+
+class Tokenizer;  // fwd-decl; full type only needed in LLMModel impl
 
 // QNN backend settings shared across all models.
 //
@@ -53,12 +57,35 @@ struct VLMConfig {
     ModelConfig vision_config;
 };
 
-// Generation-time parameters passed to LLMModel::generate() / VLMModel::generate().
+// Generation-time parameters passed to LLMModel / VLMModel.
+//
+// `enable_sampling == false` → greedy argmax fast path (skips the sampler
+// chain entirely). Otherwise the geniex-proc chain is driven from these
+// fields; `temperature <= 0` still degenerates to greedy at the temp sampler.
 struct GenerationConfig {
     int32_t max_tokens    = 512;
-    float   temperature   = 1.0f;
-    float   top_p         = 1.0f;
     bool    thinking_mode = false;
+
+    // Sampling (geniex-proc). Zero on top_k/top_p/min_p/penalties is
+    // "disabled" inside the chain (matches geniex-proc semantics).
+    bool     enable_sampling    = false;
+    float    temperature        = 1.0f;
+    float    top_p              = 1.0f;
+    float    min_p              = 0.0f;
+    int32_t  top_k              = 0;
+    float    repetition_penalty = 1.0f;
+    float    presence_penalty   = 0.0f;
+    float    frequency_penalty  = 0.0f;
+    int32_t  penalty_last_n     = 64;
+    uint32_t seed               = GENIEX_DEFAULT_SEED;
+
+    // Optional GBNF grammar; needs `tokenizer` to actually take effect.
+    std::string grammar_str;
+    std::string grammar_root = "root";
+
+    // Non-owning. Injected by the pipeline (which owns the tokenizer) so the
+    // model can build a Grammar at sampler-init time.
+    Tokenizer* tokenizer = nullptr;
 };
 
 // Static description of a single graph tensor, populated from GraphInfo_t.
