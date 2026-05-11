@@ -8,6 +8,7 @@
 #include "llm/llm_types.h"
 #include "llm/input_provider.h"
 #include "geniex_export.h"
+#include "geniex-proc/sampler.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -48,7 +49,21 @@ public:
 
 protected:
     bool onInitialized() override;
-    int32_t sampleNextToken(size_t phase, size_t token_offset = 0) const;
+
+    // Reads the last logits row, then either runs the cached sampler chain
+    // (advancing penalty / DRY state) or returns argmax when sampler_ is null.
+    int32_t sampleNextToken(size_t phase, size_t token_offset = 0);
+
+    // Reads the last logits row from the LM-head output. Shared by the
+    // greedy fast path and the sampler-driven path.
+    void readLastLogits(size_t phase, size_t token_offset, std::vector<float>& out) const;
+
+    // (Re)build the cached sampler from `gen_cfg` and seed it with this
+    // turn's prompt. Called once at the top of generate(). Reuses the
+    // existing sampler when config is unchanged so penalty / DRY history
+    // persists across multi-turn calls. No-op when sampling is disabled.
+    void prepareSampler(const GenerationConfig& gen_cfg,
+                        const std::vector<int32_t>& prompt_tokens);
 
     static std::string fmtPattern(const std::string& pattern, size_t layer_idx);
     const StateBlockSpec& requireKVStateBlock() const;
@@ -88,6 +103,14 @@ protected:
 
     size_t kv_state_block_idx_ = std::numeric_limits<size_t>::max();
     size_t n_past_ = 0;
+
+    // Cached sampler state. `sampler_` is null when sampling is disabled
+    // (greedy fast path); otherwise it persists across multi-turn calls so
+    // penalty / DRY history spans the conversation. `sampler_cfg_` records
+    // the config used to build it; prepareSampler() rebuilds when it changes.
+    std::unique_ptr<Sampler> sampler_;
+    GenerationConfig         sampler_cfg_;
+    bool                     sampler_cfg_valid_ = false;
 
 private:
     void buildConnections();

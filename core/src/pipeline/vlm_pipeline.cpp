@@ -111,6 +111,10 @@ GenerateResult VLMPipeline::generate(
 
     result.prompt_tokens = static_cast<int64_t>(prompt_tokens.size());
 
+    // Inject the tokenizer; LLMModel needs it for grammar/EOG resolution.
+    GenerationConfig effective_cfg = gen_cfg;
+    effective_cfg.tokenizer        = impl_->tokenizer;
+
     using Clock = std::chrono::high_resolution_clock;
     auto t_start = Clock::now();
     Clock::time_point t_first_token;
@@ -123,7 +127,7 @@ GenerateResult VLMPipeline::generate(
     output_tokens = impl_->model->generate(
         prompt_tokens,
         vlm_input,
-        gen_cfg,
+        effective_cfg,
         [&](int32_t tok) -> bool {
             if (!got_first) {
                 t_first_token = Clock::now();
