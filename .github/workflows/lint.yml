@@ -67,7 +67,7 @@ jobs:
           for f in "${files[@]}"; do
             [ -z "$f" ] && continue
             case "$f" in
-              third-party/*|build/*|build_*/*|qnn-api/include/*) continue ;;
+              third-party/*|build/*|build_*/*|qnn-api/*) continue ;;
             esac
             # Only keep files that still exist (skip deletes).
             [ -f "$f" ] && filtered+=("$f")

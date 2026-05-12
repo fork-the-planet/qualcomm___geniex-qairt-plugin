@@ -7,16 +7,16 @@
 // from models/qwen3/qwen3.h — the only Qwen3-specific code here is the
 // token-id writer and the RoPE cos/sin writer.
 
-#include "cb/cb.h"
-#include "llm/llm_utils.h"
-#include "pipeline/chat_template.h"
-#include "qwen3/qwen3.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "cb/cb.h"
+#include "llm/llm_utils.h"
+#include "pipeline/chat_template.h"
+#include "qwen3/qwen3.h"
 
 namespace geniex {
 namespace qwen3_cb {
@@ -27,26 +27,25 @@ static constexpr float  kRopeTheta = 1000000.0f;
 // Writes the concatenated, zero-padded input_ids buffer into shard 0.
 // No-ops on shards that don't take `input_ids`.
 class Qwen3CBTokenIdProvider : public cb::CBInputProvider {
-public:
-    explicit Qwen3CBTokenIdProvider(std::string tensor_name = "input_ids",
-                                    int32_t pad_token_id = 0)
+   public:
+    explicit Qwen3CBTokenIdProvider(std::string tensor_name = "input_ids", int32_t pad_token_id = 0)
         : tensor_name_(std::move(tensor_name)), pad_token_id_(pad_token_id) {}
 
     void write(Graph& g, const cb::CBStepContext& ctx) override {
         if (!g.hasInput(tensor_name_)) return;
 
-        const auto& spec = g.inputSpec(tensor_name_);
-        size_t capacity = 1;
+        const auto& spec     = g.inputSpec(tensor_name_);
+        size_t      capacity = 1;
         for (auto d : spec.shape) capacity *= d;
 
         std::vector<int32_t> buf(capacity, pad_token_id_);
-        const size_t n = std::min(ctx.concat_tokens.size(), capacity);
+        const size_t         n = std::min(ctx.concat_tokens.size(), capacity);
         std::copy_n(ctx.concat_tokens.begin(), n, buf.begin());
 
         g.write(tensor_name_, buf.data(), buf.size());
     }
 
-private:
+   private:
     std::string tensor_name_;
     int32_t     pad_token_id_;
 };
@@ -55,13 +54,10 @@ private:
 // Each session's positions start at its own kv_length rather than a single
 // global n_past — the only semantic difference vs. RoPEInputProvider.
 class Qwen3CBRoPEProvider : public cb::CBInputProvider {
-public:
-    Qwen3CBRoPEProvider(size_t head_dim, float theta,
-                        std::string cos_name = "position_ids_cos",
-                        std::string sin_name = "position_ids_sin")
-        : rope_(head_dim, theta),
-          cos_name_(std::move(cos_name)),
-          sin_name_(std::move(sin_name)) {}
+   public:
+    Qwen3CBRoPEProvider(size_t head_dim, float theta, std::string cos_name = "position_ids_cos",
+        std::string sin_name = "position_ids_sin")
+        : rope_(head_dim, theta), cos_name_(std::move(cos_name)), sin_name_(std::move(sin_name)) {}
 
     void write(Graph& g, const cb::CBStepContext& ctx) override {
         const bool has_cos = g.hasInput(cos_name_);
@@ -76,7 +72,7 @@ public:
         if (has_sin) g.write(sin_name_, sin_vec.data(), sin_vec.size());
     }
 
-private:
+   private:
     RotaryEmbedding rope_;
     std::string     cos_name_;
     std::string     sin_name_;

@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "llm/llm_types.h"
-#include "llm/llm_model.h"
-#include "llm/input_provider.h"
 #include "llama3/llama3.h"
+#include "llm/input_provider.h"
+#include "llm/llm_model.h"
+#include "llm/llm_types.h"
 
 namespace geniex {
 namespace llama3_2_1b {
@@ -22,26 +22,25 @@ static constexpr float  kRopeTheta = 500000.0f;
 //   shard 2 : layers  8 – 15   – hidden_state → logits         (KV layers 8–15)
 inline LLMSpec makeSpec() {
     return LLMSpec{
-        .shards = {
-            {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0"},
-            {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_7_Add_1_output_0"},
-            {"_model_model_layers_7_Add_1_output_0",
-             "logits"},
-        },
-        .state_blocks = {
-            makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 7}, LayerRange{8, 15}}),
-        },
+        .shards =
+            {
+                {"input_ids", "_model_model_embed_tokens_Gather_output_0"},
+                {"_model_model_embed_tokens_Gather_output_0", "_model_model_layers_7_Add_1_output_0"},
+                {"_model_model_layers_7_Add_1_output_0", "logits"},
+            },
+        .state_blocks =
+            {
+                makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 7}, LayerRange{8, 15}}),
+            },
 
         .seq_len_prefill = 128,
         .seq_len_decode  = 1,
 
-        .hidden_size   = 2048,
-        .num_heads     = 32,
-        .num_kv_heads  = 8,
-        .head_dim      = kHeadDim,
-        .vocab_size    = 128256,
+        .hidden_size  = 2048,
+        .num_heads    = 32,
+        .num_kv_heads = 8,
+        .head_dim     = kHeadDim,
+        .vocab_size   = 128256,
 
         .context_lengths = {4096},
 
@@ -60,15 +59,13 @@ inline LLMModel makeModel() {
 
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
-inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig& model_cfg) {
+inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg))
-        return std::nullopt;
+    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg)) return std::nullopt;
     return pipe;
 }
 
-} // namespace llama3_2_1b
+}  // namespace llama3_2_1b
 
 namespace llama3_2_3b {
 
@@ -86,26 +83,25 @@ static constexpr float  kRopeTheta = 500000.0f;
 // Graph names use prompt_/token_ prefix.
 inline LLMSpec makeSpec() {
     return LLMSpec{
-        .shards = {
-            {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0"},
-            {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_13_Add_1_output_0"},
-            {"_model_model_layers_13_Add_1_output_0",
-             "logits"},
-        },
-        .state_blocks = {
-            makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 13}, LayerRange{14, 27}}),
-        },
+        .shards =
+            {
+                {"input_ids", "_model_model_embed_tokens_Gather_output_0"},
+                {"_model_model_embed_tokens_Gather_output_0", "_model_model_layers_13_Add_1_output_0"},
+                {"_model_model_layers_13_Add_1_output_0", "logits"},
+            },
+        .state_blocks =
+            {
+                makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 13}, LayerRange{14, 27}}),
+            },
 
         .seq_len_prefill = 128,
         .seq_len_decode  = 1,
 
-        .hidden_size   = 3072,
-        .num_heads     = 24,
-        .num_kv_heads  = 8,
-        .head_dim      = kHeadDim,
-        .vocab_size    = 128256,
+        .hidden_size  = 3072,
+        .num_heads    = 24,
+        .num_kv_heads = 8,
+        .head_dim     = kHeadDim,
+        .vocab_size   = 128256,
 
         .context_lengths = {4096},
 
@@ -124,13 +120,11 @@ inline LLMModel makeModel() {
 
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
-inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig& model_cfg) {
+inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg))
-        return std::nullopt;
+    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg)) return std::nullopt;
     return pipe;
 }
 
-} // namespace llama3_2_3b
-} // namespace geniex
+}  // namespace llama3_2_3b
+}  // namespace geniex

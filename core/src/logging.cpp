@@ -14,11 +14,26 @@ static void default_log_handler(LogLevel level, const char* message) {
     const char* reset = "\033[0m";
 
     switch (level) {
-        case LogLevel::Trace: color = "\033[90m"; label = "TRACE"; break;  // dark gray
-        case LogLevel::Debug: color = "\033[34m"; label = "DEBUG"; break;  // blue
-        case LogLevel::Info:  color = "\033[32m"; label = "INFO"; break;   // green
-        case LogLevel::Warn:  color = "\033[33m"; label = "WARN"; break;   // yellow
-        case LogLevel::Error: color = "\033[31m"; label = "ERROR"; break;  // red
+        case LogLevel::Trace:
+            color = "\033[90m";
+            label = "TRACE";
+            break;  // dark gray
+        case LogLevel::Debug:
+            color = "\033[34m";
+            label = "DEBUG";
+            break;  // blue
+        case LogLevel::Info:
+            color = "\033[32m";
+            label = "INFO";
+            break;  // green
+        case LogLevel::Warn:
+            color = "\033[33m";
+            label = "WARN";
+            break;  // yellow
+        case LogLevel::Error:
+            color = "\033[31m";
+            label = "ERROR";
+            break;  // red
     }
 
     // Info/Warn labels are 4 chars vs. 5 for others; pad so log columns align.
@@ -28,8 +43,6 @@ static void default_log_handler(LogLevel level, const char* message) {
 
 LogCallback geniex_log_callback = default_log_handler;
 
-void geniex_set_log_callback(LogCallback cb) {
-    geniex_log_callback = (cb != nullptr) ? cb : default_log_handler;
-}
+void geniex_set_log_callback(LogCallback cb) { geniex_log_callback = (cb != nullptr) ? cb : default_log_handler; }
 
 }  // namespace geniex

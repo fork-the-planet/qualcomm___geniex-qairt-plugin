@@ -14,4 +14,4 @@ struct VLMInput {
     virtual ~VLMInput() = default;
 };
 
-} // namespace geniex
+}  // namespace geniex

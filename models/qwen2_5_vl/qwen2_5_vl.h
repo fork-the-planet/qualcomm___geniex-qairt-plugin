@@ -3,22 +3,21 @@
 
 #pragma once
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "geniex-proc/qwen2vl.h"
 #include "llm/input_provider.h"
 #include "llm/llm_model.h"
 #include "llm/llm_types.h"
 #include "pipeline/chat_template.h"
 #include "pipeline/vlm_pipeline.h"
 #include "types.h"
+#include "vlm/vision_encoder.h"
 #include "vlm/vlm_input_provider.h"
 #include "vlm/vlm_model.h"
-#include "vlm/vision_encoder.h"
-
-#include "geniex-proc/qwen2vl.h"
-
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
 
 namespace geniex {
 namespace qwen2_5_vl_7b {
@@ -26,7 +25,7 @@ namespace qwen2_5_vl_7b {
 static constexpr size_t kHiddenSize = 3584;
 static constexpr size_t kNumHeads   = 28;
 static constexpr size_t kNumKVHeads = 4;
-static constexpr size_t kHeadDim    = 128;      // hidden_size / num_heads
+static constexpr size_t kHeadDim    = 128;  // hidden_size / num_heads
 static constexpr size_t kNumLayers  = 28;
 static constexpr size_t kVocabSize  = 152064;
 static constexpr float  kRopeTheta  = 1000000.0f;
@@ -38,13 +37,11 @@ static constexpr int kTemporalPatchSize = 2;
 static constexpr int kSpatialMergeSize  = 2;
 
 static constexpr int kGridT            = 1;
-static constexpr int kGridH            = kImageHeight / kPatchSize;      // 24
-static constexpr int kGridW            = kImageWidth  / kPatchSize;      // 36
-static constexpr int kNumPatches       = kGridT * kGridH * kGridW;       // 864
-static constexpr int kNumImageTokens   = kNumPatches /
-    (kSpatialMergeSize * kSpatialMergeSize);                             // 216
-static constexpr int kPatchFeatureSize = 3 * kTemporalPatchSize *
-    kPatchSize * kPatchSize;                                             // 1176
+static constexpr int kGridH            = kImageHeight / kPatchSize;                              // 24
+static constexpr int kGridW            = kImageWidth / kPatchSize;                               // 36
+static constexpr int kNumPatches       = kGridT * kGridH * kGridW;                               // 864
+static constexpr int kNumImageTokens   = kNumPatches / (kSpatialMergeSize * kSpatialMergeSize);  // 216
+static constexpr int kPatchFeatureSize = 3 * kTemporalPatchSize * kPatchSize * kPatchSize;       // 1176
 
 // Qwen2.5-VL special tokens (same family as Qwen2-VL / Qwen2-Omni).
 static constexpr int32_t kVisionStartTokenId = 151652;
@@ -72,29 +69,27 @@ inline const std::vector<int>& mRoPESection() {
 // Multi-image prompts are handled by looping and calling execute() per image;
 // dynamic shapes are not supported.
 class Qwen25VLVisionEncoder : public QnnVisionEncoder {
-public:
+   public:
     std::vector<float> encode(const PixelData& pixel_data) override;
 };
 
 class Qwen25VLModel : public VLMModel {
-public:
+   public:
     Qwen25VLModel();
 
     void setVisionEncoder(std::unique_ptr<Qwen25VLVisionEncoder> vis);
     void setMRoPEProvider(std::unique_ptr<MRoPEInputProvider> provider);
 
-protected:
+   protected:
     std::vector<float> encodeVision(const PixelData& pixel_data) override;
 
     // Computes 3D MRoPE position IDs accounting for image grid extents and accumulated
     // mrope_deltas, then pushes them to the MRoPE provider.
-    void preparePositions(const std::vector<int32_t>& input_ids,
-                          const VLMInput&             vlm_input,
-                          size_t                      n_past) override;
+    void preparePositions(const std::vector<int32_t>& input_ids, const VLMInput& vlm_input, size_t n_past) override;
 
     void clearPositions() override;
 
-private:
+   private:
     MRoPEInputProvider*  mrope_provider_ = nullptr;  // non-owning
     std::vector<int32_t> mrope_deltas_   = {0, 0, 0};
 };
@@ -107,22 +102,24 @@ private:
 //   shard 5 : layers 24 – 27   add_51243     → logits
 inline LLMSpec makeSpec() {
     return LLMSpec{
-        .shards = {
-            {"inputs_embeds", "add_13335"},
-            {"add_13335",     "add_25971"},
-            {"add_25971",     "add_38607"},
-            {"add_38607",     "add_51243"},
-            {"add_51243",     "logits"},
-        },
-        .state_blocks = {
-            makeKVOnlyStateBlock({
-                LayerRange{0,  5},
-                LayerRange{6,  11},
-                LayerRange{12, 17},
-                LayerRange{18, 23},
-                LayerRange{24, 27},
-            }),
-        },
+        .shards =
+            {
+                {"inputs_embeds", "add_13335"},
+                {"add_13335", "add_25971"},
+                {"add_25971", "add_38607"},
+                {"add_38607", "add_51243"},
+                {"add_51243", "logits"},
+            },
+        .state_blocks =
+            {
+                makeKVOnlyStateBlock({
+                    LayerRange{0, 5},
+                    LayerRange{6, 11},
+                    LayerRange{12, 17},
+                    LayerRange{18, 23},
+                    LayerRange{24, 27},
+                }),
+            },
 
         .seq_len_prefill = 128,
         .seq_len_decode  = 1,
@@ -142,15 +139,13 @@ inline LLMSpec makeSpec() {
 }
 
 // Full Qwen2.5-VL-7B stack (vision encoder + LLM). Returns nullptr on failure.
-GENIEX_VLM_API std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg,
-                                                         const VLMConfig&        config);
+GENIEX_VLM_API std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg, const VLMConfig& config);
 
 // Convenience factory: builds the full pipeline (vision encoder + LLM + processor)
 // from a runtime config and a model config.  The processor is created with fixed
 // 336×504 image dimensions to match the compiled vision encoder graph.
 // Returns std::nullopt if any component fails to initialise.
-inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const VLMConfig&        config) {
+inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const VLMConfig& config) {
     auto model = makeModel(runtime_cfg, config);
     if (!model) return std::nullopt;
 
@@ -158,17 +153,15 @@ inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     proc_cfg.fixed_height = kImageHeight;
     proc_cfg.fixed_width  = kImageWidth;
 
-    auto processor = qwen2vl::Qwen2VLProcessor::create(
-        config.llm_config.tokenizer_path, proc_cfg);
+    auto processor = qwen2vl::Qwen2VLProcessor::create(config.llm_config.tokenizer_path, proc_cfg);
     if (!processor) return std::nullopt;
 
     Tokenizer& tok = processor->tokenizer();
 
     VLMPipeline pipe;
-    if (!pipe.create(std::move(model), std::move(processor), tok))
-        return std::nullopt;
+    if (!pipe.create(std::move(model), std::move(processor), tok)) return std::nullopt;
     return pipe;
 }
 
-} // namespace qwen2_5_vl_7b
-} // namespace geniex
+}  // namespace qwen2_5_vl_7b
+}  // namespace geniex

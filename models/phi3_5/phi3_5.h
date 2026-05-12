@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "llm/llm_types.h"
-#include "llm/llm_model.h"
 #include "llm/input_provider.h"
+#include "llm/llm_model.h"
+#include "llm/llm_types.h"
 #include "pipeline/chat_template.h"
 #include "pipeline/llm_pipeline.h"
 
@@ -13,18 +13,58 @@ namespace geniex {
 
 namespace phi3_5 {
 
-static constexpr size_t  kHeadDim    = 96;
-static constexpr float   kRopeTheta  = 10000.0f;
+static constexpr size_t kHeadDim   = 96;
+static constexpr float  kRopeTheta = 10000.0f;
 
 // Per-dimension LongRoPE extension factors (48 values for head_dim=96, from the model tensor).
-static inline const std::vector<float> kExtFactors = {
-    1.0000f, 1.0200f, 1.0300f, 1.0300f, 1.0500f, 1.0500f, 1.0500f, 1.0500f, 1.0500f,
-    1.0700f, 1.1000f, 1.1100f, 1.1600f, 1.1600f, 1.1700f, 1.2900f, 1.3400f, 1.6800f,
-    1.7900f, 1.8200f, 1.8500f, 1.8800f, 1.9100f, 1.9400f, 1.9900f, 2.0200f, 2.0200f,
-    2.0200f, 2.0200f, 2.0200f, 2.0200f, 2.0300f, 2.0300f, 2.0300f, 2.0300f, 2.0300f,
-    2.0300f, 2.0300f, 2.0300f, 2.0300f, 2.0800f, 2.0900f, 2.1900f, 2.2200f, 2.5900f,
-    2.7300f, 2.7500f, 2.8400f
-};
+static inline const std::vector<float> kExtFactors = {1.0000f,
+    1.0200f,
+    1.0300f,
+    1.0300f,
+    1.0500f,
+    1.0500f,
+    1.0500f,
+    1.0500f,
+    1.0500f,
+    1.0700f,
+    1.1000f,
+    1.1100f,
+    1.1600f,
+    1.1600f,
+    1.1700f,
+    1.2900f,
+    1.3400f,
+    1.6800f,
+    1.7900f,
+    1.8200f,
+    1.8500f,
+    1.8800f,
+    1.9100f,
+    1.9400f,
+    1.9900f,
+    2.0200f,
+    2.0200f,
+    2.0200f,
+    2.0200f,
+    2.0200f,
+    2.0200f,
+    2.0300f,
+    2.0300f,
+    2.0300f,
+    2.0300f,
+    2.0300f,
+    2.0300f,
+    2.0300f,
+    2.0300f,
+    2.0300f,
+    2.0800f,
+    2.0900f,
+    2.1900f,
+    2.2200f,
+    2.5900f,
+    2.7300f,
+    2.7500f,
+    2.8400f};
 
 // Returns the architecture spec for Phi3.5-mini (4 shards, 5 CL variants, on-device embedding).
 //
@@ -35,29 +75,28 @@ static inline const std::vector<float> kExtFactors = {
 //   shard 3 : lm_head only     – hidden → logits                  (no KV cache)
 inline LLMSpec makeSpec() {
     return LLMSpec{
-        .shards = {
-            {"input_ids",
-             "_model_embed_tokens_Gather_Gather_output_0"},
-            {"_model_embed_tokens_Gather_Gather_output_0",
-             "_model_layers_15_Add_1_Add_output_0"},
-            {"_model_layers_15_Add_1_Add_output_0",
-             "_model_layers_31_Add_1_Add_output_0"},
-            {"_model_layers_31_Add_1_Add_output_0",
-             "logits",
-             /*lm_head_only=*/true},
-        },
-        .state_blocks = {
-            makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 15}, LayerRange{16, 31}, std::nullopt}),
-        },
+        .shards =
+            {
+                {"input_ids", "_model_embed_tokens_Gather_Gather_output_0"},
+                {"_model_embed_tokens_Gather_Gather_output_0", "_model_layers_15_Add_1_Add_output_0"},
+                {"_model_layers_15_Add_1_Add_output_0", "_model_layers_31_Add_1_Add_output_0"},
+                {"_model_layers_31_Add_1_Add_output_0",
+                    "logits",
+                    /*lm_head_only=*/true},
+            },
+        .state_blocks =
+            {
+                makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 15}, LayerRange{16, 31}, std::nullopt}),
+            },
 
         .seq_len_prefill = 128,
         .seq_len_decode  = 1,
 
-        .hidden_size   = 3072,
-        .num_heads     = 32,
-        .num_kv_heads  = 32,
-        .head_dim      = kHeadDim,
-        .vocab_size    = 32064,
+        .hidden_size  = 3072,
+        .num_heads    = 32,
+        .num_kv_heads = 32,
+        .head_dim     = kHeadDim,
+        .vocab_size   = 32064,
 
         .context_lengths = {512, 1024, 2048, 3072, 4096},
 
@@ -74,13 +113,11 @@ inline LLMModel makeModel() {
 
 inline ChatTemplateFunc chatTemplate = phiChatTemplate;
 
-inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig& model_cfg) {
+inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg))
-        return std::nullopt;
+    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg)) return std::nullopt;
     return pipe;
 }
 
-} // namespace phi3_5
-} // namespace geniex
+}  // namespace phi3_5
+}  // namespace geniex

@@ -4,10 +4,10 @@
 #include "runtime.h"
 
 #ifdef _WIN32
-#  include <windows.h>
+#include <windows.h>
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 #elif defined(__ANDROID__) || defined(__linux__)
-#  include <dlfcn.h>
+#include <dlfcn.h>
 #endif
 
 namespace geniex {

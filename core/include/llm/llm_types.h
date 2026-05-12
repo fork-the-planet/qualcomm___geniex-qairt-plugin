@@ -15,9 +15,9 @@ namespace geniex {
 // Context describing a single forward-pass step in an LLM inference loop.
 struct LLMRunContext {
     const std::vector<int32_t>& token_ids;  // token IDs for the current chunk/step
-    size_t n_past;    // KV positions already filled
-    size_t curr_len;  // number of tokens in this chunk/step
-    size_t phase;     // 0 = prefill, 1 = decode
+    size_t                      n_past;     // KV positions already filled
+    size_t                      curr_len;   // number of tokens in this chunk/step
+    size_t                      phase;      // 0 = prefill, 1 = decode
 };
 
 // Inclusive KV layer range [begin, end] owned by a single shard.
@@ -41,7 +41,7 @@ enum class StateBlockKind {
 // For KV blocks, layer ranges are defined per shard and patterns map to
 // key/value in/out tensors with {} replaced by layer index.
 struct StateBlockSpec {
-    std::string name = "kv_default";
+    std::string    name = "kv_default";
     StateBlockKind kind = StateBlockKind::KV;
 
     // Per-shard ownership of this state block.
@@ -69,21 +69,19 @@ inline std::vector<std::vector<LayerRange>> makeShardLayerRanges(
 }
 
 inline StateBlockSpec makeKVOnlyStateBlock(
-    std::vector<std::optional<LayerRange>> shard_layer_ranges,
-    std::string name = "kv_default") {
+    std::vector<std::optional<LayerRange>> shard_layer_ranges, std::string name = "kv_default") {
     StateBlockSpec block;
-    block.name = std::move(name);
-    block.kind = StateBlockKind::KV;
+    block.name               = std::move(name);
+    block.kind               = StateBlockKind::KV;
     block.shard_layer_ranges = makeShardLayerRanges(std::move(shard_layer_ranges));
     return block;
 }
 
 inline StateBlockSpec makeKVOnlyStateBlock(
-    std::vector<std::vector<LayerRange>> shard_layer_ranges,
-    std::string name = "kv_default") {
+    std::vector<std::vector<LayerRange>> shard_layer_ranges, std::string name = "kv_default") {
     StateBlockSpec block;
-    block.name = std::move(name);
-    block.kind = StateBlockKind::KV;
+    block.name               = std::move(name);
+    block.kind               = StateBlockKind::KV;
     block.shard_layer_ranges = std::move(shard_layer_ranges);
     return block;
 }
@@ -126,4 +124,4 @@ struct LLMSpec {
     std::vector<int32_t> eos_token_ids;
 };
 
-} // namespace geniex
+}  // namespace geniex

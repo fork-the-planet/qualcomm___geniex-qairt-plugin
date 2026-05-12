@@ -16,16 +16,14 @@ void RoPEEncoder::write(Graph& g, size_t n_past, size_t curr_len) const {
     }
 }
 
-std::unique_ptr<PositionEncoder> makePositionEncoder(PositionEncodingType type,
-                                                      size_t head_dim,
-                                                      float  rope_theta) {
+std::unique_ptr<PositionEncoder> makePositionEncoder(PositionEncodingType type, size_t head_dim, float rope_theta) {
     switch (type) {
         case PositionEncodingType::ROPE:
             return std::make_unique<RoPEEncoder>(head_dim, rope_theta);
         case PositionEncodingType::NONE:
             return std::make_unique<NullEncoder>();
     }
-    return std::make_unique<NullEncoder>(); // unreachable; satisfy compiler
+    return std::make_unique<NullEncoder>();  // unreachable; satisfy compiler
 }
 
-} // namespace geniex
+}  // namespace geniex

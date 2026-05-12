@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "llm/llm_model.h"
-#include "llm/input_provider.h"
-#include "logging.h"
-#include "utils.h"
 
 #include <algorithm>
 #include <cassert>
@@ -16,13 +13,16 @@
 #include <stdexcept>
 #include <unordered_set>
 
+#include "llm/input_provider.h"
+#include "logging.h"
+#include "utils.h"
+
 namespace geniex {
 
-/*static*/ std::string LLMModel::fmtPattern(const std::string& pattern,
-                                             size_t             layer_idx) {
-    std::string result = pattern;
+/*static*/ std::string LLMModel::fmtPattern(const std::string& pattern, size_t layer_idx) {
+    std::string       result      = pattern;
     const std::string placeholder = "{}";
-    auto pos = result.find(placeholder);
+    auto              pos         = result.find(placeholder);
     if (pos != std::string::npos) {
         result.replace(pos, placeholder.size(), std::to_string(layer_idx));
     }
@@ -51,17 +51,16 @@ void forEachLayerInRanges(const std::vector<LayerRange>& ranges, Fn&& fn) {
     }
 }
 
-} // namespace
+}  // namespace
 
-LLMModel::LLMModel(LLMSpec spec)
-    : spec_(std::move(spec)) {}
+LLMModel::LLMModel(LLMSpec spec) : spec_(std::move(spec)) {}
 
 bool LLMModel::onInitialized() {
     shard_count_ = spec_.shards.size();
     num_cl_      = spec_.context_lengths.size();
 
     if (shard_count_ == 0) return false;
-    if (num_cl_ == 0)      return false;
+    if (num_cl_ == 0) return false;
 
     kv_state_block_idx_ = std::numeric_limits<size_t>::max();
     for (size_t block_idx = 0; block_idx < spec_.state_blocks.size(); ++block_idx) {
@@ -77,11 +76,17 @@ bool LLMModel::onInitialized() {
     }
 
     // QNN loads graphs in arbitrary order; reorder them so graphIndex() assumptions hold.
-    struct Seg { bool ph; std::string text; };
+    struct Seg {
+        bool        ph;
+        std::string text;
+    };
     std::vector<Seg> segs;
-    for (size_t p = 0; p < spec_.graph_name_pattern.size(); ) {
+    for (size_t p = 0; p < spec_.graph_name_pattern.size();) {
         auto o = spec_.graph_name_pattern.find('{', p);
-        if (o == std::string::npos) { segs.push_back({false, spec_.graph_name_pattern.substr(p)}); break; }
+        if (o == std::string::npos) {
+            segs.push_back({false, spec_.graph_name_pattern.substr(p)});
+            break;
+        }
         if (o > p) segs.push_back({false, spec_.graph_name_pattern.substr(p, o - p)});
         auto c = spec_.graph_name_pattern.find('}', o);
         segs.push_back({true, spec_.graph_name_pattern.substr(o + 1, c - o - 1)});
@@ -90,7 +95,7 @@ bool LLMModel::onInitialized() {
 
     auto parseGraphName = [&](const std::string& name) -> std::map<std::string, std::string> {
         std::map<std::string, std::string> r;
-        size_t p = 0;
+        size_t                             p = 0;
         for (size_t i = 0; i < segs.size(); ++i) {
             if (!segs[i].ph) {
                 if (name.compare(p, segs[i].text.size(), segs[i].text) != 0) return {};
@@ -98,37 +103,55 @@ bool LLMModel::onInitialized() {
             } else {
                 std::string next_lit;
                 for (size_t j = i + 1; j < segs.size(); ++j)
-                    if (!segs[j].ph) { next_lit = segs[j].text; break; }
+                    if (!segs[j].ph) {
+                        next_lit = segs[j].text;
+                        break;
+                    }
                 size_t end = next_lit.empty() ? name.size() : name.find(next_lit, p);
                 if (end == std::string::npos) return {};
                 r[segs[i].text] = name.substr(p, end - p);
-                p = end;
+                p               = end;
             }
         }
         return r;
     };
 
-    const std::string pf_str = std::to_string(spec_.seq_len_prefill);
-    auto sortKey = [&](const std::string& name) -> std::tuple<int,int,int> {
+    const std::string pf_str  = std::to_string(spec_.seq_len_prefill);
+    auto              sortKey = [&](const std::string& name) -> std::tuple<int, int, int> {
         auto v = parseGraphName(name);
         if (v.empty()) return {0, 0, 0};
         int phase = (v.count("ar") && v.at("ar") == pf_str) ? 0 : 1;
         int shard = 0;
-        try { if (v.count("shard")) shard = std::stoi(v.at("shard")) - 1; } catch (...) {}
+        try {
+            if (v.count("shard")) shard = std::stoi(v.at("shard")) - 1;
+        } catch (...) {
+        }
         int cl_idx = 0;
         for (size_t i = 0; i < spec_.context_lengths.size(); ++i)
-            if (v.count("cl") && v.at("cl") == std::to_string(spec_.context_lengths[i]))
-                { cl_idx = (int)i; break; }
+            if (v.count("cl") && v.at("cl") == std::to_string(spec_.context_lengths[i])) {
+                cl_idx = (int)i;
+                break;
+            }
         return {phase, shard, cl_idx};
     };
 
     std::stable_sort(graphs_.begin(), graphs_.end(), [&](const Graph& a, const Graph& b) {
         return sortKey(a.name()) < sortKey(b.name());
     });
-    GENIEX_LOG_DEBUG("LLMModel initialized: {} shards, {} CL variants [{}], vocab={}, hidden={}",
-        shard_count_, num_cl_,
-        [&]{ std::string s; for (size_t i = 0; i < num_cl_; ++i) { if (i) s+=','; s+=std::to_string(spec_.context_lengths[i]); } return s; }(),
-        spec_.vocab_size, spec_.hidden_size);
+    GENIEX_LOG_DEBUG(
+        "LLMModel initialized: {} shards, {} CL variants [{}], vocab={}, hidden={}",
+        shard_count_,
+        num_cl_,
+        [&] {
+            std::string s;
+            for (size_t i = 0; i < num_cl_; ++i) {
+                if (i) s += ',';
+                s += std::to_string(spec_.context_lengths[i]);
+            }
+            return s;
+        }(),
+        spec_.vocab_size,
+        spec_.hidden_size);
 
     buildConnections();
 
@@ -145,29 +168,29 @@ void LLMModel::buildConnections() {
 
     for (size_t cl = 0; cl < num_cl_; ++cl) {
         for (size_t s = 0; s + 1 < shard_count_; ++s) {
-            shard_hidden_state_[cl].push_back(
-                {static_cast<int>(graphIndex(0, s,     cl)), spec_.shards[s].out_state_name,
-                 static_cast<int>(graphIndex(0, s + 1, cl)), spec_.shards[s + 1].in_state_name});
+            shard_hidden_state_[cl].push_back({static_cast<int>(graphIndex(0, s, cl)),
+                spec_.shards[s].out_state_name,
+                static_cast<int>(graphIndex(0, s + 1, cl)),
+                spec_.shards[s + 1].in_state_name});
         }
 
         for (size_t s = 0; s + 1 < shard_count_; ++s) {
-            decode_shard_hidden_state_[cl].push_back(
-                {static_cast<int>(graphIndex(1, s,     cl)), spec_.shards[s].out_state_name,
-                 static_cast<int>(graphIndex(1, s + 1, cl)), spec_.shards[s + 1].in_state_name});
+            decode_shard_hidden_state_[cl].push_back({static_cast<int>(graphIndex(1, s, cl)),
+                spec_.shards[s].out_state_name,
+                static_cast<int>(graphIndex(1, s + 1, cl)),
+                spec_.shards[s + 1].in_state_name});
         }
     }
 }
 
-void LLMModel::runShard(size_t shard, size_t phase, size_t cl_idx,
-                         const LLMRunContext& ctx) {
-    const size_t kv_len = spec_.context_lengths[cl_idx]
-                        - (phase == 0 ? spec_.seq_len_prefill : spec_.seq_len_decode);
-    const size_t gi = graphIndex(phase, shard, cl_idx);
-    Graph& g = graph(gi);
+void LLMModel::runShard(size_t shard, size_t phase, size_t cl_idx, const LLMRunContext& ctx) {
+    const size_t kv_len = spec_.context_lengths[cl_idx] - (phase == 0 ? spec_.seq_len_prefill : spec_.seq_len_decode);
+    const size_t gi     = graphIndex(phase, shard, cl_idx);
+    Graph&       g      = graph(gi);
 
     if (g.hasInput(spec_.attention_mask_name)) {
         const size_t seq_len = (phase == 0) ? spec_.seq_len_prefill : spec_.seq_len_decode;
-        auto mask = get_attention_mask(ctx.n_past, ctx.curr_len, seq_len, kv_len);
+        auto         mask    = get_attention_mask(ctx.n_past, ctx.curr_len, seq_len, kv_len);
         g.write(spec_.attention_mask_name, mask.data(), mask.size());
     }
 
@@ -177,31 +200,27 @@ void LLMModel::runShard(size_t shard, size_t phase, size_t cl_idx,
 
     TimeLog tl;
     if (!g.execute(tl)) {
-        throw std::runtime_error(
-            "Graph execute failed: phase=" + std::to_string(phase) +
-            " shard=" + std::to_string(shard) +
-            " cl_idx=" + std::to_string(cl_idx) +
-            " n_past=" + std::to_string(ctx.n_past));
+        throw std::runtime_error("Graph execute failed: phase=" + std::to_string(phase) +
+                                 " shard=" + std::to_string(shard) + " cl_idx=" + std::to_string(cl_idx) +
+                                 " n_past=" + std::to_string(ctx.n_past));
     }
 }
 
-void LLMModel::copyKV(Graph& src_g, const std::string& src_name, bool src_is_output,
-                      Graph& dst_g, const std::string& dst_name,
-                      size_t src_off, size_t dst_off, size_t n_tok, bool is_key) {
-    const TensorSpec& src_spec = src_is_output ? src_g.outputSpec(src_name)
-                                               : src_g.inputSpec(src_name);
-    const TensorSpec& dst_spec = dst_g.inputSpec(dst_name);
-    const size_t elem_size = src_spec.elementSize();
+void LLMModel::copyKV(Graph& src_g, const std::string& src_name, bool src_is_output, Graph& dst_g,
+    const std::string& dst_name, size_t src_off, size_t dst_off, size_t n_tok, bool is_key) {
+    const TensorSpec& src_spec  = src_is_output ? src_g.outputSpec(src_name) : src_g.inputSpec(src_name);
+    const TensorSpec& dst_spec  = dst_g.inputSpec(dst_name);
+    const size_t      elem_size = src_spec.elementSize();
 
-    const auto* src_buf = static_cast<const uint8_t*>(
-        src_is_output ? src_g.outputPtr(src_name) : src_g.inputPtr(src_name));
+    const auto* src_buf =
+        static_cast<const uint8_t*>(src_is_output ? src_g.outputPtr(src_name) : src_g.inputPtr(src_name));
     auto* dst_buf = static_cast<uint8_t*>(dst_g.inputPtr(dst_name));
 
     // key   [H, 1, head_dim, kv_len]: n_rows = H*head_dim, token_size = elem_size
     // value [H, 1, kv_len, head_dim]: n_rows = H, token_size = head_dim * elem_size
     const size_t H  = spec_.num_kv_heads;
     const size_t hd = spec_.head_dim;
-    size_t num_rows, src_kv_len, dst_kv_len, token_size;
+    size_t       num_rows, src_kv_len, dst_kv_len, token_size;
     if (is_key) {
         num_rows   = H * hd;
         src_kv_len = src_spec.shape[3];
@@ -216,21 +235,36 @@ void LLMModel::copyKV(Graph& src_g, const std::string& src_name, bool src_is_out
 
     for (size_t row = 0; row < num_rows; ++row)
         std::memcpy(dst_buf + (row * dst_kv_len + dst_off) * token_size,
-                    src_buf + (row * src_kv_len + src_off) * token_size,
-                    n_tok * token_size);
+            src_buf + (row * src_kv_len + src_off) * token_size,
+            n_tok * token_size);
 }
 
-// Propagates freshly-computed KV outputs back into the KV input buffers so each execution sees the full context history.
+// Propagates freshly-computed KV outputs back into the KV input buffers so each execution sees the full context
+// history.
 void LLMModel::updateKV(size_t s, size_t phase, size_t dst_off, size_t n_tok) {
-    const auto& kv_block = requireKVStateBlock();
+    const auto& kv_block     = requireKVStateBlock();
     const auto& layer_ranges = kv_block.shard_layer_ranges[s];
     if (layer_ranges.empty()) return;
     Graph& g = graph(graphIndex(phase, s, active_cl_idx_));
     forEachLayerInRanges(layer_ranges, [&](size_t l) {
-        copyKV(g, fmtPattern(kv_block.key_out_pattern,   l), true,
-               g, fmtPattern(kv_block.key_in_pattern,    l), 0, dst_off, n_tok, true);
-        copyKV(g, fmtPattern(kv_block.value_out_pattern, l), true,
-               g, fmtPattern(kv_block.value_in_pattern,  l), 0, dst_off, n_tok, false);
+        copyKV(g,
+            fmtPattern(kv_block.key_out_pattern, l),
+            true,
+            g,
+            fmtPattern(kv_block.key_in_pattern, l),
+            0,
+            dst_off,
+            n_tok,
+            true);
+        copyKV(g,
+            fmtPattern(kv_block.value_out_pattern, l),
+            true,
+            g,
+            fmtPattern(kv_block.value_in_pattern, l),
+            0,
+            dst_off,
+            n_tok,
+            false);
     });
 }
 
@@ -239,7 +273,7 @@ void LLMModel::updateKV(size_t s, size_t phase, size_t dst_off, size_t n_tok) {
 // Expanding iterates rows backward to avoid overwriting unread data; contracting goes forward.
 void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, size_t n_valid) {
     if (old_kv_len == new_kv_len) return;
-    const auto& kv_block = requireKVStateBlock();
+    const auto& kv_block     = requireKVStateBlock();
     const auto& layer_ranges = kv_block.shard_layer_ranges[shard];
     if (layer_ranges.empty()) return;
 
@@ -253,87 +287,76 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
 
         // Key: [num_kv_heads, 1, head_dim, kv_len]
         {
-            const TensorSpec& spec = g.inputSpec(key_in);
-            const size_t elem_size = spec.elementSize();
-            const size_t n_rows   = spec_.num_kv_heads * spec_.head_dim;
-            auto* buf = static_cast<uint8_t*>(g.inputPtr(key_in));
+            const TensorSpec& spec      = g.inputSpec(key_in);
+            const size_t      elem_size = spec.elementSize();
+            const size_t      n_rows    = spec_.num_kv_heads * spec_.head_dim;
+            auto*             buf       = static_cast<uint8_t*>(g.inputPtr(key_in));
 
             if (new_kv_len > old_kv_len) {
                 for (ptrdiff_t row = static_cast<ptrdiff_t>(n_rows) - 1; row >= 0; --row) {
-                    std::memmove(buf + row * new_kv_len * elem_size,
-                                 buf + row * old_kv_len * elem_size,
-                                 copy_len * elem_size);
+                    std::memmove(
+                        buf + row * new_kv_len * elem_size, buf + row * old_kv_len * elem_size, copy_len * elem_size);
                     if (copy_len < new_kv_len)
-                        std::memset(buf + (row * new_kv_len + copy_len) * elem_size,
-                                    0, (new_kv_len - copy_len) * elem_size);
+                        std::memset(
+                            buf + (row * new_kv_len + copy_len) * elem_size, 0, (new_kv_len - copy_len) * elem_size);
                 }
             } else {
                 for (size_t row = 0; row < n_rows; ++row)
-                    std::memmove(buf + row * new_kv_len * elem_size,
-                                 buf + row * old_kv_len * elem_size,
-                                 copy_len * elem_size);
+                    std::memmove(
+                        buf + row * new_kv_len * elem_size, buf + row * old_kv_len * elem_size, copy_len * elem_size);
             }
         }
 
         // Value: [num_kv_heads, 1, kv_len, head_dim]
         {
-            const auto val_in = fmtPattern(kv_block.value_in_pattern, l);
-            const TensorSpec& spec = g.inputSpec(val_in);
-            const size_t elem_size  = spec.elementSize();
-            const size_t n_heads    = spec_.num_kv_heads;
-            const size_t token_size = spec_.head_dim * elem_size;
-            auto* buf = static_cast<uint8_t*>(g.inputPtr(val_in));
+            const auto        val_in     = fmtPattern(kv_block.value_in_pattern, l);
+            const TensorSpec& spec       = g.inputSpec(val_in);
+            const size_t      elem_size  = spec.elementSize();
+            const size_t      n_heads    = spec_.num_kv_heads;
+            const size_t      token_size = spec_.head_dim * elem_size;
+            auto*             buf        = static_cast<uint8_t*>(g.inputPtr(val_in));
 
             if (new_kv_len > old_kv_len) {
                 for (ptrdiff_t h = static_cast<ptrdiff_t>(n_heads) - 1; h >= 0; --h) {
-                    std::memmove(buf + h * new_kv_len * token_size,
-                                 buf + h * old_kv_len * token_size,
-                                 copy_len * token_size);
+                    std::memmove(
+                        buf + h * new_kv_len * token_size, buf + h * old_kv_len * token_size, copy_len * token_size);
                     if (copy_len < new_kv_len)
-                        std::memset(buf + (h * new_kv_len + copy_len) * token_size,
-                                    0, (new_kv_len - copy_len) * token_size);
+                        std::memset(
+                            buf + (h * new_kv_len + copy_len) * token_size, 0, (new_kv_len - copy_len) * token_size);
                 }
             } else {
                 for (size_t h = 0; h < n_heads; ++h)
-                    std::memmove(buf + h * new_kv_len * token_size,
-                                 buf + h * old_kv_len * token_size,
-                                 copy_len * token_size);
+                    std::memmove(
+                        buf + h * new_kv_len * token_size, buf + h * old_kv_len * token_size, copy_len * token_size);
             }
         }
     });
 }
 
-bool LLMModel::promoteCL(size_t required,
-                          size_t capacity_reserved_seq,
-                          size_t stride_reserved_seq) {
+bool LLMModel::promoteCL(size_t required, size_t capacity_reserved_seq, size_t stride_reserved_seq) {
     if (num_cl_ <= 1) return false;
 
     size_t new_cl = active_cl_idx_;
-    while (new_cl + 1 < num_cl_ &&
-           spec_.context_lengths[new_cl] - capacity_reserved_seq < required) {
+    while (new_cl + 1 < num_cl_ && spec_.context_lengths[new_cl] - capacity_reserved_seq < required) {
         ++new_cl;
     }
     if (new_cl == active_cl_idx_) return false;
 
     GENIEX_LOG_DEBUG("Upgrading CL from {} to {}", active_cl_idx_, new_cl);
     const size_t old_kv = spec_.context_lengths[active_cl_idx_] - stride_reserved_seq;
-    const size_t new_kv = spec_.context_lengths[new_cl]          - stride_reserved_seq;
-    for (size_t s = 0; s < shard_count_; ++s)
-        reshapeKV(s, old_kv, new_kv, n_past_);
+    const size_t new_kv = spec_.context_lengths[new_cl] - stride_reserved_seq;
+    for (size_t s = 0; s < shard_count_; ++s) reshapeKV(s, old_kv, new_kv, n_past_);
     active_cl_idx_ = new_cl;
     return true;
 }
 
-std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens,
-                                         const GenerationConfig&      gen_cfg,
-                                         std::function<bool(int32_t)> token_callback) {
+std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens, const GenerationConfig& gen_cfg,
+    std::function<bool(int32_t)> token_callback) {
+    size_t       tokens_processed = 0;
+    const size_t total_tokens     = prompt_tokens.size();
+    size_t       last_chunk_size  = 0;  // valid token count in the final prefill chunk
 
-    size_t tokens_processed = 0;
-    const size_t total_tokens = prompt_tokens.size();
-    size_t last_chunk_size = 0;  // valid token count in the final prefill chunk
-
-    GENIEX_LOG_DEBUG("generate: prompt_tokens={}, n_past={}, max_tokens={}",
-        total_tokens, n_past_, gen_cfg.max_tokens);
+    GENIEX_LOG_DEBUG("generate: prompt_tokens={}, n_past={}, max_tokens={}", total_tokens, n_past_, gen_cfg.max_tokens);
 
     // (Re)build & seed the sampler. No-op when sampling is disabled — in
     // that case `sampler_` stays null and sampleNextToken() takes the greedy
@@ -344,31 +367,33 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     // context_lengths is sorted ascending, so the last entry is the max CL.
     const size_t max_cl = spec_.context_lengths.back();
     if (n_past_ + total_tokens > max_cl) {
-        throw ContextLengthExceededError(
-            "geniex: prompt exceeds max context length (" + std::to_string(max_cl) + ")");
+        throw ContextLengthExceededError("geniex: prompt exceeds max context length (" + std::to_string(max_cl) + ")");
     }
 
     while (tokens_processed < total_tokens) {
-        const size_t remaining   = total_tokens - tokens_processed;
-        const size_t chunk_size  = std::min(remaining, spec_.seq_len_prefill);
-        last_chunk_size = chunk_size;
+        const size_t remaining    = total_tokens - tokens_processed;
+        const size_t chunk_size   = std::min(remaining, spec_.seq_len_prefill);
+        last_chunk_size           = chunk_size;
         const bool is_final_chunk = (tokens_processed + chunk_size >= total_tokens);
 
         // Ensure the prefill KV buffer (CL - seq_len_prefill) can hold n_past + chunk_size after this chunk.
         promoteCL(/*required=*/n_past_ + chunk_size,
-                  /*capacity_reserved_seq=*/spec_.seq_len_prefill,
-                  /*stride_reserved_seq=*/spec_.seq_len_prefill);
+            /*capacity_reserved_seq=*/spec_.seq_len_prefill,
+            /*stride_reserved_seq=*/spec_.seq_len_prefill);
 
-        const std::vector<int32_t> chunk(
-            prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed),
+        const std::vector<int32_t> chunk(prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed),
             prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed + chunk_size));
 
         GENIEX_LOG_DEBUG("prefill chunk: tokens [{}, {}) cl_idx={} final={}",
-            tokens_processed, tokens_processed + chunk_size, active_cl_idx_, is_final_chunk);
+            tokens_processed,
+            tokens_processed + chunk_size,
+            active_cl_idx_,
+            is_final_chunk);
         const LLMRunContext ctx{chunk, n_past_, chunk_size, /*phase=*/0};
 
         for (size_t s = 0; s < shard_count_; ++s) {
-            // For non-final prefill chunks we only need the KV cache to be populated, so such shards can be skipped entirely.
+            // For non-final prefill chunks we only need the KV cache to be populated, so such shards can be skipped
+            // entirely.
             if (!is_final_chunk && spec_.shards[s].lm_head_only) {
                 GENIEX_LOG_DEBUG("skipping LM-head-only shard {} on non-final prefill chunk", s);
                 continue;
@@ -383,7 +408,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             }
         }
 
-        n_past_          += chunk_size;
+        n_past_ += chunk_size;
         tokens_processed += chunk_size;
     }
 
@@ -391,13 +416,12 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     {
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
-        for (size_t s = 0; s < shard_count_; ++s)
-            reshapeKV(s, prefill_kv, decode_kv, n_past_);
+        for (size_t s = 0; s < shard_count_; ++s) reshapeKV(s, prefill_kv, decode_kv, n_past_);
     }
 
     // Prefill output is [seq_len, vocab_size]; the last valid token is at last_chunk_size - 1.
-    const size_t last_chunk_offset = last_chunk_size - 1;
-    int32_t next_token = sampleNextToken(/*phase=*/0, last_chunk_offset);
+    const size_t         last_chunk_offset = last_chunk_size - 1;
+    int32_t              next_token        = sampleNextToken(/*phase=*/0, last_chunk_offset);
     std::vector<int32_t> output_tokens;
 
     GENIEX_LOG_DEBUG("prefill done: n_past={}, first_token={}", n_past_, next_token);
@@ -405,7 +429,10 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     for (int step = 0; step < gen_cfg.max_tokens; ++step) {
         bool is_eos = false;
         for (int32_t eos_id : spec_.eos_token_ids) {
-            if (next_token == eos_id) { is_eos = true; break; }
+            if (next_token == eos_id) {
+                is_eos = true;
+                break;
+            }
         }
         if (is_eos) break;
         output_tokens.push_back(next_token);
@@ -422,8 +449,8 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
 
         // Ensure the decode KV buffer (CL - seq_len_decode) has room for the write at offset n_past_.
         promoteCL(/*required=*/n_past_ + 1,
-                  /*capacity_reserved_seq=*/spec_.seq_len_decode,
-                  /*stride_reserved_seq=*/spec_.seq_len_decode);
+            /*capacity_reserved_seq=*/spec_.seq_len_decode,
+            /*stride_reserved_seq=*/spec_.seq_len_decode);
 
         const LLMRunContext ctx{{next_token}, n_past_, /*curr_len=*/1, /*phase=*/1};
 
@@ -442,13 +469,12 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     // Restore prefill stride so the model is ready for the next generate() call.
     // Promote first so the upcoming decode_kv → prefill_kv reshape doesn't truncate history when n_past_ > prefill_kv.
     promoteCL(/*required=*/n_past_,
-              /*capacity_reserved_seq=*/spec_.seq_len_prefill,
-              /*stride_reserved_seq=*/spec_.seq_len_decode);
+        /*capacity_reserved_seq=*/spec_.seq_len_prefill,
+        /*stride_reserved_seq=*/spec_.seq_len_decode);
     {
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
-        for (size_t s = 0; s < shard_count_; ++s)
-            reshapeKV(s, decode_kv, prefill_kv, n_past_);
+        for (size_t s = 0; s < shard_count_; ++s) reshapeKV(s, decode_kv, prefill_kv, n_past_);
     }
 
     GENIEX_LOG_DEBUG("generate done: {} output tokens", output_tokens.size());
@@ -467,8 +493,7 @@ int32_t LLMModel::sampleNextToken(size_t phase, size_t token_offset) {
     }
 
     // Greedy fast path — historical behaviour when sampling is disabled.
-    return static_cast<int32_t>(
-        std::max_element(logits.begin(), logits.end()) - logits.begin());
+    return static_cast<int32_t>(std::max_element(logits.begin(), logits.end()) - logits.begin());
 }
 
 void LLMModel::readLastLogits(size_t phase, size_t token_offset, std::vector<float>& out) const {
@@ -477,32 +502,23 @@ void LLMModel::readLastLogits(size_t phase, size_t token_offset, std::vector<flo
     const Graph& g          = graph(g_idx);
 
     out.resize(spec_.vocab_size);
-    g.read(spec_.shards.back().out_state_name, out.data(), spec_.vocab_size,
-           token_offset * spec_.vocab_size);
+    g.read(spec_.shards.back().out_state_name, out.data(), spec_.vocab_size, token_offset * spec_.vocab_size);
 }
 
 namespace {
 
 // True when two configs agree on every field that affects the sampler chain.
 bool samplerCfgEqual(const GenerationConfig& a, const GenerationConfig& b) {
-    return a.enable_sampling     == b.enable_sampling
-        && a.temperature         == b.temperature
-        && a.top_p               == b.top_p
-        && a.min_p               == b.min_p
-        && a.top_k               == b.top_k
-        && a.repetition_penalty  == b.repetition_penalty
-        && a.presence_penalty    == b.presence_penalty
-        && a.frequency_penalty   == b.frequency_penalty
-        && a.penalty_last_n      == b.penalty_last_n
-        && a.seed                == b.seed
-        && a.grammar_str         == b.grammar_str
-        && a.grammar_root        == b.grammar_root;
+    return a.enable_sampling == b.enable_sampling && a.temperature == b.temperature && a.top_p == b.top_p &&
+           a.min_p == b.min_p && a.top_k == b.top_k && a.repetition_penalty == b.repetition_penalty &&
+           a.presence_penalty == b.presence_penalty && a.frequency_penalty == b.frequency_penalty &&
+           a.penalty_last_n == b.penalty_last_n && a.seed == b.seed && a.grammar_str == b.grammar_str &&
+           a.grammar_root == b.grammar_root;
 }
 
 }  // namespace
 
-void LLMModel::prepareSampler(const GenerationConfig& gen_cfg,
-                                const std::vector<int32_t>& prompt_tokens) {
+void LLMModel::prepareSampler(const GenerationConfig& gen_cfg, const std::vector<int32_t>& prompt_tokens) {
     // Sampling off → drop any cached sampler so sampleNextToken() goes greedy.
     if (!gen_cfg.enable_sampling) {
         sampler_.reset();
@@ -517,16 +533,16 @@ void LLMModel::prepareSampler(const GenerationConfig& gen_cfg,
     const bool can_reuse = sampler_ && sampler_cfg_valid_ && samplerCfgEqual(sampler_cfg_, gen_cfg);
     if (!can_reuse) {
         geniex_sampler_params sp;
-        sp.seed             = gen_cfg.seed;
-        sp.temp             = gen_cfg.temperature;
-        sp.top_k            = gen_cfg.top_k;
-        sp.top_p            = gen_cfg.top_p;
-        sp.min_p            = gen_cfg.min_p;
-        sp.penalty_repeat   = gen_cfg.repetition_penalty;
-        sp.penalty_freq     = gen_cfg.frequency_penalty;
-        sp.penalty_present  = gen_cfg.presence_penalty;
-        sp.penalty_last_n   = gen_cfg.penalty_last_n;
-        sp.no_perf          = true;
+        sp.seed            = gen_cfg.seed;
+        sp.temp            = gen_cfg.temperature;
+        sp.top_k           = gen_cfg.top_k;
+        sp.top_p           = gen_cfg.top_p;
+        sp.min_p           = gen_cfg.min_p;
+        sp.penalty_repeat  = gen_cfg.repetition_penalty;
+        sp.penalty_freq    = gen_cfg.frequency_penalty;
+        sp.penalty_present = gen_cfg.presence_penalty;
+        sp.penalty_last_n  = gen_cfg.penalty_last_n;
+        sp.no_perf         = true;
 
         // EOG tokens come from the model spec so Sampler::is_eog() works.
         sp.eog_tokens.assign(spec_.eos_token_ids.begin(), spec_.eos_token_ids.end());
@@ -538,8 +554,8 @@ void LLMModel::prepareSampler(const GenerationConfig& gen_cfg,
         if (!gen_cfg.grammar_str.empty()) {
             if (gen_cfg.tokenizer) {
                 try {
-                    sampler_->set_grammar(std::make_unique<Grammar>(
-                        gen_cfg.grammar_str, *gen_cfg.tokenizer, gen_cfg.grammar_root));
+                    sampler_->set_grammar(
+                        std::make_unique<Grammar>(gen_cfg.grammar_str, *gen_cfg.tokenizer, gen_cfg.grammar_root));
                 } catch (const std::exception& e) {
                     GENIEX_LOG_WARN("grammar init failed, continuing without grammar: {}", e.what());
                 }
@@ -561,11 +577,11 @@ void LLMModel::prepareSampler(const GenerationConfig& gen_cfg,
 
 std::unordered_set<std::string> LLMModel::buildKVInputNameSet() const {
     std::unordered_set<std::string> names;
-    const auto& kv_block = requireKVStateBlock();
+    const auto&                     kv_block = requireKVStateBlock();
     for (size_t s = 0; s < shard_count_; ++s) {
         const auto& layer_ranges = kv_block.shard_layer_ranges[s];
         forEachLayerInRanges(layer_ranges, [&](size_t l) {
-            names.insert(fmtPattern(kv_block.key_in_pattern,   l));
+            names.insert(fmtPattern(kv_block.key_in_pattern, l));
             names.insert(fmtPattern(kv_block.value_in_pattern, l));
         });
     }
@@ -580,7 +596,7 @@ void LLMModel::resetKVCache() {
     sampler_.reset();
     sampler_cfg_valid_ = false;
 
-    const auto kv_names = buildKVInputNameSet();
+    const auto   kv_names     = buildKVInputNameSet();
     const size_t total_graphs = 2 * shard_count_ * num_cl_;
     for (size_t gi = 0; gi < total_graphs; ++gi) {
         Graph& g = graph(gi);
@@ -597,10 +613,10 @@ void LLMModel::saveKVCacheToFile(const std::string& path) const {
     std::ofstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("saveKVCacheToFile: cannot open " + path);
 
-    f.write(reinterpret_cast<const char*>(&n_past_),        sizeof(n_past_));
+    f.write(reinterpret_cast<const char*>(&n_past_), sizeof(n_past_));
     f.write(reinterpret_cast<const char*>(&active_cl_idx_), sizeof(active_cl_idx_));
 
-    const auto kv_names = buildKVInputNameSet();
+    const auto   kv_names       = buildKVInputNameSet();
     const size_t prefill_graphs = shard_count_ * num_cl_;
     for (size_t gi = 0; gi < prefill_graphs; ++gi) {
         const Graph& g = graph(gi);
@@ -608,8 +624,7 @@ void LLMModel::saveKVCacheToFile(const std::string& path) const {
             if (kv_names.count(spec.name)) {
                 std::vector<uint8_t> buf(spec.byteCount());
                 g.read(spec.name, buf.data(), buf.size());
-                f.write(reinterpret_cast<const char*>(buf.data()),
-                        static_cast<std::streamsize>(buf.size()));
+                f.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
             }
         }
     }
@@ -620,18 +635,17 @@ void LLMModel::loadKVCacheFromFile(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) throw std::runtime_error("loadKVCacheFromFile: cannot open " + path);
 
-    f.read(reinterpret_cast<char*>(&n_past_),        sizeof(n_past_));
+    f.read(reinterpret_cast<char*>(&n_past_), sizeof(n_past_));
     f.read(reinterpret_cast<char*>(&active_cl_idx_), sizeof(active_cl_idx_));
 
-    const auto kv_names = buildKVInputNameSet();
+    const auto   kv_names       = buildKVInputNameSet();
     const size_t prefill_graphs = shard_count_ * num_cl_;
     for (size_t gi = 0; gi < prefill_graphs; ++gi) {
         Graph& g = graph(gi);
         for (const auto& spec : g.inputSpecs()) {
             if (kv_names.count(spec.name)) {
                 std::vector<uint8_t> buf(spec.byteCount());
-                f.read(reinterpret_cast<char*>(buf.data()),
-                       static_cast<std::streamsize>(buf.size()));
+                f.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
                 g.write(spec.name, buf.data(), buf.size());
             }
         }
@@ -645,4 +659,4 @@ void LLMModel::addInputProvider(std::unique_ptr<InputProvider> provider) {
     input_providers_.push_back(std::move(provider));
 }
 
-} // namespace geniex
+}  // namespace geniex

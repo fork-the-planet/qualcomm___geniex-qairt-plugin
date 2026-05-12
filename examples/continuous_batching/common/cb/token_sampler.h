@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "cb/session.h"
-
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include "cb/session.h"
 
 namespace geniex {
 namespace cb {
@@ -24,10 +24,7 @@ struct TokenResult {
 // handles the graph's native output dtype. Kept for callers that already
 // have a float logits buffer in hand.
 inline std::vector<TokenResult> extractNextTokens(
-    const float* logits,
-    const std::vector<Session*>& sessions,
-    const std::vector<int>& seg_lengths,
-    int vocab_size) {
+    const float* logits, const std::vector<Session*>& sessions, const std::vector<int>& seg_lengths, int vocab_size) {
     std::vector<TokenResult> results;
     results.reserve(sessions.size());
     int offset = 0;

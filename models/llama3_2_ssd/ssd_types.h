@@ -32,15 +32,15 @@ struct SSDConfig {
 // Binary file header for the Genie KV cache format used to load the forecast prefix.
 #pragma pack(push, 1)
 struct KVCacheFileHeader {
-    uint32_t num_tensors;   // K+V tensors (2 per layer)
-    uint32_t magic;         // 0xC0DE
-    uint8_t  dtype;         // 0=uint8, 1=float16, 2=float32
+    uint32_t num_tensors;  // K+V tensors (2 per layer)
+    uint32_t magic;        // 0xC0DE
+    uint8_t  dtype;        // 0=uint8, 1=float16, 2=float32
     uint8_t  pad;
-    uint16_t n_heads;       // KV heads
-    uint16_t embed_dim;     // head_dim
-    uint16_t update_size;   // KV entries stored
+    uint16_t n_heads;      // KV heads
+    uint16_t embed_dim;    // head_dim
+    uint16_t update_size;  // KV entries stored
 };
 #pragma pack(pop)
 static_assert(sizeof(KVCacheFileHeader) == 16, "KVCacheFileHeader must be 16 bytes");
 
-} // namespace geniex
+}  // namespace geniex

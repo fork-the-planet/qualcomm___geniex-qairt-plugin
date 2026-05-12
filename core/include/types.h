@@ -9,12 +9,11 @@
 #include <string>
 #include <vector>
 
+#include "IBackend.hpp"  // for qnn::tools::netrun::PerfProfile
 #include "QnnLog.h"
 #include "QnnTypes.h"
-#include "IBackend.hpp"  // for qnn::tools::netrun::PerfProfile
-
-#include "geniex-proc/types.h"      // for GENIEX_DEFAULT_SEED
 #include "geniex-proc/tokenizer.h"  // for Tokenizer
+#include "geniex-proc/types.h"      // for GENIEX_DEFAULT_SEED
 
 namespace geniex {
 
@@ -43,10 +42,10 @@ struct QnnRuntimeConfig {
 
 // Per-model configuration: everything needed to load and run a QNN graph model.
 struct ModelConfig {
-    std::vector<std::string>   model_paths;    // .bin shards in order
-    std::string                tokenizer_path;
-    std::string                embedding_path; // empty if token embeddings are computed by the model graph
-    std::string                htp_config_path; // HTP JSON config (empty = default)
+    std::vector<std::string>        model_paths;  // .bin shards in order
+    std::string                     tokenizer_path;
+    std::string                     embedding_path;   // empty if token embeddings are computed by the model graph
+    std::string                     htp_config_path;  // HTP JSON config (empty = default)
     qnn::tools::netrun::PerfProfile perf_profile = qnn::tools::netrun::PerfProfile::BURST;
 };
 
@@ -90,7 +89,7 @@ struct GenerationConfig {
 // Static description of a single graph tensor, populated from GraphInfo_t.
 struct TensorSpec {
     std::string           name;
-    Qnn_DataType_t        dtype        = QNN_DATATYPE_FLOAT_32;
+    Qnn_DataType_t        dtype = QNN_DATATYPE_FLOAT_32;
     std::vector<uint32_t> shape;
     float                 quant_scale  = 1.0f;
     int32_t               quant_offset = 0;
@@ -148,5 +147,4 @@ struct PixelData {
     std::vector<std::array<int32_t, 3>> image_grid_thw;  // [{T, H, W}] per image
 };
 
-} // namespace geniex
-
+}  // namespace geniex

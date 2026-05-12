@@ -37,11 +37,12 @@
 #include "types.h"
 
 #ifdef _WIN32
-#  include <windows.h>
-#  include <winsvc.h>
-#  include <vector>
+#include <windows.h>
+#include <winsvc.h>
+
+#include <vector>
 #elif defined(__ANDROID__) || defined(__linux__)
-#  include <dlfcn.h>
+#include <dlfcn.h>
 #endif
 
 namespace geniex {
@@ -85,7 +86,7 @@ inline int detect_htp_arch() {
         DWORD buf_size = 0;
         QueryServiceConfigW(svc, NULL, 0, &buf_size);
         std::vector<uint8_t> cfg_buf(buf_size);
-        auto* cfg = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(cfg_buf.data());
+        auto*                cfg = reinterpret_cast<LPQUERY_SERVICE_CONFIGW>(cfg_buf.data());
         if (!QueryServiceConfigW(svc, cfg, buf_size, &buf_size)) {
             GENIEX_LOG_WARN("HTP detect: QueryServiceConfigW failed ({})", GetLastError());
             CloseServiceHandle(svc);
@@ -98,15 +99,13 @@ inline int detect_htp_arch() {
         CloseServiceHandle(svc);
         CloseServiceHandle(scm);
 
-        if (auto sep = drv_dir.find_last_of(L'\\'); sep != std::wstring::npos)
-            drv_dir.resize(sep);
+        if (auto sep = drv_dir.find_last_of(L'\\'); sep != std::wstring::npos) drv_dir.resize(sep);
 
         // Resolve %SystemRoot% placeholder if present.
         const std::wstring placeholder = L"\\SystemRoot";
         if (drv_dir.compare(0, placeholder.size(), placeholder) == 0) {
             wchar_t windir[MAX_PATH];
-            if (GetEnvironmentVariableW(L"windir", windir, MAX_PATH))
-                drv_dir.replace(0, placeholder.size(), windir);
+            if (GetEnvironmentVariableW(L"windir", windir, MAX_PATH)) drv_dir.replace(0, placeholder.size(), windir);
         }
 
         std::wstring dll_path = drv_dir + L"\\libcdsprpc.dll";
@@ -122,8 +121,7 @@ inline int detect_htp_arch() {
             return;
         }
 
-        fn = reinterpret_cast<remote_handle_control_t>(
-            GetProcAddress(lib, "remote_handle_control"));
+        fn = reinterpret_cast<remote_handle_control_t>(GetProcAddress(lib, "remote_handle_control"));
         if (!fn) {
             GENIEX_LOG_WARN("HTP detect: remote_handle_control not found in libcdsprpc.dll");
             FreeLibrary(lib);
@@ -132,8 +130,8 @@ inline int detect_htp_arch() {
         }
 
 #else  // __ANDROID__ and __linux__
-        // libcdsprpc.so is a system library on Android; on Linux the Qualcomm
-        // FastRPC driver installs it; if absent, detection returns 0.
+       // libcdsprpc.so is a system library on Android; on Linux the Qualcomm
+       // FastRPC driver installs it; if absent, detection returns 0.
         void* lib = dlopen("libcdsprpc.so", RTLD_NOW | RTLD_LOCAL);
         if (!lib) {
             GENIEX_LOG_WARN("HTP detect: failed to load libcdsprpc.so: {}", dlerror());
@@ -156,7 +154,9 @@ inline int detect_htp_arch() {
         constexpr uint32_t FASTRPC_ARCH_VER    = 6;
         constexpr uint32_t FASTRPC_CDSP_DOMAIN = 3;
 
-        struct { uint32_t domain, attribute_ID, capability; } cap{};
+        struct {
+            uint32_t domain, attribute_ID, capability;
+        } cap{};
         cap.domain       = FASTRPC_CDSP_DOMAIN;
         cap.attribute_ID = FASTRPC_ARCH_VER;
 
@@ -173,20 +173,33 @@ inline int detect_htp_arch() {
         }
 
         switch (cap.capability & 0xff) {
-            case 0x68: s_arch = 68; break;
-            case 0x69: s_arch = 69; break;
-            case 0x73: s_arch = 73; break;
-            case 0x75: s_arch = 75; break;
-            case 0x79: s_arch = 79; break;
-            case 0x81: s_arch = 81; break;
-            case 0x85: s_arch = 85; break;
+            case 0x68:
+                s_arch = 68;
+                break;
+            case 0x69:
+                s_arch = 69;
+                break;
+            case 0x73:
+                s_arch = 73;
+                break;
+            case 0x75:
+                s_arch = 75;
+                break;
+            case 0x79:
+                s_arch = 79;
+                break;
+            case 0x81:
+                s_arch = 81;
+                break;
+            case 0x85:
+                s_arch = 85;
+                break;
             default:
                 GENIEX_LOG_WARN("HTP detect: unknown arch capability 0x{:x}", cap.capability);
                 s_arch = 0;
         }
 
-        if (s_arch > 0)
-            GENIEX_LOG_INFO("Detected HTP arch: v{}", s_arch);
+        if (s_arch > 0) GENIEX_LOG_INFO("Detected HTP arch: v{}", s_arch);
 
 #ifdef _WIN32
         FreeLibrary(lib);
@@ -204,9 +217,7 @@ inline int detect_htp_arch() {
 // Side effect on Windows: calls SetDllDirectoryA() so the loader can find
 // transitive HTP DLL dependencies (e.g. QnnHtpV73Stub.dll).
 inline void resolveHtpPaths(QnnRuntimeConfig& cfg) {
-    if (cfg.backend_path.has_value() &&
-        cfg.system_lib_path.has_value() &&
-        cfg.extensions_path.has_value()) {
+    if (cfg.backend_path.has_value() && cfg.system_lib_path.has_value() && cfg.extensions_path.has_value()) {
         return;
     }
 
@@ -220,31 +231,24 @@ inline void resolveHtpPaths(QnnRuntimeConfig& cfg) {
     auto htp_dir = geniex_core_dir() / "htp-files";
 
     if (!std::filesystem::exists(htp_dir)) {
-        throw std::runtime_error(
-            "geniex: HTP runtime folder not found: " + htp_dir.string() +
-            "\nExpected htp-files/ to be installed alongside geniex_core. "
-            "Set QnnRuntimeConfig path fields explicitly to override.");
+        throw std::runtime_error("geniex: HTP runtime folder not found: " + htp_dir.string() +
+                                 "\nExpected htp-files/ to be installed alongside geniex_core. "
+                                 "Set QnnRuntimeConfig path fields explicitly to override.");
     }
 
     GENIEX_LOG_INFO("Auto-resolved HTP runtime path: {}", htp_dir.string());
 
 #ifdef _WIN32
-    if (!cfg.backend_path.has_value())
-        cfg.backend_path    = (htp_dir / "QnnHtp.dll").string();
-    if (!cfg.system_lib_path.has_value())
-        cfg.system_lib_path = (htp_dir / "QnnSystem.dll").string();
-    if (!cfg.extensions_path.has_value())
-        cfg.extensions_path = (htp_dir / "QnnHtpNetRunExtensions.dll").string();
+    if (!cfg.backend_path.has_value()) cfg.backend_path = (htp_dir / "QnnHtp.dll").string();
+    if (!cfg.system_lib_path.has_value()) cfg.system_lib_path = (htp_dir / "QnnSystem.dll").string();
+    if (!cfg.extensions_path.has_value()) cfg.extensions_path = (htp_dir / "QnnHtpNetRunExtensions.dll").string();
 
     // Allow the loader to find transitive HTP DLL dependencies in the same folder.
     SetDllDirectoryA(htp_dir.string().c_str());
 #else  // __ANDROID__ and __linux__
-    if (!cfg.backend_path.has_value())
-        cfg.backend_path    = (htp_dir / "libQnnHtp.so").string();
-    if (!cfg.system_lib_path.has_value())
-        cfg.system_lib_path = (htp_dir / "libQnnSystem.so").string();
-    if (!cfg.extensions_path.has_value())
-        cfg.extensions_path = (htp_dir / "libQnnHtpNetRunExtensions.so").string();
+    if (!cfg.backend_path.has_value()) cfg.backend_path = (htp_dir / "libQnnHtp.so").string();
+    if (!cfg.system_lib_path.has_value()) cfg.system_lib_path = (htp_dir / "libQnnSystem.so").string();
+    if (!cfg.extensions_path.has_value()) cfg.extensions_path = (htp_dir / "libQnnHtpNetRunExtensions.so").string();
 #endif
 }
 

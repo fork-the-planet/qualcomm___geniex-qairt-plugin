@@ -24,8 +24,7 @@ static void enable_utf8_io() {
     SetConsoleCP(CP_UTF8);
     DWORD  mode = 0;
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (GetConsoleMode(hOut, &mode))
-        SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    if (GetConsoleMode(hOut, &mode)) SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 }
 #endif
 
@@ -48,15 +47,21 @@ static void printUsage(const char* prog) {
 
 static bool parseArgs(int argc, char** argv, Args& args) {
     for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto next = [&]() -> std::string {
-            return (i + 1 < argc) ? argv[++i] : std::string{};
-        };
-        if      (a == "--max-tokens")    args.max_tokens    = std::stoi(next());
-        else if (a == "--system-prompt") args.system_prompt = next();
-        else if (a == "--verbose")       args.verbose       = true;
-        else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
-        else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
+        std::string a    = argv[i];
+        auto        next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string{}; };
+        if (a == "--max-tokens")
+            args.max_tokens = std::stoi(next());
+        else if (a == "--system-prompt")
+            args.system_prompt = next();
+        else if (a == "--verbose")
+            args.verbose = true;
+        else if (a == "--help" || a == "-h") {
+            printUsage(argv[0]);
+            return false;
+        } else {
+            std::cerr << "Unknown argument: " << a << "\n";
+            return false;
+        }
     }
     return true;
 }
@@ -64,20 +69,20 @@ static bool parseArgs(int argc, char** argv, Args& args) {
 static bool isImageFile(const std::string& path) {
     std::string p = path;
     std::transform(p.begin(), p.end(), p.begin(), ::tolower);
-    return p.ends_with(".jpg") || p.ends_with(".jpeg") || p.ends_with(".png")
-        || p.ends_with(".bmp") || p.ends_with(".gif")  || p.ends_with(".webp");
+    return p.ends_with(".jpg") || p.ends_with(".jpeg") || p.ends_with(".png") || p.ends_with(".bmp") ||
+           p.ends_with(".gif") || p.ends_with(".webp");
 }
 
-static void parseInput(const std::string& input,
-                       std::string& prompt_text,
-                       std::vector<std::string>& image_paths) {
+static void parseInput(const std::string& input, std::string& prompt_text, std::vector<std::string>& image_paths) {
     image_paths.clear();
     std::vector<std::string> text_tokens;
-    std::istringstream iss(input);
-    std::string token;
+    std::istringstream       iss(input);
+    std::string              token;
     while (iss >> token) {
-        if (isImageFile(token)) image_paths.push_back(token);
-        else                    text_tokens.push_back(token);
+        if (isImageFile(token))
+            image_paths.push_back(token);
+        else
+            text_tokens.push_back(token);
     }
     prompt_text.clear();
     for (size_t i = 0; i < text_tokens.size(); ++i) {
@@ -113,8 +118,7 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir =
-        std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl_7b";
+    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl_7b";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected from
     // htp-files/ installed alongside geniex_core.
@@ -133,8 +137,8 @@ int main(int argc, char** argv) {
     config.llm_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
     config.llm_config.embedding_path  = (model_dir / "embedding_weights.raw").string();
 
-    config.vision_config.model_paths      = {(model_dir / "vision_encoder.bin").string()};
-    config.vision_config.htp_config_path  = (model_dir / "htp_backend_ext_config.json").string();
+    config.vision_config.model_paths     = {(model_dir / "vision_encoder.bin").string()};
+    config.vision_config.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
 
     geniex::GenerationConfig gen_cfg;
     gen_cfg.max_tokens = args.max_tokens;
@@ -160,8 +164,7 @@ int main(int argc, char** argv) {
     geniex::qwen2vl::Qwen2VLConfig proc_cfg;
     proc_cfg.fixed_height = geniex::qwen2_5_vl_7b::kImageHeight;
     proc_cfg.fixed_width  = geniex::qwen2_5_vl_7b::kImageWidth;
-    auto processor = geniex::qwen2vl::Qwen2VLProcessor::create(
-        config.llm_config.tokenizer_path, proc_cfg);
+    auto processor        = geniex::qwen2vl::Qwen2VLProcessor::create(config.llm_config.tokenizer_path, proc_cfg);
 
     bool first_turn = true;
     while (true) {
@@ -169,78 +172,67 @@ int main(int argc, char** argv) {
         std::string input;
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
-        std::string prompt_text;
+        std::string              prompt_text;
         std::vector<std::string> image_paths;
         parseInput(input, prompt_text, image_paths);
 
         const bool saved_first_turn = first_turn;
 
-        const auto t_start = std::chrono::high_resolution_clock::now();
+        const auto                                     t_start = std::chrono::high_resolution_clock::now();
         std::chrono::high_resolution_clock::time_point t_first_token;
-        bool got_first_token = false;
+        bool                                           got_first_token = false;
 
         std::cout << "\033[33m";
         std::vector<int32_t> output_tokens;
         try {
             std::vector<int32_t> prompt_tokens;
-            geniex::VLMInput vlm_input;
+            geniex::VLMInput     vlm_input;
 
             if (first_turn) {
                 geniex::ChatMessage system_msg{geniex::Role::System, args.system_prompt};
                 geniex::ChatMessage user_msg{geniex::Role::User, prompt_text};
-                for (const auto& img : image_paths)
-                    user_msg.mm_content.push_back({geniex::Modality::Image, img});
+                for (const auto& img : image_paths) user_msg.mm_content.push_back({geniex::Modality::Image, img});
 
-                std::string formatted = processor->apply_chat_template(
-                    {system_msg, user_msg}, /*add_generation_prompt=*/true);
+                std::string formatted =
+                    processor->apply_chat_template({system_msg, user_msg}, /*add_generation_prompt=*/true);
                 geniex::BatchFeatures bf = processor->process(formatted, image_paths);
-                vlm_input.pixel_data = toPixelData(bf);
+                vlm_input.pixel_data     = toPixelData(bf);
                 prompt_tokens.assign(bf.input_ids.cbegin(), bf.input_ids.cend());
                 first_turn = false;
 
             } else if (!image_paths.empty()) {
                 geniex::ChatMessage user_msg{geniex::Role::User, prompt_text};
-                for (const auto& img : image_paths)
-                    user_msg.mm_content.push_back({geniex::Modality::Image, img});
+                for (const auto& img : image_paths) user_msg.mm_content.push_back({geniex::Modality::Image, img});
 
-                std::string formatted = processor->apply_chat_template(
-                    {user_msg}, /*add_generation_prompt=*/true);
+                std::string formatted    = processor->apply_chat_template({user_msg}, /*add_generation_prompt=*/true);
                 geniex::BatchFeatures bf = processor->process(formatted, image_paths);
-                vlm_input.pixel_data = toPixelData(bf);
+                vlm_input.pixel_data     = toPixelData(bf);
 
                 auto prefix = processor->tokenizer().encode("<|im_end|>\n",
-                                                            /*add_special_tokens=*/false);
+                    /*add_special_tokens=*/false);
                 prompt_tokens.assign(prefix.begin(), prefix.end());
-                prompt_tokens.insert(prompt_tokens.end(),
-                                     bf.input_ids.cbegin(), bf.input_ids.cend());
+                prompt_tokens.insert(prompt_tokens.end(), bf.input_ids.cbegin(), bf.input_ids.cend());
 
             } else {
                 // Subsequent text-only turn: no images, use apply_chat_template
                 // and tokenize directly (KV cache already holds prior context).
                 geniex::ChatMessage user_msg{geniex::Role::User, prompt_text};
-                std::string formatted = processor->apply_chat_template(
-                    {user_msg}, /*add_generation_prompt=*/true);
-                auto prefix = processor->tokenizer().encode("<|im_end|>\n",
-                                                            /*add_special_tokens=*/false);
-                auto turn_tokens = processor->tokenizer().encode(
-                    formatted, /*add_special_tokens=*/false);
+                std::string formatted   = processor->apply_chat_template({user_msg}, /*add_generation_prompt=*/true);
+                auto        prefix      = processor->tokenizer().encode("<|im_end|>\n",
+                    /*add_special_tokens=*/false);
+                auto        turn_tokens = processor->tokenizer().encode(formatted, /*add_special_tokens=*/false);
                 prompt_tokens.assign(prefix.begin(), prefix.end());
-                prompt_tokens.insert(prompt_tokens.end(),
-                                     turn_tokens.begin(), turn_tokens.end());
+                prompt_tokens.insert(prompt_tokens.end(), turn_tokens.begin(), turn_tokens.end());
             }
 
-            output_tokens = model->generate(
-                prompt_tokens,
-                vlm_input,
-                gen_cfg,
-                [&](int32_t tok) {
-                    if (!got_first_token) {
-                        t_first_token   = std::chrono::high_resolution_clock::now();
-                        got_first_token = true;
-                    }
-                    std::cout << processor->tokenizer().decode({tok}) << std::flush;
-                    return true;
-                });
+            output_tokens = model->generate(prompt_tokens, vlm_input, gen_cfg, [&](int32_t tok) {
+                if (!got_first_token) {
+                    t_first_token   = std::chrono::high_resolution_clock::now();
+                    got_first_token = true;
+                }
+                std::cout << processor->tokenizer().decode({tok}) << std::flush;
+                return true;
+            });
         } catch (const std::exception& e) {
             std::cout << "\033[0m\n" << std::flush;
             std::cerr << "Error: " << e.what() << "\n" << std::flush;
@@ -261,7 +253,7 @@ int main(int argc, char** argv) {
             if (args.verbose) {
                 std::cout << "\033[1;36m=== Performance ===\033[0m\n"
                           << "Generated tokens : " << output_tokens.size() << "\n"
-                          << "TTFT             : " << std::fixed << std::setprecision(1) << ttft_ms  << " ms\n"
+                          << "TTFT             : " << std::fixed << std::setprecision(1) << ttft_ms << " ms\n"
                           << "Decode time      : " << std::fixed << std::setprecision(1) << decode_ms << " ms\n"
                           << "Decode speed     : " << std::fixed << std::setprecision(2) << tps << " tokens/s\n"
                           << "===================\n\n";

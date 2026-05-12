@@ -14,17 +14,15 @@
 #include "QnnApi.hpp"
 #include "QnnTypes.h"
 #include "QnnWrapperUtils.hpp"
-#include "types.h"
 #include "geniex_export.h"
+#include "types.h"
 
 namespace geniex {
 
 class GENIEX_API Graph {
-public:
+   public:
     // All pointers are non-owning and must outlive this Graph.
-    Graph(qnn_wrapper_api::GraphInfo_t* graph_info,
-          QnnApi*                        api,
-          IOTensor*              io_tensor);
+    Graph(qnn_wrapper_api::GraphInfo_t* graph_info, QnnApi* api, IOTensor* io_tensor);
 
     ~Graph();
 
@@ -39,13 +37,13 @@ public:
     // is assumed here and tearDownTensors is never called.
     bool setup(Qnn_ContextHandle_t context);
 
-    bool hasInput (const std::string& name) const;
+    bool hasInput(const std::string& name) const;
     bool hasOutput(const std::string& name) const;
 
-    const TensorSpec& inputSpec (const std::string& name) const;
+    const TensorSpec& inputSpec(const std::string& name) const;
     const TensorSpec& outputSpec(const std::string& name) const;
 
-    const std::vector<TensorSpec>& inputSpecs()  const;
+    const std::vector<TensorSpec>& inputSpecs() const;
     const std::vector<TensorSpec>& outputSpecs() const;
 
     const std::string& name() const;
@@ -53,47 +51,47 @@ public:
     // Converts src to the tensor's native dtype and writes it into the named
     // input buffer. float: memcpy for FLOAT_32, quantize for UFIXED_POINT_8/16,
     // cast for INT_32. int32_t: direct memcpy, no quantization.
-    void write(const std::string& name, const float*   src, size_t element_count);
+    void write(const std::string& name, const float* src, size_t element_count);
     void write(const std::string& name, const int32_t* src, size_t element_count);
 
     // Copies bytes verbatim with no type conversion.
     void write(const std::string& name, const void* src, size_t byte_count);
-    void read (const std::string& name,       void* dst, size_t byte_count) const;
+    void read(const std::string& name, void* dst, size_t byte_count) const;
 
     // De-quantises or casts the named output buffer into float32.
     // elem_offset: number of elements to skip before reading (for multi-row outputs).
     void read(const std::string& name, float* dst, size_t element_count, size_t elem_offset = 0) const;
 
-    void*       inputPtr (const std::string& name);
+    void*       inputPtr(const std::string& name);
     const void* outputPtr(const std::string& name) const;
 
     bool execute(std::map<std::string, std::pair<double, uint16_t>>& time_log);
 
-private:
+   private:
     void buildSpecs();
 
     qnn_wrapper_api::GraphInfo_t* graph_info_ = nullptr;
-    QnnApi*                        api_        = nullptr;
-    IOTensor*              io_tensor_  = nullptr;
+    QnnApi*                       api_        = nullptr;
+    IOTensor*                     io_tensor_  = nullptr;
 
     Qnn_Tensor_t* inputs_  = nullptr;
     Qnn_Tensor_t* outputs_ = nullptr;
 
-    std::vector<TensorSpec>                   input_specs_;
-    std::vector<TensorSpec>                   output_specs_;
+    std::vector<TensorSpec> input_specs_;
+    std::vector<TensorSpec> output_specs_;
 
     std::unordered_map<std::string, uint32_t> input_index_;
     std::unordered_map<std::string, uint32_t> output_index_;
 
-    std::unordered_map<std::string, void*>    input_buffer_ptrs_;
-    std::unordered_map<std::string, void*>    output_buffer_ptrs_;
+    std::unordered_map<std::string, void*> input_buffer_ptrs_;
+    std::unordered_map<std::string, void*> output_buffer_ptrs_;
 
-    std::unordered_map<std::string, size_t>   input_tensors_size_;
-    std::unordered_map<std::string, size_t>   output_tensors_size_;
+    std::unordered_map<std::string, size_t> input_tensors_size_;
+    std::unordered_map<std::string, size_t> output_tensors_size_;
 
     std::string name_;
 
     bool setup_done_ = false;
 };
 
-} // namespace geniex
+}  // namespace geniex

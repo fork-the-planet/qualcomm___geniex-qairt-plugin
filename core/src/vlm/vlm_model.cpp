@@ -2,19 +2,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "vlm/vlm_model.h"
-#include "vlm/vlm_types.h"
 
 #include <algorithm>
 #include <stdexcept>
 
+#include "vlm/vlm_types.h"
+
 namespace geniex {
 
-VLMModel::VLMModel(LLMSpec spec)
-    : LLMModel(std::move(spec)) {}
+VLMModel::VLMModel(LLMSpec spec) : LLMModel(std::move(spec)) {}
 
-bool VLMModel::onInitialized() {
-    return LLMModel::onInitialized();
-}
+bool VLMModel::onInitialized() { return LLMModel::onInitialized(); }
 
 void VLMModel::setEmbeddingProvider(std::unique_ptr<PrecomputedEmbeddingProvider> provider) {
     emb_provider_ = provider.get();
@@ -24,31 +22,26 @@ void VLMModel::setEmbeddingProvider(std::unique_ptr<PrecomputedEmbeddingProvider
 void VLMModel::preparePositions(const std::vector<int32_t>&, const VLMInput&, size_t) {}
 void VLMModel::clearPositions() {}
 
-/*static*/ void VLMModel::maskedScatter(std::vector<float>&         input_embeds,
-                                         const std::vector<float>&   multimodal_embeds,
-                                         const std::vector<int32_t>& input_ids,
-                                         int32_t                     target_token_id,
-                                         size_t                      hidden_size) {
+/*static*/ void VLMModel::maskedScatter(std::vector<float>& input_embeds, const std::vector<float>& multimodal_embeds,
+    const std::vector<int32_t>& input_ids, int32_t target_token_id, size_t hidden_size) {
     size_t src_row = 0;
     for (size_t i = 0; i < input_ids.size(); ++i) {
         if (input_ids[i] == target_token_id) {
             std::copy(multimodal_embeds.data() + src_row * hidden_size,
-                      multimodal_embeds.data() + src_row * hidden_size + hidden_size,
-                      input_embeds.data() + i * hidden_size);
+                multimodal_embeds.data() + src_row * hidden_size + hidden_size,
+                input_embeds.data() + i * hidden_size);
             ++src_row;
         }
     }
 }
 
-std::vector<int32_t> VLMModel::generate(const std::vector<int32_t>& prompt_tokens,
-                                          const VLMInput&              vlm_input,
-                                          const GenerationConfig&      gen_cfg,
-                                          std::function<bool(int32_t)> token_callback) {
+std::vector<int32_t> VLMModel::generate(const std::vector<int32_t>& prompt_tokens, const VLMInput& vlm_input,
+    const GenerationConfig& gen_cfg, std::function<bool(int32_t)> token_callback) {
     if (!emb_provider_) {
         throw std::runtime_error("VLMModel: no embedding provider registered");
     }
 
-    auto text_embeds = emb_provider_->lookupBatch(prompt_tokens);
+    auto         text_embeds = emb_provider_->lookupBatch(prompt_tokens);
     const size_t hidden_size = text_embeds.size() / prompt_tokens.size();
 
     if (!vlm_input.pixel_data.pixel_values.empty()) {
@@ -67,4 +60,4 @@ std::vector<int32_t> VLMModel::generate(const std::vector<int32_t>& prompt_token
     return result;
 }
 
-} // namespace geniex
+}  // namespace geniex

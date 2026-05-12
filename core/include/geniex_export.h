@@ -10,17 +10,17 @@
 // dllexport is used when building the owning library; dllimport when consuming it.
 // On non-Windows platforms both macros expand to nothing.
 #ifdef _WIN32
-#  ifdef geniex_core_EXPORTS
-#    define GENIEX_API __declspec(dllexport)
-#  else
-#    define GENIEX_API __declspec(dllimport)
-#  endif
-#  ifdef geniex_vlm_EXPORTS
-#    define GENIEX_VLM_API __declspec(dllexport)
-#  else
-#    define GENIEX_VLM_API __declspec(dllimport)
-#  endif
+#ifdef geniex_core_EXPORTS
+#define GENIEX_API __declspec(dllexport)
 #else
-#  define GENIEX_API
-#  define GENIEX_VLM_API
+#define GENIEX_API __declspec(dllimport)
+#endif
+#ifdef geniex_vlm_EXPORTS
+#define GENIEX_VLM_API __declspec(dllexport)
+#else
+#define GENIEX_VLM_API __declspec(dllimport)
+#endif
+#else
+#define GENIEX_API
+#define GENIEX_VLM_API
 #endif

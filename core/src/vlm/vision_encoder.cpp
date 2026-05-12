@@ -5,9 +5,8 @@
 
 namespace geniex {
 
-bool QnnVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg,
-                                   const ModelConfig&      model_cfg) {
+bool QnnVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     return Model::initialize(runtime_cfg, model_cfg);
 }
 
-} // namespace geniex
+}  // namespace geniex
