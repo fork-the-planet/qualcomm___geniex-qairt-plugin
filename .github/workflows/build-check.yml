@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   windows-arm64:
+    if: ${{ github.actor != 'dependabot[bot]' }}
     name: Windows ARM64 build check
     runs-on: windows-arm64
     timeout-minutes: 60

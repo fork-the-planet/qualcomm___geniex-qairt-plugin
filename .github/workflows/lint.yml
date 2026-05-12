@@ -1,0 +1,105 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cpp-format:
+    name: cpp-format
+    # Skip Dependabot PRs: they only bump GitHub Actions versions, no C/C++ changes.
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          # Need full history so we can diff against the PR base / previous push.
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-format-20
+          clang-format-20 --version
+
+      - name: Resolve changed C/C++ files
+        id: files
+        env:
+          # For PRs: diff against the merge base of the target branch.
+          # For pushes: diff against the previous commit on the branch.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Fall back to "lint everything" when we don't have a usable base
+          # (e.g. workflow_dispatch, first push to a new branch where
+          # github.event.before is all-zeros).
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            echo "No base SHA available; linting all tracked C/C++ files."
+            mapfile -t files < <(git ls-files '*.cpp' '*.cc' '*.cxx' '*.c' '*.hpp' '*.hxx' '*.h')
+          else
+            echo "Diffing ${BASE_SHA}...${HEAD_SHA}"
+            mapfile -t files < <(
+              git diff --name-only --diff-filter=ACMR "${BASE_SHA}" "${HEAD_SHA}" \
+                | grep -E '\.(cpp|cc|cxx|c|hpp|hxx|h)$' || true
+            )
+          fi
+
+          # Exclude vendored / generated / build trees.
+          filtered=()
+          for f in "${files[@]}"; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              third-party/*|build/*|build_*/*|qnn-api/include/*) continue ;;
+            esac
+            # Only keep files that still exist (skip deletes).
+            [ -f "$f" ] && filtered+=("$f")
+          done
+
+          {
+            echo "files<<EOF"
+            printf '%s\n' "${filtered[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "${#filtered[@]}" -eq 0 ]; then
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No changed C/C++ files."
+          else
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "Changed C/C++ files:"
+            printf '  %s\n' "${filtered[@]}"
+          fi
+
+      - name: Check C/C++ formatting
+        if: steps.files.outputs.any == 'true'
+        env:
+          FILES: ${{ steps.files.outputs.files }}
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if ! diff -u "$file" <(clang-format-20 "$file"); then
+              echo "::error file=$file::clang-format diff — run 'clang-format-20 -i $file'"
+              failed=1
+            fi
+          done <<< "$FILES"
+          [ "$failed" -eq 0 ]
