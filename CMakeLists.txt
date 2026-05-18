@@ -86,6 +86,7 @@ set(CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/llm/input_provider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/pipeline/chat_template.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/pipeline/llm_pipeline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2_ssd/ssd_model.cpp
 )
 
 # ── LLM model specs (header-only; no .cpp to collect) ────────────────────────
@@ -111,6 +112,23 @@ target_compile_definitions(geniex_core PUBLIC ${GENIEX_COMPILE_DEFS})
 target_link_libraries(geniex_core PUBLIC geniex-proc)
 if(WIN32)
     target_link_libraries(geniex_core PRIVATE Version Shlwapi)
+endif()
+
+# ── Workaround: GCC 11 autovec miscompile in graph.cpp ───────────────────────
+# core/src/graph.cpp contains hot scalar↔quantized templated cast loops
+# (floatToTfN / tfNToFloat / castToFloat / castFromFloat). GCC 11.2's
+# tree-loop vectorizer miscompiles them on aarch64-linux-gnu at -O3,
+# producing garbage tokens during LLM inference. Bisected to this single TU
+# in 2026-05; -O2 and -fno-tree-vectorize both fix it. Scoped to the one
+# file and to GCC only — Clang on Windows / Android NDK is unaffected.
+#
+# Note: applied *after* add_library(geniex_core ...) so the source file is
+# already known to the target
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(
+        ${CMAKE_CURRENT_SOURCE_DIR}/core/src/graph.cpp
+        PROPERTIES COMPILE_OPTIONS "-fno-tree-vectorize"
+    )
 endif()
 
 set_target_properties(geniex_core PROPERTIES

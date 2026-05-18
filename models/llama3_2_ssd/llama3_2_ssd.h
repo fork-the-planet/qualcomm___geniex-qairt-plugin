@@ -10,6 +10,9 @@
 #include "pipeline/llm_pipeline.h"
 #include "ssd_model.h"
 #include "ssd_types.h"
+#include "llm/input_provider.h"
+#include "pipeline/llm_pipeline.h"
+#include "pipeline/chat_template.h"
 
 namespace geniex {
 namespace llama3_2_3b_ssd {
@@ -78,10 +81,13 @@ inline SSDModel makeModel(const std::string& forecast_prefix_path) {
 
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
-inline std::optional<LLMPipeline> makePipeline(
-    const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg, const std::string& forecast_prefix_path) {
+inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
+                                               const ModelConfig& model_cfg) {
     LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(forecast_prefix_path), runtime_cfg, model_cfg)) return std::nullopt;
+    if (!pipe.create(chatTemplate,
+                     makeModel(model_cfg.forecast_prefix_path.value_or("")),
+                     runtime_cfg, model_cfg))
+        return std::nullopt;
     return pipe;
 }
 

@@ -16,6 +16,7 @@
 #include "llama3/llama3.h"
 #include "llama3_1/llama3_1.h"
 #include "llama3_2/llama3_2.h"
+#include "llama3_2_ssd/llama3_2_ssd.h"
 #include "phi3_5/phi3_5.h"
 #include "qwen2_5/qwen2_5.h"
 #include "qwen3/qwen3.h"
@@ -39,13 +40,10 @@ inline const std::unordered_map<std::string, LlmModelEntry>& llm_model_registry(
         {"llama_v3_taide_8b_chat", {llama_v3_taide_8b_chat::makePipeline}},
         {"llama_v3_1_8b_instruct", {llama3_1_8b::makePipeline}},
         {"llama_v3_1_sea_lion_3_5_8b_r", {llama3_1_8b::makePipeline}},  // same arch as llama3_1_8b
-        {"llama_v3_2_1b_instruct", {llama3_2_1b::makePipeline}},
-        {"llama_v3_2_3b_instruct", {llama3_2_3b::makePipeline}},
-        {"falcon_v3_7b_instruct", {falcon3_7b::makePipeline}},
-        // skipping llama_v3_2_3b_instruct_ssd for now - it requires an additional forecast_prefix_path
-        // TODO: we should support an "extra_paths" map in ModelConfig to allow special special models to take
-        // additional path.
-        // That way SSD model can use a conventional 2 argument makePipeline signature
+        {"llama_v3_2_1b_instruct",    {llama3_2_1b::makePipeline}},
+        {"llama_v3_2_3b_instruct",    {llama3_2_3b::makePipeline}},
+        {"llama_v3_2_3b_instruct_ssd", {llama3_2_3b_ssd::makePipeline}},
+        {"falcon_v3_7b_instruct",       {falcon3_7b::makePipeline}},
     };
     return registry;
 }

@@ -5,8 +5,8 @@
 
 #include "llama3/llama3.h"
 #include "llm/input_provider.h"
-#include "llm/llm_model.h"
-#include "llm/llm_types.h"
+#include "pipeline/chat_template.h"
+#include "pipeline/llm_pipeline.h"
 
 namespace geniex {
 namespace llama3_1_8b {
