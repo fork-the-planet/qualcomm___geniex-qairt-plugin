@@ -3,17 +3,13 @@
 
 #pragma once
 
-#include "geniex_export.h"
-#include "llm/llm_model.h"
-#include "llm/llm_utils.h"
-#include "ssd_types.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
+#include "geniex_export.h"
 #include "llm/llm_model.h"
 #include "llm/llm_utils.h"
 #include "ssd_types.h"
@@ -24,7 +20,7 @@ namespace geniex {
 // Drafts a candidate tree in a single AR-32 pass, then verifies and accepts greedily;
 // typically yields 2-3 tokens per forward pass without a separate draft model.
 class GENIEX_API SSDModel : public LLMModel {
-public:
+   public:
     SSDModel(LLMSpec spec, SSDConfig ssd_cfg);
 
     // Return false from the callback to stop early.

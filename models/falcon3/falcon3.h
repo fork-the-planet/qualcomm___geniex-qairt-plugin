@@ -15,10 +15,8 @@ namespace geniex {
 // Tool calls are supported: when tools are non-empty a <tools>...</tools> block
 // is injected into the system message, mirroring the official Falcon3 Jinja
 // chat template.
-inline std::string falcon3ChatTemplate(const std::string& user_message,
-                                       const std::string& system_prompt,
-                                       const ChatTools&   tools,
-                                       bool /*enable_thinking*/) {
+inline std::string falcon3ChatTemplate(const std::string& user_message, const std::string& system_prompt,
+    const ChatTools& tools, bool /*enable_thinking*/) {
     std::string result;
     if (!tools.empty()) {
         // With tools: emit a merged system block containing the tool list.
@@ -28,11 +26,12 @@ inline std::string falcon3ChatTemplate(const std::string& user_message,
             result += system_prompt;
             result += "\n\n";
         }
-        result += "# Tools\n\n"
-                  "You have access to the following functions. You MUST use them to answer "
-                  "questions when needed. For each function call, you MUST return a JSON "
-                  "object inside <tool_call></tool_call> tags.\n\n"
-                  "<tools>";
+        result +=
+            "# Tools\n\n"
+            "You have access to the following functions. You MUST use them to answer "
+            "questions when needed. For each function call, you MUST return a JSON "
+            "object inside <tool_call></tool_call> tags.\n\n"
+            "<tools>";
         // Inline serialisation: OpenAI-format JSON array, 2-space indent.
         // (appendOpenAIToolsJson lives in chat_template.cpp's anonymous namespace
         //  and is not visible here, so we emit the JSON directly.)
@@ -43,32 +42,40 @@ inline std::string falcon3ChatTemplate(const std::string& user_message,
             first = false;
             result += "  {\"type\": \"function\", \"function\": {\"name\": \"";
             for (unsigned char c : t.name) {
-                if (c == '"')       result += "\\\"";
-                else if (c == '\\') result += "\\\\";
-                else                result += static_cast<char>(c);
+                if (c == '"')
+                    result += "\\\"";
+                else if (c == '\\')
+                    result += "\\\\";
+                else
+                    result += static_cast<char>(c);
             }
             result += "\", \"description\": \"";
             for (unsigned char c : t.description) {
-                if (c == '"')       result += "\\\"";
-                else if (c == '\\') result += "\\\\";
-                else if (c == '\n') result += "\\n";
-                else                result += static_cast<char>(c);
+                if (c == '"')
+                    result += "\\\"";
+                else if (c == '\\')
+                    result += "\\\\";
+                else if (c == '\n')
+                    result += "\\n";
+                else
+                    result += static_cast<char>(c);
             }
             result += "\", \"parameters\": ";
             result += t.parameters_json.empty() ? "{}" : t.parameters_json;
             result += "}}";
         }
         result += "\n]";
-        result += "</tools>\n\n"
-                  "# Output Format\n\n"
-                  "Your response MUST follow this format when making function calls:\n"
-                  "<tool_call>\n"
-                  "[\n"
-                  "  {\"name\": \"function_name\", \"arguments\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}},\n"
-                  "  {\"name\": \"another_function\", \"arguments\": {\"arg\": \"value\"}}\n"
-                  "]\n"
-                  "</tool_call>\n"
-                  "If no function calls are needed, respond normally without the tool_call tags.\n";
+        result +=
+            "</tools>\n\n"
+            "# Output Format\n\n"
+            "Your response MUST follow this format when making function calls:\n"
+            "<tool_call>\n"
+            "[\n"
+            "  {\"name\": \"function_name\", \"arguments\": {\"arg1\": \"value1\", \"arg2\": \"value2\"}},\n"
+            "  {\"name\": \"another_function\", \"arguments\": {\"arg\": \"value\"}}\n"
+            "]\n"
+            "</tool_call>\n"
+            "If no function calls are needed, respond normally without the tool_call tags.\n";
     } else {
         // No tools: plain system block (no end token — Falcon3 uses role headers only).
         if (!system_prompt.empty()) {

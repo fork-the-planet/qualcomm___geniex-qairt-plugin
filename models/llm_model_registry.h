@@ -40,10 +40,10 @@ inline const std::unordered_map<std::string, LlmModelEntry>& llm_model_registry(
         {"llama_v3_taide_8b_chat", {llama_v3_taide_8b_chat::makePipeline}},
         {"llama_v3_1_8b_instruct", {llama3_1_8b::makePipeline}},
         {"llama_v3_1_sea_lion_3_5_8b_r", {llama3_1_8b::makePipeline}},  // same arch as llama3_1_8b
-        {"llama_v3_2_1b_instruct",    {llama3_2_1b::makePipeline}},
-        {"llama_v3_2_3b_instruct",    {llama3_2_3b::makePipeline}},
+        {"llama_v3_2_1b_instruct", {llama3_2_1b::makePipeline}},
+        {"llama_v3_2_3b_instruct", {llama3_2_3b::makePipeline}},
         {"llama_v3_2_3b_instruct_ssd", {llama3_2_3b_ssd::makePipeline}},
-        {"falcon_v3_7b_instruct",       {falcon3_7b::makePipeline}},
+        {"falcon_v3_7b_instruct", {falcon3_7b::makePipeline}},
     };
     return registry;
 }

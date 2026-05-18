@@ -42,31 +42,19 @@ using ChatTools = std::vector<ChatTool>;
 // `tools` may be empty. When non-empty, formatters that support tool calls
 // inject a tools block into the system message; formatters without tool-call
 // support ignore the parameter.
-using ChatTemplateFunc = std::string(*)(
-    const std::string& user_message,
-    const std::string& system_prompt,
-    const ChatTools&   tools,
-    bool               enable_thinking);
+using ChatTemplateFunc = std::string (*)(
+    const std::string& user_message, const std::string& system_prompt, const ChatTools& tools, bool enable_thinking);
 
 // ChatML format — used by Qwen3, Qwen2.5, and other ChatML-based models.
 GENIEX_API std::string chatMLTemplate(
-    const std::string& user_message,
-    const std::string& system_prompt,
-    const ChatTools&   tools,
-    bool               enable_thinking);
+    const std::string& user_message, const std::string& system_prompt, const ChatTools& tools, bool enable_thinking);
 
 // Phi format — used by Phi3.5 and Phi4.
 GENIEX_API std::string phiChatTemplate(
-    const std::string& user_message,
-    const std::string& system_prompt,
-    const ChatTools&   tools,
-    bool               enable_thinking);
+    const std::string& user_message, const std::string& system_prompt, const ChatTools& tools, bool enable_thinking);
 
 // Llama3 header-id format — used by Llama 3, Llama 3.1, and Llama 3.2 model families.
 GENIEX_API std::string llama3ChatTemplate(
-    const std::string& user_message,
-    const std::string& system_prompt,
-    const ChatTools&   tools,
-    bool               enable_thinking);
+    const std::string& user_message, const std::string& system_prompt, const ChatTools& tools, bool enable_thinking);
 
 }  // namespace geniex

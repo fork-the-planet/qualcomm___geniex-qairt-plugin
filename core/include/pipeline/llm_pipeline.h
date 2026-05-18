@@ -74,9 +74,7 @@ class GENIEX_API LLMPipeline {
     // system prompt set via setSystemPrompt() and any pending tools set via
     // setTools(). Both the system prompt and tools state are cleared after
     // this call; call setSystemPrompt() / setTools() again to re-inject.
-    std::string applyChatTemplate(
-        const std::string& user_message,
-        bool enable_thinking = true);
+    std::string applyChatTemplate(const std::string& user_message, bool enable_thinking = true);
 
     // on_token is called with each decoded text piece; return false to stop early.
     GenerateResult generate(const std::string& prompt_utf8, const GenerationConfig& gen_cfg = {},

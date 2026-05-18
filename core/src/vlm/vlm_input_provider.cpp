@@ -73,9 +73,8 @@ void PrecomputedEmbeddingProvider::loadTable(const std::string& path, size_t voc
     }
 }
 
-void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg,
-                                                  const LLMSpec&     spec) {
-    if (!table_.empty()) return;          // idempotent
+void PrecomputedEmbeddingProvider::onInitialized(const ModelConfig& model_cfg, const LLMSpec& spec) {
+    if (!table_.empty()) return;  // idempotent
     if (!model_cfg.embedding_path) return;
 
     loadTable(*model_cfg.embedding_path, spec.vocab_size, spec.hidden_size);
