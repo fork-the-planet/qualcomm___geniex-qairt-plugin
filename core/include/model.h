@@ -8,25 +8,24 @@
 
 #include "IOTensor.hpp"
 #include "QnnApi.hpp"
+#include "geniex_export.h"
 #include "graph.h"
 #include "types.h"
-#include "geniex_export.h"
 
 namespace geniex {
 
 class GENIEX_API Model {
-public:
+   public:
     virtual ~Model() = default;
 
-    Model(const Model&)            = delete;
-    Model& operator=(const Model&) = delete;
-    Model(Model&&) noexcept        = default;
+    Model(const Model&)                = delete;
+    Model& operator=(const Model&)     = delete;
+    Model(Model&&) noexcept            = default;
     Model& operator=(Model&&) noexcept = default;
 
     // Sets up the QNN backend and loads all graphs. Must be called before any
     // subclass inference.
-    bool initialize(const QnnRuntimeConfig& runtime_cfg,
-                    const ModelConfig&      model_cfg);
+    bool initialize(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg);
 
     bool isInitialized() const;
 
@@ -38,7 +37,7 @@ public:
     Model&       subModel(size_t idx);
     const Model& subModel(size_t idx) const;
 
-protected:
+   protected:
     Model() = default;
 
     // Called by initialize() after all Graph objects have been set up.
@@ -51,9 +50,9 @@ protected:
 
     // Declaration order matters: graphs_ holds non-owning pointers into api_
     // and io_tensor_, so graphs_ must be destroyed first (it is listed last).
-    ModelConfig                         model_cfg_;
-    std::unique_ptr<QnnApi>             api_;
-    std::shared_ptr<IOTensor>   io_tensor_;
+    ModelConfig               model_cfg_;
+    std::unique_ptr<QnnApi>   api_;
+    std::shared_ptr<IOTensor> io_tensor_;
 
     std::vector<Graph>                  graphs_;
     std::vector<std::shared_ptr<Model>> sub_models_;
@@ -61,4 +60,4 @@ protected:
     bool initialized_ = false;
 };
 
-} // namespace geniex
+}  // namespace geniex

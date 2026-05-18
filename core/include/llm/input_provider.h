@@ -3,24 +3,24 @@
 
 #pragma once
 
-#include "graph.h"
-#include "types.h"
-#include "llm/llm_types.h"
-#include "llm/llm_utils.h"
-#include "geniex_export.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "geniex_export.h"
+#include "graph.h"
+#include "llm/llm_types.h"
+#include "llm/llm_utils.h"
+#include "types.h"
+
 namespace geniex {
 
 // Abstract interface for CPU-side tensor writes at inference time.
 // Implementations write one or more named inputs into a Graph.
 class GENIEX_API InputProvider {
-public:
+   public:
     virtual ~InputProvider() = default;
 
     // Called once after all Graph objects are ready.
@@ -49,7 +49,7 @@ public:
 //              hidden_size must be known either from the caller (loadTable)
 //              or from the owning LLMSpec (onInitialized).
 class GENIEX_API EmbeddingInputProvider : public InputProvider {
-public:
+   public:
     // tensor_name: name of the graph input to write (default "input_embeds").
     explicit EmbeddingInputProvider(std::string tensor_name = "input_embeds");
 
@@ -59,9 +59,7 @@ public:
     //  * other   — flat row-major float32 binary; both vocab_size and
     //              hidden_size must be non-zero and match the file size.
     // Idempotent: does nothing if a table is already loaded.
-    void loadTable(const std::string& path,
-                   size_t             vocab_size  = 0,
-                   size_t             hidden_size = 0);
+    void loadTable(const std::string& path, size_t vocab_size = 0, size_t hidden_size = 0);
 
     // Loads the table from `model_cfg.embedding_path`. For headerless raw
     // files, shape is taken from `spec.vocab_size` / `spec.hidden_size`.
@@ -70,39 +68,37 @@ public:
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
-private:
+   private:
     std::string        tensor_name_;
-    std::vector<float> table_;        // flat row-major [vocab_size * hidden_size]
+    std::vector<float> table_;  // flat row-major [vocab_size * hidden_size]
     size_t             hidden_size_ = 0;
 };
 
 // For models where embedding lookup runs on-device (e.g. AI Hub exports).
 // Pads to the graph's tensor capacity with a configurable pad token.
 class GENIEX_API TokenIdInputProvider : public InputProvider {
-public:
-    explicit TokenIdInputProvider(std::string tensor_name = "input_ids",
-                                  int32_t pad_token_id = 0);
+   public:
+    explicit TokenIdInputProvider(std::string tensor_name = "input_ids", int32_t pad_token_id = 0);
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
-private:
+   private:
     std::string tensor_name_;
     int32_t     pad_token_id_;
 };
 
 // Computes RoPE cos/sin tables and writes them into the two named graph inputs.
 class GENIEX_API RoPEInputProvider : public InputProvider {
-public:
+   public:
     // head_dim: per-head dimension (cos/sin vectors have size curr_len * head_dim/2).
     // theta:    RoPE base frequency.
     // cos_name / sin_name: names of the two graph inputs to write.
-    RoPEInputProvider(size_t head_dim, float theta,
-                      std::string cos_name = "position_ids_cos",
-                      std::string sin_name = "position_ids_sin");
+    RoPEInputProvider(size_t head_dim, float theta, std::string cos_name = "position_ids_cos",
+        std::string sin_name = "position_ids_sin");
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
-private:
+   private:
     RotaryEmbedding rope_;
     std::string     cos_name_;
     std::string     sin_name_;
@@ -110,17 +106,14 @@ private:
 
 // LongRoPE with dynamic scaling and per-dimension extension factors.
 class GENIEX_API LongRoPEInputProvider : public InputProvider {
-public:
-    LongRoPEInputProvider(size_t head_dim, float theta,
-                          std::vector<float> ext_factors,
-                          int max_position_embeddings = 131072,
-                          int original_max_position_embeddings = 4096,
-                          std::string cos_name = "position_ids_cos",
-                          std::string sin_name = "position_ids_sin");
+   public:
+    LongRoPEInputProvider(size_t head_dim, float theta, std::vector<float> ext_factors,
+        int max_position_embeddings = 131072, int original_max_position_embeddings = 4096,
+        std::string cos_name = "position_ids_cos", std::string sin_name = "position_ids_sin");
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
-private:
+   private:
     LongRoPEEmbedding rope_;
     std::string       cos_name_;
     std::string       sin_name_;
@@ -128,18 +121,16 @@ private:
 
 // Partial RoPE (rope_fraction of head_dim) with post-scale factor.
 class GENIEX_API PartialRoPEInputProvider : public InputProvider {
-public:
-    PartialRoPEInputProvider(size_t head_dim, float theta = 10000.f,
-                             float rope_fraction = 1.0f, float scale = 1.0f,
-                             std::string cos_name = "position_ids_cos",
-                             std::string sin_name = "position_ids_sin");
+   public:
+    PartialRoPEInputProvider(size_t head_dim, float theta = 10000.f, float rope_fraction = 1.0f, float scale = 1.0f,
+        std::string cos_name = "position_ids_cos", std::string sin_name = "position_ids_sin");
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
-private:
+   private:
     PartialRoPEEmbedding rope_;
     std::string          cos_name_;
     std::string          sin_name_;
 };
 
-} // namespace geniex
+}  // namespace geniex

@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include "cb/session.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include "cb/session.h"
 
 namespace geniex {
 namespace cb {
@@ -21,10 +21,8 @@ namespace cb {
 // single decode token; packing stops as soon as the next session would
 // exceed `max_tokens_in_batch`.
 class Scheduler {
-public:
-    void addSession(const std::string& session_id,
-                    const std::vector<int32_t>& query_tokens,
-                    int max_tokens = 512) {
+   public:
+    void addSession(const std::string& session_id, const std::vector<int32_t>& query_tokens, int max_tokens = 512) {
         Session s;
         s.id           = session_id;
         s.query_tokens = query_tokens;
@@ -42,8 +40,7 @@ public:
 
             int need = 0;
             if (s.processed_length < s.query_len) {
-                need = std::min(s.query_len - s.processed_length,
-                                max_tokens_in_batch - total);
+                need = std::min(s.query_len - s.processed_length, max_tokens_in_batch - total);
                 if (need <= 0) break;
             } else {
                 if (total + 1 > max_tokens_in_batch) break;
@@ -68,8 +65,7 @@ public:
 
     void removeSession(const std::string& session_id) {
         sessions_.erase(
-            std::remove_if(sessions_.begin(), sessions_.end(),
-                           [&](const Session& s) { return s.id == session_id; }),
+            std::remove_if(sessions_.begin(), sessions_.end(), [&](const Session& s) { return s.id == session_id; }),
             sessions_.end());
     }
 
@@ -85,10 +81,10 @@ public:
         return nullptr;
     }
 
-    std::vector<Session>&       sessions()       { return sessions_; }
+    std::vector<Session>&       sessions() { return sessions_; }
     const std::vector<Session>& sessions() const { return sessions_; }
 
-private:
+   private:
     std::vector<Session> sessions_;
 };
 

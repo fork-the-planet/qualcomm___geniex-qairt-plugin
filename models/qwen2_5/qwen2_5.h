@@ -3,9 +3,9 @@
 
 #pragma once
 
-#include "llm/llm_types.h"
-#include "llm/llm_model.h"
 #include "llm/input_provider.h"
+#include "llm/llm_model.h"
+#include "llm/llm_types.h"
 #include "pipeline/chat_template.h"
 #include "pipeline/llm_pipeline.h"
 
@@ -26,23 +26,24 @@ static constexpr float  kRopeTheta = 1000000.0f;
 //   shard 5 : layers 24 – 27   – hidden → logits
 inline LLMSpec makeSpec() {
     return LLMSpec{
-        .shards = {
-            {"input_ids",
-             "_model_embed_tokens_Gather_Gather_output_0"},
-            {"_model_embed_tokens_Gather_Gather_output_0",
-             "_model_layers_5_Add_1_Add_output_0"},
-            {"_model_layers_5_Add_1_Add_output_0",
-             "_model_layers_11_Add_1_Add_output_0"},
-            {"_model_layers_11_Add_1_Add_output_0",
-             "_model_layers_17_Add_1_Add_output_0"},
-            {"_model_layers_17_Add_1_Add_output_0",
-             "_model_layers_23_Add_1_Add_output_0"},
-            {"_model_layers_23_Add_1_Add_output_0",
-             "logits"},
-        },
-        .state_blocks = {
-            makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 5}, LayerRange{6, 11}, LayerRange{12, 17}, LayerRange{18, 23}, LayerRange{24, 27}}),
-        },
+        .shards =
+            {
+                {"input_ids", "_model_embed_tokens_Gather_Gather_output_0"},
+                {"_model_embed_tokens_Gather_Gather_output_0", "_model_layers_5_Add_1_Add_output_0"},
+                {"_model_layers_5_Add_1_Add_output_0", "_model_layers_11_Add_1_Add_output_0"},
+                {"_model_layers_11_Add_1_Add_output_0", "_model_layers_17_Add_1_Add_output_0"},
+                {"_model_layers_17_Add_1_Add_output_0", "_model_layers_23_Add_1_Add_output_0"},
+                {"_model_layers_23_Add_1_Add_output_0", "logits"},
+            },
+        .state_blocks =
+            {
+                makeKVOnlyStateBlock({std::nullopt,
+                    LayerRange{0, 5},
+                    LayerRange{6, 11},
+                    LayerRange{12, 17},
+                    LayerRange{18, 23},
+                    LayerRange{24, 27}}),
+            },
 
         .seq_len_prefill = 128,
         .seq_len_decode  = 128,
@@ -70,13 +71,11 @@ inline LLMModel makeModel() {
 
 inline ChatTemplateFunc chatTemplate = chatMLTemplate;
 
-inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig& model_cfg) {
+inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg))
-        return std::nullopt;
+    if (!pipe.create(chatTemplate, makeModel(), runtime_cfg, model_cfg)) return std::nullopt;
     return pipe;
 }
 
-} // namespace qwen2_5_7b_instruct
-} // namespace geniex
+}  // namespace qwen2_5_7b_instruct
+}  // namespace geniex

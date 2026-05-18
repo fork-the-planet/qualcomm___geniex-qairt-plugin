@@ -3,12 +3,13 @@
 
 #pragma once
 
+#include "llama3/llama3.h"
+#include "llm/input_provider.h"
 #include "llm/llm_types.h"
+#include "pipeline/chat_template.h"
+#include "pipeline/llm_pipeline.h"
 #include "ssd_model.h"
 #include "ssd_types.h"
-#include "llm/input_provider.h"
-#include "pipeline/llm_pipeline.h"
-#include "pipeline/chat_template.h"
 
 namespace geniex {
 namespace llama3_2_3b_ssd {
@@ -31,26 +32,25 @@ static constexpr float  kRopeTheta = 500000.0f;
 // Graph names use prompt_ prefix for both AR variants.
 inline LLMSpec makeSpec() {
     return LLMSpec{
-        .shards = {
-            {"input_ids",
-             "_model_model_embed_tokens_Gather_output_0"},
-            {"_model_model_embed_tokens_Gather_output_0",
-             "_model_model_layers_13_Add_1_output_0"},
-            {"_model_model_layers_13_Add_1_output_0",
-             "logits"},
-        },
-        .state_blocks = {
-            makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 13}, LayerRange{14, 27}}),
-        },
+        .shards =
+            {
+                {"input_ids", "_model_model_embed_tokens_Gather_output_0"},
+                {"_model_model_embed_tokens_Gather_output_0", "_model_model_layers_13_Add_1_output_0"},
+                {"_model_model_layers_13_Add_1_output_0", "logits"},
+            },
+        .state_blocks =
+            {
+                makeKVOnlyStateBlock({std::nullopt, LayerRange{0, 13}, LayerRange{14, 27}}),
+            },
 
-        .seq_len_prefill = 128,   // AR-128 for prompt prefill
-        .seq_len_decode  = 32,    // AR-32 for SSD tree verification
+        .seq_len_prefill = 128,  // AR-128 for prompt prefill
+        .seq_len_decode  = 32,   // AR-32 for SSD tree verification
 
-        .hidden_size   = 3072,
-        .num_heads     = 24,
-        .num_kv_heads  = 8,
-        .head_dim      = kHeadDim,
-        .vocab_size    = 128256,
+        .hidden_size  = 3072,
+        .num_heads    = 24,
+        .num_kv_heads = 8,
+        .head_dim     = kHeadDim,
+        .vocab_size   = 128256,
 
         .context_lengths = {4096},
 
@@ -62,10 +62,10 @@ inline LLMSpec makeSpec() {
 
 inline SSDConfig makeSSDConfig(const std::string& forecast_prefix_path) {
     return SSDConfig{
-        .branches = {3, 2},
-        .forecast_prefix = 16,
+        .branches             = {3, 2},
+        .forecast_prefix      = 16,
         .forecast_prefix_path = forecast_prefix_path,
-        .rope_theta = kRopeTheta,
+        .rope_theta           = kRopeTheta,
     };
 }
 
@@ -78,15 +78,12 @@ inline SSDModel makeModel(const std::string& forecast_prefix_path) {
 
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
-inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig& model_cfg) {
+inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     LLMPipeline pipe;
-    if (!pipe.create(chatTemplate,
-                     makeModel(model_cfg.forecast_prefix_path.value_or("")),
-                     runtime_cfg, model_cfg))
+    if (!pipe.create(chatTemplate, makeModel(model_cfg.forecast_prefix_path.value_or("")), runtime_cfg, model_cfg))
         return std::nullopt;
     return pipe;
 }
 
-} // namespace llama3_2_3b_ssd
-} // namespace geniex
+}  // namespace llama3_2_3b_ssd
+}  // namespace geniex

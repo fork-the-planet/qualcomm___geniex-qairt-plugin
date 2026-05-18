@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "ssd_model.h"
-#include "llm/llm_utils.h"
-#include "utils.h"
 
 #include <algorithm>
 #include <cassert>
@@ -13,12 +11,14 @@
 #include <numeric>
 #include <stdexcept>
 
+#include "llm/llm_utils.h"
+#include "utils.h"
+
 namespace geniex {
 
 SSDModel::SSDModel(LLMSpec spec, SSDConfig ssd_cfg)
-    : LLMModel(std::move(spec)), ssd_cfg_(std::move(ssd_cfg)),
-      rope_(spec_.head_dim, ssd_cfg_.rope_theta) {
-    draft_levels_ = ssd_cfg_.branches.size();
+    : LLMModel(std::move(spec)), ssd_cfg_(std::move(ssd_cfg)), rope_(spec_.head_dim, ssd_cfg_.rope_theta) {
+    draft_levels_  = ssd_cfg_.branches.size();
     attention_map_ = genAttentionMap();
 }
 
@@ -35,7 +35,7 @@ bool SSDModel::onInitialized() {
             if (layer_ranges.empty()) continue;
 
             const size_t gi = graphIndex(1, s, active_cl_idx_);
-            Graph& g = graph(gi);
+            Graph&       g  = graph(gi);
 
             for (const auto& [begin, end] : layer_ranges) {
                 for (size_t l = begin; l <= end; ++l) {
@@ -48,8 +48,8 @@ bool SSDModel::onInitialized() {
                     const std::string val_in  = fmtPattern(kv_block.value_in_pattern, l);
                     const std::string val_out = fmtPattern(kv_block.value_out_pattern, l);
 
-                    const auto& ki_spec = g.inputSpec(key_in);
-                    const auto& ko_spec = g.outputSpec(key_out);
+                    const auto& ki_spec  = g.inputSpec(key_in);
+                    const auto& ko_spec  = g.outputSpec(key_out);
                     info.key_in_ptr      = g.inputPtr(key_in);
                     info.key_out_ptr     = g.outputPtr(key_out);
                     info.key_in_kv_len   = ki_spec.shape[3];
@@ -57,8 +57,8 @@ bool SSDModel::onInitialized() {
                     info.key_elem_size   = ki_spec.elementSize();
                     info.key_n_rows      = spec_.num_kv_heads * spec_.head_dim;
 
-                    const auto& vi_spec = g.inputSpec(val_in);
-                    const auto& vo_spec = g.outputSpec(val_out);
+                    const auto& vi_spec  = g.inputSpec(val_in);
+                    const auto& vo_spec  = g.outputSpec(val_out);
                     info.val_in_ptr      = g.inputPtr(val_in);
                     info.val_out_ptr     = g.outputPtr(val_out);
                     info.val_in_kv_len   = vi_spec.shape[2];
@@ -98,7 +98,7 @@ std::vector<int32_t> SSDModel::genAttentionMap() {
 
     size_t start_idx = 0;
     for (size_t d = 0; d < draft_levels_; ++d) {
-        const size_t end_idx = tree.size();
+        const size_t end_idx      = tree.size();
         const size_t branch_count = ssd_cfg_.branches[d];
 
         samples_per_draft_level_.push_back(branch_count + 1);
@@ -128,13 +128,11 @@ std::vector<int32_t> SSDModel::genAttentionMap() {
 
 std::vector<int32_t> SSDModel::genForecastTokens(size_t repeat) const {
     std::vector<int32_t> forecast(draft_levels_);
-    std::iota(forecast.begin(), forecast.end(),
-              static_cast<int32_t>(spec_.vocab_size));
+    std::iota(forecast.begin(), forecast.end(), static_cast<int32_t>(spec_.vocab_size));
 
     std::vector<int32_t> result;
     result.reserve(repeat * draft_levels_);
-    for (size_t i = 0; i < repeat; ++i)
-        result.insert(result.end(), forecast.begin(), forecast.end());
+    for (size_t i = 0; i < repeat; ++i) result.insert(result.end(), forecast.begin(), forecast.end());
     return result;
 }
 
@@ -142,30 +140,26 @@ std::vector<int32_t> SSDModel::topKLogits(const float* logits_row, size_t k) con
     std::vector<int32_t> indices(spec_.vocab_size);
     std::iota(indices.begin(), indices.end(), 0);
     if (k > spec_.vocab_size) k = spec_.vocab_size;
-    std::partial_sort(indices.begin(), indices.begin() + static_cast<ptrdiff_t>(k),
-                      indices.end(),
-                      [logits_row](int32_t a, int32_t b) {
-                          return logits_row[a] > logits_row[b];
-                      });
+    std::partial_sort(indices.begin(),
+        indices.begin() + static_cast<ptrdiff_t>(k),
+        indices.end(),
+        [logits_row](int32_t a, int32_t b) { return logits_row[a] > logits_row[b]; });
     indices.resize(k);
     return indices;
 }
 
 int32_t SSDModel::argmaxLogits(const float* logits_row) const {
-    return static_cast<int32_t>(
-        std::max_element(logits_row, logits_row + spec_.vocab_size) - logits_row);
+    return static_cast<int32_t>(std::max_element(logits_row, logits_row + spec_.vocab_size) - logits_row);
 }
 
-std::vector<int32_t> SSDModel::buildSampleTree(int32_t last_token,
-                                                size_t phase,
-                                                size_t start_offset) const {
-    const size_t V = spec_.vocab_size;
+std::vector<int32_t> SSDModel::buildSampleTree(int32_t last_token, size_t phase, size_t start_offset) const {
+    const size_t         V    = spec_.vocab_size;
     std::vector<int32_t> tree = {last_token};
 
-    size_t draft_level = 0;
-    size_t draft_node_idx = 0;
+    size_t               draft_level    = 0;
+    size_t               draft_node_idx = 0;
     std::vector<int32_t> samples;
-    size_t sample_idx = 0;
+    size_t               sample_idx = 0;
 
     std::vector<float> row_buf(V);
 
@@ -195,34 +189,30 @@ std::vector<int32_t> SSDModel::buildSampleTree(int32_t last_token,
     return tree;
 }
 
-std::pair<std::vector<int32_t>, std::vector<int32_t>>
-SSDModel::verifyDraftTree(const std::vector<int32_t>& draft_tree,
-                          size_t phase) const {
+std::pair<std::vector<int32_t>, std::vector<int32_t>> SSDModel::verifyDraftTree(
+    const std::vector<int32_t>& draft_tree, size_t phase) const {
     const size_t V = spec_.vocab_size;
 
     std::vector<float> row_buf(V);
 
     readLogitsAt(phase, 0, row_buf.data());
-    std::vector<int32_t> accepted_ids = {0};
+    std::vector<int32_t> accepted_ids    = {0};
     std::vector<int32_t> accepted_tokens = {argmaxLogits(row_buf.data())};
 
     for (int32_t eos_id : spec_.eos_token_ids) {
-        if (accepted_tokens.back() == eos_id)
-            return {accepted_tokens, accepted_ids};
+        if (accepted_tokens.back() == eos_id) return {accepted_tokens, accepted_ids};
     }
 
     for (size_t cur_idx = 1; cur_idx < num_draft_nodes_; ++cur_idx) {
         const int32_t parent_idx = attention_map_[cur_idx];
-        if (parent_idx == accepted_ids.back() &&
-            draft_tree[cur_idx] == accepted_tokens.back()) {
+        if (parent_idx == accepted_ids.back() && draft_tree[cur_idx] == accepted_tokens.back()) {
             readLogitsAt(phase, cur_idx, row_buf.data());
             int32_t verified = argmaxLogits(row_buf.data());
             accepted_tokens.push_back(verified);
             accepted_ids.push_back(static_cast<int32_t>(cur_idx));
 
             for (int32_t eos_id : spec_.eos_token_ids) {
-                if (verified == eos_id)
-                    return {accepted_tokens, accepted_ids};
+                if (verified == eos_id) return {accepted_tokens, accepted_ids};
             }
         }
     }
@@ -230,11 +220,10 @@ SSDModel::verifyDraftTree(const std::vector<int32_t>& draft_tree,
     return {accepted_tokens, accepted_ids};
 }
 
-std::vector<float> SSDModel::buildTreeAttentionMask(size_t n_past, size_t num_tokens,
-                                                     size_t seq_len, size_t kv_len,
-                                                     size_t kv_prefix_offset) const {
-    const size_t row_len = kv_len + seq_len;
-    const size_t fp = ssd_cfg_.forecast_prefix;
+std::vector<float> SSDModel::buildTreeAttentionMask(
+    size_t n_past, size_t num_tokens, size_t seq_len, size_t kv_len, size_t kv_prefix_offset) const {
+    const size_t       row_len = kv_len + seq_len;
+    const size_t       fp      = ssd_cfg_.forecast_prefix;
     std::vector<float> mask(seq_len * row_len, -1e9f);
 
     // kv-prefix-skip / kv-prefix-offset semantics (matching Genie):
@@ -260,7 +249,7 @@ std::vector<float> SSDModel::buildTreeAttentionMask(size_t n_past, size_t num_to
         int32_t ancestor = attention_map_[i];
         while (ancestor >= 0) {
             row[kv_len + static_cast<size_t>(ancestor)] = 0.0f;
-            ancestor = attention_map_[static_cast<size_t>(ancestor)];
+            ancestor                                    = attention_map_[static_cast<size_t>(ancestor)];
         }
     }
 
@@ -268,19 +257,21 @@ std::vector<float> SSDModel::buildTreeAttentionMask(size_t n_past, size_t num_to
 }
 
 void SSDModel::readLogitsAt(size_t phase, size_t position, float* dst) const {
-    const size_t V = spec_.vocab_size;
+    const size_t V          = spec_.vocab_size;
     const size_t last_shard = spec_.shards.size() - 1;
-    const size_t g_idx = graphIndex(phase, last_shard, active_cl_idx_);
-    const Graph& g = graph(g_idx);
+    const size_t g_idx      = graphIndex(phase, last_shard, active_cl_idx_);
+    const Graph& g          = graph(g_idx);
 
     g.read(spec_.shards.back().out_state_name, dst, V, position * V);
 }
 
 // Batches consecutive accepted KV positions into single memcpy calls using
 // pre-cached tensor pointers, avoiding per-element copies.
-void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
-                                  size_t n_accepted) {
-    struct CopyRun { size_t src_start; size_t count; };
+void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected, size_t n_accepted) {
+    struct CopyRun {
+        size_t src_start;
+        size_t count;
+    };
     std::vector<CopyRun> runs;
     runs.reserve(n_accepted);
 
@@ -296,9 +287,9 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
     for (const auto& info : kv_tensor_cache_) {
         // Key layout: [H, 1, hd, kv_len] input ← [H, 1, hd, seq_len] output
         {
-            auto* dst = static_cast<uint8_t*>(info.key_in_ptr);
-            const auto* src = static_cast<const uint8_t*>(info.key_out_ptr);
-            const size_t es = info.key_elem_size;
+            auto*        dst        = static_cast<uint8_t*>(info.key_in_ptr);
+            const auto*  src        = static_cast<const uint8_t*>(info.key_out_ptr);
+            const size_t es         = info.key_elem_size;
             const size_t in_stride  = info.key_in_kv_len;
             const size_t out_stride = info.key_out_seq_len;
 
@@ -307,8 +298,8 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
                 const size_t copy_bytes = run.count * es;
                 for (size_t row = 0; row < info.key_n_rows; ++row) {
                     std::memcpy(dst + (row * in_stride + dst_col) * es,
-                                src + (row * out_stride + run.src_start) * es,
-                                copy_bytes);
+                        src + (row * out_stride + run.src_start) * es,
+                        copy_bytes);
                 }
                 dst_col += run.count;
             }
@@ -316,9 +307,9 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
 
         // Value layout: [H, 1, kv_len, hd] input ← [H, 1, seq_len, hd] output
         {
-            auto* dst = static_cast<uint8_t*>(info.val_in_ptr);
-            const auto* src = static_cast<const uint8_t*>(info.val_out_ptr);
-            const size_t ts = info.val_token_size;
+            auto*        dst        = static_cast<uint8_t*>(info.val_in_ptr);
+            const auto*  src        = static_cast<const uint8_t*>(info.val_out_ptr);
+            const size_t ts         = info.val_token_size;
             const size_t in_stride  = info.val_in_kv_len;
             const size_t out_stride = info.val_out_seq_len;
 
@@ -326,9 +317,8 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
             for (const auto& run : runs) {
                 const size_t copy_bytes = run.count * ts;
                 for (size_t h = 0; h < info.val_n_heads; ++h) {
-                    std::memcpy(dst + (h * in_stride + dst_row) * ts,
-                                src + (h * out_stride + run.src_start) * ts,
-                                copy_bytes);
+                    std::memcpy(
+                        dst + (h * in_stride + dst_row) * ts, src + (h * out_stride + run.src_start) * ts, copy_bytes);
                 }
                 dst_row += run.count;
             }
@@ -339,9 +329,8 @@ void SSDModel::selectiveKVUpdate(const std::vector<bool>& selected,
 // Mirrors Genie's AttentionMask::m_cached_attention_counts: each node's
 // position = parent's position + 1. The root is n_past - forecast_prefix
 // because prefix entries occupy KV slots but don't count as real past tokens.
-std::vector<int32_t> SSDModel::computeTreePositionIds(size_t n_past,
-                                                       size_t num_tokens) const {
-    const size_t fp = ssd_cfg_.forecast_prefix;
+std::vector<int32_t> SSDModel::computeTreePositionIds(size_t n_past, size_t num_tokens) const {
+    const size_t         fp = ssd_cfg_.forecast_prefix;
     std::vector<int32_t> pos_ids(num_tokens, 0);
 
     for (size_t i = 0; i < num_tokens; ++i) {
@@ -349,29 +338,28 @@ std::vector<int32_t> SSDModel::computeTreePositionIds(size_t n_past,
             pos_ids[i] = static_cast<int32_t>(n_past - fp);
         } else {
             const size_t parent_idx = static_cast<size_t>(attention_map_[i]);
-            pos_ids[i] = pos_ids[parent_idx] + 1;
+            pos_ids[i]              = pos_ids[parent_idx] + 1;
         }
     }
 
     return pos_ids;
 }
 
-void SSDModel::runShardsWithTreeMask(const std::vector<int32_t>& tokens,
-                                      size_t phase, size_t n_past,
-                                      size_t kv_prefix_offset) {
+void SSDModel::runShardsWithTreeMask(
+    const std::vector<int32_t>& tokens, size_t phase, size_t n_past, size_t kv_prefix_offset) {
     const size_t num_tokens = tokens.size();
-    const size_t kv_len = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
-    const size_t seq_len = spec_.seq_len_decode;
+    const size_t kv_len     = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
+    const size_t seq_len    = spec_.seq_len_decode;
 
-    auto mask = buildTreeAttentionMask(n_past, num_tokens, seq_len, kv_len, kv_prefix_offset);
-    auto tree_pos = computeTreePositionIds(n_past, num_tokens);
+    auto mask               = buildTreeAttentionMask(n_past, num_tokens, seq_len, kv_len, kv_prefix_offset);
+    auto tree_pos           = computeTreePositionIds(n_past, num_tokens);
     auto [cos_vec, sin_vec] = rope_.forward(tree_pos);
 
     const LLMRunContext ctx{tokens, n_past, num_tokens, phase};
 
     for (size_t s = 0; s < spec_.shards.size(); ++s) {
         const size_t gi = graphIndex(phase, s, active_cl_idx_);
-        Graph& g = graph(gi);
+        Graph&       g  = graph(gi);
 
         if (g.hasInput(spec_.attention_mask_name)) {
             g.write(spec_.attention_mask_name, mask.data(), mask.size());
@@ -382,16 +370,13 @@ void SSDModel::runShardsWithTreeMask(const std::vector<int32_t>& tokens,
         }
 
         // Override RoPE with tree-based position IDs (providers write sequential ones first).
-        if (g.hasInput("position_ids_cos"))
-            g.write("position_ids_cos", cos_vec.data(), cos_vec.size());
-        if (g.hasInput("position_ids_sin"))
-            g.write("position_ids_sin", sin_vec.data(), sin_vec.size());
+        if (g.hasInput("position_ids_cos")) g.write("position_ids_cos", cos_vec.data(), cos_vec.size());
+        if (g.hasInput("position_ids_sin")) g.write("position_ids_sin", sin_vec.data(), sin_vec.size());
 
         TimeLog tl;
         if (!g.execute(tl)) {
             throw std::runtime_error(
-                "SSD graph execute failed: phase=" + std::to_string(phase) +
-                " shard=" + std::to_string(s));
+                "SSD graph execute failed: phase=" + std::to_string(phase) + " shard=" + std::to_string(s));
         }
 
         if (s + 1 < spec_.shards.size()) {
@@ -406,7 +391,7 @@ void SSDModel::runShardsWithTreeMask(const std::vector<int32_t>& tokens,
 
 bool SSDModel::loadForecastPrefix() {
     const std::string& path = ssd_cfg_.forecast_prefix_path;
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream      file(path, std::ios::binary);
     if (!file.is_open()) {
         fprintf(stderr, "Cannot open forecast prefix file: %s\n", path.c_str());
         return false;
@@ -421,31 +406,37 @@ bool SSDModel::loadForecastPrefix() {
 
     const size_t n_valid = header.update_size;
     if (n_valid != ssd_cfg_.forecast_prefix) {
-        fprintf(stderr, "Forecast prefix size mismatch: file has %zu, config expects %zu\n",
-                n_valid, ssd_cfg_.forecast_prefix);
+        fprintf(stderr,
+            "Forecast prefix size mismatch: file has %zu, config expects %zu\n",
+            n_valid,
+            ssd_cfg_.forecast_prefix);
         return false;
     }
 
     const size_t n_heads_file = header.n_heads;
-    const size_t embed_dim = header.embed_dim;
-    const size_t H = spec_.num_kv_heads;
-    const size_t hd = spec_.head_dim;
+    const size_t embed_dim    = header.embed_dim;
+    const size_t H            = spec_.num_kv_heads;
+    const size_t hd           = spec_.head_dim;
 
     size_t bytes_per_elem = 1;
-    if (header.dtype == 1) bytes_per_elem = 2;
-    else if (header.dtype == 2) bytes_per_elem = 4;
+    if (header.dtype == 1)
+        bytes_per_elem = 2;
+    else if (header.dtype == 2)
+        bytes_per_elem = 4;
 
     const auto& kv_block = spec_.state_blocks[kv_state_block_idx_];
 
     auto fmtPat = [](const std::string& pattern, size_t idx) -> std::string {
         std::string result = pattern;
-        auto pos = result.find("{}");
-        if (pos != std::string::npos)
-            result.replace(pos, 2, std::to_string(idx));
+        auto        pos    = result.find("{}");
+        if (pos != std::string::npos) result.replace(pos, 2, std::to_string(idx));
         return result;
     };
 
-    struct ShardLayer { size_t shard; size_t layer; };
+    struct ShardLayer {
+        size_t shard;
+        size_t layer;
+    };
     std::vector<ShardLayer> all_layers;
     for (size_t s = 0; s < spec_.shards.size(); ++s) {
         for (const auto& [begin, end] : kv_block.shard_layer_ranges[s]) {
@@ -459,27 +450,26 @@ bool SSDModel::loadForecastPrefix() {
         const std::string key_in_name = fmtPat(kv_block.key_in_pattern, layer);
 
         const size_t gi = graphIndex(0, shard, active_cl_idx_);
-        Graph& g = graph(gi);
+        Graph&       g  = graph(gi);
 
         if (!g.hasInput(key_in_name)) {
-            file.seekg(static_cast<std::streamoff>(n_heads_file * embed_dim * n_valid * bytes_per_elem),
-                       std::ios::cur);
+            file.seekg(static_cast<std::streamoff>(n_heads_file * embed_dim * n_valid * bytes_per_elem), std::ios::cur);
             continue;
         }
 
-        const TensorSpec& in_spec = g.inputSpec(key_in_name);
-        const size_t in_kv_len = in_spec.shape[3];
-        const size_t elem_size = in_spec.elementSize();
-        auto* dst = static_cast<uint8_t*>(g.inputPtr(key_in_name));
+        const TensorSpec& in_spec   = g.inputSpec(key_in_name);
+        const size_t      in_kv_len = in_spec.shape[3];
+        const size_t      elem_size = in_spec.elementSize();
+        auto*             dst       = static_cast<uint8_t*>(g.inputPtr(key_in_name));
 
         const size_t n_rows = H * hd;
         for (size_t row = 0; row < n_rows; ++row) {
             file.read(reinterpret_cast<char*>(dst + row * in_kv_len * elem_size),
-                      static_cast<std::streamsize>(n_valid * elem_size));
+                static_cast<std::streamsize>(n_valid * elem_size));
         }
         if (n_heads_file > H) {
-            file.seekg(static_cast<std::streamoff>((n_heads_file - H) * embed_dim * n_valid * bytes_per_elem),
-                       std::ios::cur);
+            file.seekg(
+                static_cast<std::streamoff>((n_heads_file - H) * embed_dim * n_valid * bytes_per_elem), std::ios::cur);
         }
     }
 
@@ -487,27 +477,26 @@ bool SSDModel::loadForecastPrefix() {
         const std::string val_in_name = fmtPat(kv_block.value_in_pattern, layer);
 
         const size_t gi = graphIndex(0, shard, active_cl_idx_);
-        Graph& g = graph(gi);
+        Graph&       g  = graph(gi);
 
         if (!g.hasInput(val_in_name)) {
-            file.seekg(static_cast<std::streamoff>(n_heads_file * n_valid * embed_dim * bytes_per_elem),
-                       std::ios::cur);
+            file.seekg(static_cast<std::streamoff>(n_heads_file * n_valid * embed_dim * bytes_per_elem), std::ios::cur);
             continue;
         }
 
-        const TensorSpec& in_spec = g.inputSpec(val_in_name);
-        const size_t in_kv_len = in_spec.shape[2];
-        const size_t elem_size = in_spec.elementSize();
-        const size_t token_size = hd * elem_size;
-        auto* dst = static_cast<uint8_t*>(g.inputPtr(val_in_name));
+        const TensorSpec& in_spec    = g.inputSpec(val_in_name);
+        const size_t      in_kv_len  = in_spec.shape[2];
+        const size_t      elem_size  = in_spec.elementSize();
+        const size_t      token_size = hd * elem_size;
+        auto*             dst        = static_cast<uint8_t*>(g.inputPtr(val_in_name));
 
         for (size_t h = 0; h < H; ++h) {
             file.read(reinterpret_cast<char*>(dst + h * in_kv_len * token_size),
-                      static_cast<std::streamsize>(n_valid * token_size));
+                static_cast<std::streamsize>(n_valid * token_size));
         }
         if (n_heads_file > H) {
-            file.seekg(static_cast<std::streamoff>((n_heads_file - H) * n_valid * embed_dim * bytes_per_elem),
-                       std::ios::cur);
+            file.seekg(
+                static_cast<std::streamoff>((n_heads_file - H) * n_valid * embed_dim * bytes_per_elem), std::ios::cur);
         }
     }
 
@@ -524,50 +513,45 @@ void SSDModel::resetKVCache() {
     n_past_ = ssd_cfg_.forecast_prefix;
 }
 
-std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_tokens,
-                                         const GenerationConfig& gen_cfg,
-                                         std::function<bool(int32_t)> token_callback) {
+std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_tokens, const GenerationConfig& gen_cfg,
+    std::function<bool(int32_t)> token_callback) {
     // Prefill: prompt tokens must not attend to the forecast prefix KV [0, fp).
-    const size_t fp = ssd_cfg_.forecast_prefix;
-    size_t tokens_processed = 0;
-    const size_t total_tokens = prompt_tokens.size();
-    size_t last_chunk_size = 0;
+    const size_t fp               = ssd_cfg_.forecast_prefix;
+    size_t       tokens_processed = 0;
+    const size_t total_tokens     = prompt_tokens.size();
+    size_t       last_chunk_size  = 0;
 
     while (tokens_processed < total_tokens) {
-        const size_t remaining = total_tokens - tokens_processed;
+        const size_t remaining  = total_tokens - tokens_processed;
         const size_t chunk_size = std::min(remaining, spec_.seq_len_prefill);
-        last_chunk_size = chunk_size;
+        last_chunk_size         = chunk_size;
 
-        const std::vector<int32_t> chunk(
-            prompt_tokens.begin() + static_cast<ptrdiff_t>(tokens_processed),
+        const std::vector<int32_t> chunk(prompt_tokens.begin() + static_cast<ptrdiff_t>(tokens_processed),
             prompt_tokens.begin() + static_cast<ptrdiff_t>(tokens_processed + chunk_size));
 
-        const size_t prefill_kv_len = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
+        const size_t prefill_kv_len  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
         const size_t prefill_seq_len = spec_.seq_len_prefill;
-        const size_t row_len = prefill_kv_len + prefill_seq_len;
+        const size_t row_len         = prefill_kv_len + prefill_seq_len;
 
         // Causal mask that skips forecast prefix [0, fp).
         std::vector<float> mask(prefill_seq_len * row_len, -1e9f);
         for (size_t row = 0; row < chunk_size; ++row) {
             float* row_ptr = mask.data() + row * row_len;
-                for (size_t col = fp; col < n_past_; ++col)
-                row_ptr[col] = 0.0f;
-            for (size_t col = 0; col <= row; ++col)
-                row_ptr[prefill_kv_len + col] = 0.0f;
+            for (size_t col = fp; col < n_past_; ++col) row_ptr[col] = 0.0f;
+            for (size_t col = 0; col <= row; ++col) row_ptr[prefill_kv_len + col] = 0.0f;
         }
 
         // Offset position IDs by -fp so prompt starts at position 0.
-        const size_t rope_n_past = n_past_ - fp;
+        const size_t        rope_n_past = n_past_ - fp;
         const LLMRunContext ctx{chunk, n_past_, chunk_size, /*phase=*/0};
 
         std::vector<int32_t> prefill_pos(chunk_size);
-        for (size_t i = 0; i < chunk_size; ++i)
-            prefill_pos[i] = static_cast<int32_t>(rope_n_past + i);
+        for (size_t i = 0; i < chunk_size; ++i) prefill_pos[i] = static_cast<int32_t>(rope_n_past + i);
         auto [pf_cos, pf_sin] = rope_.forward(prefill_pos);
 
         for (size_t s = 0; s < spec_.shards.size(); ++s) {
             const size_t gi = graphIndex(0, s, active_cl_idx_);
-            Graph& g = graph(gi);
+            Graph&       g  = graph(gi);
 
             if (g.hasInput(spec_.attention_mask_name)) {
                 g.write(spec_.attention_mask_name, mask.data(), mask.size());
@@ -578,15 +562,12 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
             }
 
             // Override RoPE with prefix-adjusted positions.
-            if (g.hasInput("position_ids_cos"))
-                g.write("position_ids_cos", pf_cos.data(), pf_cos.size());
-            if (g.hasInput("position_ids_sin"))
-                g.write("position_ids_sin", pf_sin.data(), pf_sin.size());
+            if (g.hasInput("position_ids_cos")) g.write("position_ids_cos", pf_cos.data(), pf_cos.size());
+            if (g.hasInput("position_ids_sin")) g.write("position_ids_sin", pf_sin.data(), pf_sin.size());
 
             TimeLog tl;
             if (!g.execute(tl)) {
-                throw std::runtime_error(
-                    "SSD prefill execute failed: shard=" + std::to_string(s));
+                throw std::runtime_error("SSD prefill execute failed: shard=" + std::to_string(s));
             }
 
             updateKV(s, /*phase=*/0, n_past_, chunk_size);
@@ -602,19 +583,17 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
     {
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
-        for (size_t s = 0; s < spec_.shards.size(); ++s)
-            reshapeKV(s, prefill_kv, decode_kv, n_past_);
+        for (size_t s = 0; s < spec_.shards.size(); ++s) reshapeKV(s, prefill_kv, decode_kv, n_past_);
     }
 
     const size_t last_chunk_offset = last_chunk_size - 1;
-    int32_t first_token = sampleNextToken(/*phase=*/0, last_chunk_offset);
+    int32_t      first_token       = sampleNextToken(/*phase=*/0, last_chunk_offset);
 
     for (int32_t eos_id : spec_.eos_token_ids) {
         if (first_token == eos_id) {
             const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
             const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
-            for (size_t s = 0; s < spec_.shards.size(); ++s)
-                reshapeKV(s, decode_kv, prefill_kv, n_past_);
+            for (size_t s = 0; s < spec_.shards.size(); ++s) reshapeKV(s, decode_kv, prefill_kv, n_past_);
             return {};
         }
     }
@@ -633,8 +612,10 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
                 init_tokens.push_back(static_cast<int32_t>(spec_.vocab_size + i));
             }
 
-            runShardsWithTreeMask(init_tokens, /*phase=*/1, n_past_,
-                                  /*kv_prefix_offset=*/1);
+            runShardsWithTreeMask(init_tokens,
+                /*phase=*/1,
+                n_past_,
+                /*kv_prefix_offset=*/1);
 
             for (size_t s = 0; s < spec_.shards.size(); ++s) {
                 updateKV(s, /*phase=*/1, n_past_, /*n_tok=*/1);
@@ -643,9 +624,9 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
         }
 
         int32_t last_accepted_token = first_token;
-        auto draft_tree = buildSampleTree(last_accepted_token, /*phase=*/1, /*start_offset=*/1);
+        auto    draft_tree          = buildSampleTree(last_accepted_token, /*phase=*/1, /*start_offset=*/1);
 
-        const auto forecast_tokens = genForecastTokens(num_draft_nodes_);
+        const auto   forecast_tokens  = genForecastTokens(num_draft_nodes_);
         const size_t total_ssd_tokens = num_draft_nodes_ + forecast_tokens.size();
 
         std::vector<int32_t> tokens;
@@ -654,8 +635,11 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
 
         for (int step = 0; step < gen_cfg.max_tokens; ++step) {
             if (n_past_ + total_ssd_tokens > spec_.context_lengths[active_cl_idx_]) {
-                fprintf(stderr, "SSD: Context limit reached (%zu + %zu > %zu)\n",
-                        n_past_, total_ssd_tokens, spec_.context_lengths[active_cl_idx_]);
+                fprintf(stderr,
+                    "SSD: Context limit reached (%zu + %zu > %zu)\n",
+                    n_past_,
+                    total_ssd_tokens,
+                    spec_.context_lengths[active_cl_idx_]);
                 break;
             }
 
@@ -665,8 +649,10 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
 
             // Draft tree positions [0, num_draft_nodes_) skip prefix;
             // forecast positions [num_draft_nodes_, ...) attend to prefix.
-            runShardsWithTreeMask(tokens, /*phase=*/1, n_past_,
-                                  /*kv_prefix_offset=*/num_draft_nodes_);
+            runShardsWithTreeMask(tokens,
+                /*phase=*/1,
+                n_past_,
+                /*kv_prefix_offset=*/num_draft_nodes_);
 
             auto [accepted_tokens, accepted_ids] = verifyDraftTree(draft_tree, /*phase=*/1);
 
@@ -678,11 +664,14 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
             selectiveKVUpdate(selected, accepted_tokens.size());
             n_past_ += accepted_tokens.size();
 
-            bool hit_eos = false;
+            bool hit_eos   = false;
             bool user_stop = false;
             for (const int32_t tok : accepted_tokens) {
                 for (int32_t eos_id : spec_.eos_token_ids) {
-                    if (tok == eos_id) { hit_eos = true; break; }
+                    if (tok == eos_id) {
+                        hit_eos = true;
+                        break;
+                    }
                 }
                 if (hit_eos) break;
                 output_tokens.push_back(tok);
@@ -698,7 +687,7 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
             const size_t next_draft_offset =
                 num_draft_nodes_ + static_cast<size_t>(accepted_ids.back()) * draft_levels_;
             last_accepted_token = accepted_tokens.back();
-            draft_tree = buildSampleTree(last_accepted_token, /*phase=*/1, next_draft_offset);
+            draft_tree          = buildSampleTree(last_accepted_token, /*phase=*/1, next_draft_offset);
         }
     }
 
@@ -706,11 +695,10 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
     {
         const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
         const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
-        for (size_t s = 0; s < spec_.shards.size(); ++s)
-            reshapeKV(s, decode_kv, prefill_kv, n_past_);
+        for (size_t s = 0; s < spec_.shards.size(); ++s) reshapeKV(s, decode_kv, prefill_kv, n_past_);
     }
 
     return output_tokens;
 }
 
-} // namespace geniex
+}  // namespace geniex

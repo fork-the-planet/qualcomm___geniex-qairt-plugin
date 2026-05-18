@@ -1,7 +1,6 @@
 // Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 // SPDX-License-Identifier: BSD-3-Clause
 
-
 #include <chrono>
 #include <filesystem>
 #include <iomanip>
@@ -9,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "llm/llm_model.h"
 #include "geniex-proc/tokenizer.h"
 #include "llama3/llama3.h"
+#include "llm/llm_model.h"
 #include "types.h"
 
 #ifdef _WIN32
@@ -19,16 +18,15 @@
 static void enable_utf8_io() {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-    DWORD mode = 0;
+    DWORD  mode = 0;
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (GetConsoleMode(hOut, &mode))
-        SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    if (GetConsoleMode(hOut, &mode)) SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 }
 #endif
 
 struct Args {
-    int32_t     max_tokens     = 512;
-    bool        verbose        = false;
+    int32_t     max_tokens = 512;
+    bool        verbose    = false;
     std::string system_prompt;
 };
 
@@ -42,27 +40,31 @@ static void printUsage(const char* prog) {
 
 static bool parseArgs(int argc, char** argv, Args& args) {
     for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto next = [&]() -> std::string {
-            return (i + 1 < argc) ? argv[++i] : std::string{};
-        };
-        if      (a == "--max-tokens")    args.max_tokens    = std::stoi(next());
-        else if (a == "--system-prompt") args.system_prompt = next();
-        else if (a == "--verbose")       args.verbose       = true;
-        else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
-        else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
+        std::string a    = argv[i];
+        auto        next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string{}; };
+        if (a == "--max-tokens")
+            args.max_tokens = std::stoi(next());
+        else if (a == "--system-prompt")
+            args.system_prompt = next();
+        else if (a == "--verbose")
+            args.verbose = true;
+        else if (a == "--help" || a == "-h") {
+            printUsage(argv[0]);
+            return false;
+        } else {
+            std::cerr << "Unknown argument: " << a << "\n";
+            return false;
+        }
     }
     return true;
 }
 
-static std::string applyTemplate(const std::string& user_text, bool first_turn,
-                                 const std::string& system_prompt) {
+static std::string applyTemplate(const std::string& user_text, bool first_turn, const std::string& system_prompt) {
     std::string out;
     if (first_turn) {
         out = "<|begin_of_text|>";
         if (!system_prompt.empty()) {
-            out += "<|start_header_id|>system<|end_header_id|>\n"
-                 + system_prompt + "<|eot_id|>";
+            out += "<|start_header_id|>system<|end_header_id|>\n" + system_prompt + "<|eot_id|>";
         }
         out += "<|start_header_id|>user<|end_header_id|>\n";
     } else {
@@ -129,29 +131,26 @@ int main(int argc, char** argv) {
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
 
         const std::string prompt_text = applyTemplate(input, first_turn, args.system_prompt);
-        first_turn = false;
+        first_turn                    = false;
 
-        auto encoded = tokenizer->encode(prompt_text);
+        auto                       encoded = tokenizer->encode(prompt_text);
         const std::vector<int32_t> prompt_tokens(encoded.begin(), encoded.end());
 
-        const auto t_start = std::chrono::high_resolution_clock::now();
+        const auto                                     t_start = std::chrono::high_resolution_clock::now();
         std::chrono::high_resolution_clock::time_point t_first_token;
-        bool got_first_token = false;
+        bool                                           got_first_token = false;
 
         std::cout << "\033[33m";
         std::vector<int32_t> output_tokens;
         try {
-            output_tokens = model.generate(
-                prompt_tokens,
-                gen_cfg,
-                [&](int32_t tok) {
-                    if (!got_first_token) {
-                        t_first_token   = std::chrono::high_resolution_clock::now();
-                        got_first_token = true;
-                    }
-                    std::cout << tokenizer->decode({tok}) << std::flush;
-                    return true;
-                });
+            output_tokens = model.generate(prompt_tokens, gen_cfg, [&](int32_t tok) {
+                if (!got_first_token) {
+                    t_first_token   = std::chrono::high_resolution_clock::now();
+                    got_first_token = true;
+                }
+                std::cout << tokenizer->decode({tok}) << std::flush;
+                return true;
+            });
         } catch (const std::exception& e) {
             std::cout << "\033[0m\n";
             std::cerr << "Generation error: " << e.what() << "\n";
@@ -173,7 +172,7 @@ int main(int argc, char** argv) {
             if (args.verbose) {
                 std::cout << "\033[1;36m=== Performance ===\033[0m\n"
                           << "Generated tokens : " << output_tokens.size() << "\n"
-                          << "TTFT             : " << std::fixed << std::setprecision(1) << ttft_ms  << " ms\n"
+                          << "TTFT             : " << std::fixed << std::setprecision(1) << ttft_ms << " ms\n"
                           << "Decode time      : " << std::fixed << std::setprecision(1) << decode_ms << " ms\n"
                           << "Decode speed     : " << std::fixed << std::setprecision(2) << tps << " tokens/s\n"
                           << "===================\n\n";

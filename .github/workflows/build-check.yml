@@ -13,6 +13,9 @@ concurrency:
   group: build-check-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   windows-arm64:
     name: Windows ARM64 build check

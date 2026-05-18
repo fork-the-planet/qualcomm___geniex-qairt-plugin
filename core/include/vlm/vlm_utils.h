@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "geniex_export.h"
-
 #include <array>
 #include <cstdint>
 #include <vector>
+
+#include "geniex_export.h"
 
 namespace geniex {
 
@@ -28,14 +28,9 @@ struct MRoPEPositions {
 // Computes 3D MRoPE position IDs for a sequence with interleaved text, image, and audio tokens.
 // Generic algorithm shared by Qwen2-VL, Qwen2-Omni, Qwen3-VL: text tokens get sequential
 // positions in all 3 dims; image tokens get grid positions; audio tokens get sequential positions.
-GENIEX_VLM_API MRoPEPositions computeMRoPEPositions(
-    const std::vector<int32_t>&          input_ids,
-    const std::vector<ImageGrid>&        image_grids,
-    const std::vector<AudioSegmentInfo>& audio_segments,
-    int                                  spatial_merge_size,
-    int32_t                              vision_start_token_id,
-    int32_t                              image_token_id,
-    int32_t                              audio_start_token_id,
-    int32_t                              audio_token_id);
+GENIEX_VLM_API MRoPEPositions computeMRoPEPositions(const std::vector<int32_t>& input_ids,
+    const std::vector<ImageGrid>& image_grids, const std::vector<AudioSegmentInfo>& audio_segments,
+    int spatial_merge_size, int32_t vision_start_token_id, int32_t image_token_id, int32_t audio_start_token_id,
+    int32_t audio_token_id);
 
-} // namespace geniex
+}  // namespace geniex

@@ -1,0 +1,62 @@
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cpp-format:
+    name: cpp-format
+    # Skip Dependabot PRs: they only bump GitHub Actions versions, no C/C++ changes.
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          # Need full history so changed-files can diff against the PR base.
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-format-20
+          clang-format-20 --version
+
+      - name: Resolve C/C++ file list
+        id: files
+        uses: ./.github/actions/changed-files
+        with:
+          include: '\.(cpp|hpp|c|h|cc|cxx|hxx)$'
+          exclude: '^third-party/|^build/|^build_[^/]*/|^qnn-api/'
+
+      - name: Check C/C++ formatting
+        if: steps.files.outputs.any == 'true'
+        env:
+          FILES: ${{ steps.files.outputs.files }}
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if ! diff -u "$file" <(clang-format-20 "$file"); then
+              echo "::error file=$file::clang-format diff — run 'clang-format-20 -i $file'"
+              failed=1
+            fi
+          done <<< "$FILES"
+          [ "$failed" -eq 0 ]

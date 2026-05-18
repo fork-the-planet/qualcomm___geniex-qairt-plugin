@@ -9,12 +9,11 @@
 #include <string>
 #include <vector>
 
+#include "IBackend.hpp"  // for qnn::tools::netrun::PerfProfile
 #include "QnnLog.h"
 #include "QnnTypes.h"
-#include "IBackend.hpp"  // for qnn::tools::netrun::PerfProfile
-
-#include "geniex-proc/types.h"      // for GENIEX_DEFAULT_SEED
 #include "geniex-proc/tokenizer.h"  // for Tokenizer
+#include "geniex-proc/types.h"      // for GENIEX_DEFAULT_SEED
 
 namespace geniex {
 
@@ -43,12 +42,12 @@ struct QnnRuntimeConfig {
 
 // Per-model configuration: everything needed to load and run a QNN graph model.
 struct ModelConfig {
-    std::vector<std::string>   model_paths;     // .bin shards in order (required)
-    std::string                tokenizer_path;  // tokenizer.json on disk (required)
-    std::string                htp_config_path; // HTP JSON config (empty = QNN defaults)
-    std::optional<std::string> embedding_path;  // CPU-side embedding table; nullopt if embeddings live in the graph
+    std::vector<std::string>   model_paths;      // .bin shards in order (required)
+    std::string                tokenizer_path;   // tokenizer.json on disk (required)
+    std::string                htp_config_path;  // HTP JSON config (empty = QNN defaults)
+    std::optional<std::string> embedding_path;   // CPU-side embedding table; nullopt if embeddings live in the graph
     // Forecast-prefix KV-cache file used by SSD variants. nullopt for non-SSD models.
-    std::optional<std::string> forecast_prefix_path;
+    std::optional<std::string>      forecast_prefix_path;
     qnn::tools::netrun::PerfProfile perf_profile = qnn::tools::netrun::PerfProfile::BURST;
 };
 
@@ -92,7 +91,7 @@ struct GenerationConfig {
 // Static description of a single graph tensor, populated from GraphInfo_t.
 struct TensorSpec {
     std::string           name;
-    Qnn_DataType_t        dtype        = QNN_DATATYPE_FLOAT_32;
+    Qnn_DataType_t        dtype = QNN_DATATYPE_FLOAT_32;
     std::vector<uint32_t> shape;
     float                 quant_scale  = 1.0f;
     int32_t               quant_offset = 0;
@@ -150,5 +149,4 @@ struct PixelData {
     std::vector<std::array<int32_t, 3>> image_grid_thw;  // [{T, H, W}] per image
 };
 
-} // namespace geniex
-
+}  // namespace geniex

@@ -22,8 +22,8 @@ GENIEX_API void float16ToFloat(float* out, const uint16_t* in, size_t n);
 using TimeLog = std::map<std::string, std::pair<double, uint16_t>>;
 
 GENIEX_API double totalMs(const TimeLog& log);
-GENIEX_API void mergeTimeLogs(TimeLog& dst, const TimeLog& src);
+GENIEX_API void   mergeTimeLogs(TimeLog& dst, const TimeLog& src);
 
 void printTimings(const TimeLog& log);
 
-} // namespace geniex
+}  // namespace geniex

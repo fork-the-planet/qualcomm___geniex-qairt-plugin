@@ -15,11 +15,11 @@ namespace fs = std::filesystem;
 
 // ─── Per-model file layout ───────────────────────────────────────────────────
 struct ModelFiles {
-    std::string                modelfiles_subdir;
-    std::vector<std::string>   bin_shards;        // in execution order
-    std::string                tokenizer  = "tokenizer.json";
-    std::string                htp_config = "htp_backend_ext_config.json";
-    std::string                embedding;         // empty = on-device embedding
+    std::string              modelfiles_subdir;
+    std::vector<std::string> bin_shards;  // in execution order
+    std::string              tokenizer  = "tokenizer.json";
+    std::string              htp_config = "htp_backend_ext_config.json";
+    std::string              embedding;  // empty = on-device embedding
 };
 
 static const std::vector<std::pair<std::string, ModelFiles>>& modelFilesTable() {
@@ -68,17 +68,25 @@ static void printUsage(const char* prog) {
 
 static bool parseArgs(int argc, char** argv, Args& args) {
     for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto next = [&]() -> std::string {
-            return (i + 1 < argc) ? argv[++i] : std::string{};
-        };
-        if      (a == "--model")       args.model       = next();
-        else if (a == "--prompt")      args.prompt      = next();
-        else if (a == "--max-tokens")  args.max_tokens  = std::stoi(next());
-        else if (a == "--min-tokens")  args.min_tokens  = std::stoi(next());
-        else if (a == "--list-models") args.list_models = true;
-        else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
-        else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
+        std::string a    = argv[i];
+        auto        next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string{}; };
+        if (a == "--model")
+            args.model = next();
+        else if (a == "--prompt")
+            args.prompt = next();
+        else if (a == "--max-tokens")
+            args.max_tokens = std::stoi(next());
+        else if (a == "--min-tokens")
+            args.min_tokens = std::stoi(next());
+        else if (a == "--list-models")
+            args.list_models = true;
+        else if (a == "--help" || a == "-h") {
+            printUsage(argv[0]);
+            return false;
+        } else {
+            std::cerr << "Unknown argument: " << a << "\n";
+            return false;
+        }
     }
     return true;
 }
@@ -89,8 +97,7 @@ int main(int argc, char** argv) {
     if (!parseArgs(argc, argv, args)) return 1;
 
     if (args.list_models) {
-        for (const auto& [name, _] : geniex::llm_model_registry())
-            std::cout << name << "\n";
+        for (const auto& [name, _] : geniex::llm_model_registry()) std::cout << name << "\n";
         return 0;
     }
 
@@ -100,30 +107,26 @@ int main(int argc, char** argv) {
     }
 
     const auto& registry = geniex::llm_model_registry();
-    auto reg_it = registry.find(args.model);
+    auto        reg_it   = registry.find(args.model);
     if (reg_it == registry.end()) {
         std::cerr << "Unknown model '" << args.model << "'. Use --list-models.\n";
         return 1;
     }
     const ModelFiles* files = findModelFiles(args.model);
     if (!files) {
-        std::cerr << "Model '" << args.model
-                  << "' has no file-path entry in tests/llm.cpp modelFilesTable().\n";
+        std::cerr << "Model '" << args.model << "' has no file-path entry in tests/llm.cpp modelFilesTable().\n";
         return 1;
     }
 
-    const fs::path model_dir =
-        fs::current_path() / "modelfiles" / files->modelfiles_subdir;
+    const fs::path model_dir = fs::current_path() / "modelfiles" / files->modelfiles_subdir;
 
     geniex::QnnRuntimeConfig runtime_cfg;  // auto-detect HTP paths
 
     geniex::ModelConfig model_cfg;
-    for (const auto& shard : files->bin_shards)
-        model_cfg.model_paths.push_back((model_dir / shard).string());
+    for (const auto& shard : files->bin_shards) model_cfg.model_paths.push_back((model_dir / shard).string());
     model_cfg.tokenizer_path  = (model_dir / files->tokenizer).string();
     model_cfg.htp_config_path = (model_dir / files->htp_config).string();
-    if (!files->embedding.empty())
-        model_cfg.embedding_path = (model_dir / files->embedding).string();
+    if (!files->embedding.empty()) model_cfg.embedding_path = (model_dir / files->embedding).string();
 
     // Fail fast if any expected file is missing, so failures look like
     // "files not staged" rather than deep QNN init errors.
@@ -138,10 +141,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "[llm_test] model=" << args.model
-              << " prompt=\"" << args.prompt << "\""
-              << " max_tokens=" << args.max_tokens
-              << " min_tokens=" << args.min_tokens << "\n";
+    std::cout << "[llm_test] model=" << args.model << " prompt=\"" << args.prompt << "\""
+              << " max_tokens=" << args.max_tokens << " min_tokens=" << args.min_tokens << "\n";
 
     std::optional<geniex::LLMPipeline> pipe;
     try {
@@ -179,13 +180,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "[llm_test] generated_tokens=" << result.generated_tokens
-              << " stop_reason=" << result.stop_reason
+    std::cout << "[llm_test] generated_tokens=" << result.generated_tokens << " stop_reason=" << result.stop_reason
               << " tps=" << result.tokens_per_second << "\n";
 
     if (static_cast<int32_t>(result.generated_tokens) < args.min_tokens) {
-        std::cerr << "Test FAILED: generated " << result.generated_tokens
-                  << " tokens, expected at least " << args.min_tokens << "\n";
+        std::cerr << "Test FAILED: generated " << result.generated_tokens << " tokens, expected at least "
+                  << args.min_tokens << "\n";
         return 2;
     }
     return 0;

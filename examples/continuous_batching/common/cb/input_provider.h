@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "cb/kv_cache_manager.h"
-#include "cb/session.h"
-#include "graph.h"
-
 #include <cstdint>
 #include <utility>
 #include <vector>
+
+#include "cb/kv_cache_manager.h"
+#include "cb/session.h"
+#include "graph.h"
 
 namespace geniex {
 namespace cb {
@@ -25,7 +25,7 @@ namespace cb {
 //   - sum of in_segs[i].len <= seq_len.
 struct CBStepContext {
     // Same ordering across sessions / in_segs / kv_segs.
-    std::vector<Session*> sessions;
+    std::vector<Session*>            sessions;
     std::vector<std::pair<int, int>> in_segs;
 
     // Snapshot taken *before* this step's growth — position IDs start at kv_segs[i].length.
@@ -45,7 +45,7 @@ struct CBStepContext {
 // cos/sin writer. The attention mask is block-diagonal causal and is
 // written by CBLLMModel itself via KVCacheManager::getAttentionMask.
 class CBInputProvider {
-public:
+   public:
     virtual ~CBInputProvider() = default;
 
     // Hook for one-time setup after Model init (e.g. loading a CPU-side

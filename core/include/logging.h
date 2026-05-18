@@ -11,11 +11,10 @@
 #ifndef FMT_USE_CONSTEVAL
 #define FMT_USE_CONSTEVAL 0
 #endif
-#include "utils/fmt/core.h"
+#include <cstdint>
 
 #include "geniex_export.h"
-
-#include <cstdint>
+#include "utils/fmt/core.h"
 
 namespace geniex {
 
@@ -64,7 +63,7 @@ inline auto lp(T arg) {
 
 template <typename... Args>
 void geniex_log_internal(LogLevel level, const char* file, int32_t line, const char* func,
-                         fmt::format_string<Args...> fmt_str, Args&&... args) {
+    fmt::format_string<Args...> fmt_str, Args&&... args) {
     if (geniex_log_callback == nullptr) return;
 #ifdef PROJECT_SOURCE_DIR
     auto p        = std::strstr(file, PROJECT_SOURCE_DIR);
@@ -72,18 +71,17 @@ void geniex_log_internal(LogLevel level, const char* file, int32_t line, const c
 #else
     auto filename = file;
 #endif
-    geniex_log_callback(
-        level,
-        fmt::format("[{}:{}:{}] {}", filename, line, func,
-                    fmt::format(fmt_str, lp(std::forward<Args>(args))...)).c_str());
+    geniex_log_callback(level,
+        fmt::format("[{}:{}:{}] {}", filename, line, func, fmt::format(fmt_str, lp(std::forward<Args>(args))...))
+            .c_str());
 }
 
 #define GENIEX_LEVEL_LOG(level, ...) geniex::geniex_log_internal(level, __FILE__, __LINE__, __func__, __VA_ARGS__)
 
 #define GENIEX_LOG_TRACE(...) GENIEX_LEVEL_LOG(geniex::LogLevel::Trace, __VA_ARGS__)
 #define GENIEX_LOG_DEBUG(...) GENIEX_LEVEL_LOG(geniex::LogLevel::Debug, __VA_ARGS__)
-#define GENIEX_LOG_INFO(...)  GENIEX_LEVEL_LOG(geniex::LogLevel::Info,  __VA_ARGS__)
-#define GENIEX_LOG_WARN(...)  GENIEX_LEVEL_LOG(geniex::LogLevel::Warn,  __VA_ARGS__)
+#define GENIEX_LOG_INFO(...) GENIEX_LEVEL_LOG(geniex::LogLevel::Info, __VA_ARGS__)
+#define GENIEX_LOG_WARN(...) GENIEX_LEVEL_LOG(geniex::LogLevel::Warn, __VA_ARGS__)
 #define GENIEX_LOG_ERROR(...) GENIEX_LEVEL_LOG(geniex::LogLevel::Error, __VA_ARGS__)
 
 #else  // GENIEX_DEBUG
@@ -96,8 +94,8 @@ inline void geniex_log_internal(LogLevel level, fmt::format_string<Args...> fmt_
 
 #define GENIEX_LOG_TRACE(...) ((void)0)
 #define GENIEX_LOG_DEBUG(...) ((void)0)
-#define GENIEX_LOG_INFO(...)  geniex::geniex_log_internal(geniex::LogLevel::Info,  __VA_ARGS__)
-#define GENIEX_LOG_WARN(...)  geniex::geniex_log_internal(geniex::LogLevel::Warn,  __VA_ARGS__)
+#define GENIEX_LOG_INFO(...) geniex::geniex_log_internal(geniex::LogLevel::Info, __VA_ARGS__)
+#define GENIEX_LOG_WARN(...) geniex::geniex_log_internal(geniex::LogLevel::Warn, __VA_ARGS__)
 #define GENIEX_LOG_ERROR(...) geniex::geniex_log_internal(geniex::LogLevel::Error, __VA_ARGS__)
 
 #endif  // GENIEX_DEBUG

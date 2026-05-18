@@ -10,16 +10,16 @@
 // so providers are structurally identical to Qwen3's; only head_dim and
 // theta differ per size.
 
-#include "cb/cb.h"
-#include "llm/llm_utils.h"
-#include "pipeline/chat_template.h"
-#include "llama3_2/llama3_2.h"
-
 #include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include "cb/cb.h"
+#include "llama3_2/llama3_2.h"
+#include "llm/llm_utils.h"
+#include "pipeline/chat_template.h"
 
 namespace geniex {
 namespace llama3_2_cb {
@@ -30,39 +30,35 @@ static constexpr int32_t kPadTokenId = 128001;
 // Writes the concatenated, zero-padded input_ids buffer into shard 0.
 // No-ops on shards that don't take `input_ids`.
 class Llama32CBTokenIdProvider : public cb::CBInputProvider {
-public:
-    explicit Llama32CBTokenIdProvider(std::string tensor_name = "input_ids",
-                                      int32_t pad_token_id = kPadTokenId)
+   public:
+    explicit Llama32CBTokenIdProvider(std::string tensor_name = "input_ids", int32_t pad_token_id = kPadTokenId)
         : tensor_name_(std::move(tensor_name)), pad_token_id_(pad_token_id) {}
 
     void write(Graph& g, const cb::CBStepContext& ctx) override {
         if (!g.hasInput(tensor_name_)) return;
 
-        const auto& spec = g.inputSpec(tensor_name_);
-        size_t capacity = 1;
+        const auto& spec     = g.inputSpec(tensor_name_);
+        size_t      capacity = 1;
         for (auto d : spec.shape) capacity *= d;
 
         std::vector<int32_t> buf(capacity, pad_token_id_);
-        const size_t n = std::min(ctx.concat_tokens.size(), capacity);
+        const size_t         n = std::min(ctx.concat_tokens.size(), capacity);
         std::copy_n(ctx.concat_tokens.begin(), n, buf.begin());
 
         g.write(tensor_name_, buf.data(), buf.size());
     }
 
-private:
+   private:
     std::string tensor_name_;
     int32_t     pad_token_id_;
 };
 
 // Builds per-session position IDs and writes the RoPE cos/sin tables.
 class Llama32CBRoPEProvider : public cb::CBInputProvider {
-public:
-    Llama32CBRoPEProvider(size_t head_dim, float theta,
-                          std::string cos_name = "position_ids_cos",
-                          std::string sin_name = "position_ids_sin")
-        : rope_(head_dim, theta),
-          cos_name_(std::move(cos_name)),
-          sin_name_(std::move(sin_name)) {}
+   public:
+    Llama32CBRoPEProvider(size_t head_dim, float theta, std::string cos_name = "position_ids_cos",
+        std::string sin_name = "position_ids_sin")
+        : rope_(head_dim, theta), cos_name_(std::move(cos_name)), sin_name_(std::move(sin_name)) {}
 
     void write(Graph& g, const cb::CBStepContext& ctx) override {
         const bool has_cos = g.hasInput(cos_name_);
@@ -77,7 +73,7 @@ public:
         if (has_sin) g.write(sin_name_, sin_vec.data(), sin_vec.size());
     }
 
-private:
+   private:
     RotaryEmbedding rope_;
     std::string     cos_name_;
     std::string     sin_name_;
@@ -93,8 +89,8 @@ namespace llama3_2_3b {
 inline cb::CBLLMModel makeModel() {
     cb::CBLLMModel m(geniex::llama3_2_3b::makeSpec());
     m.addCBProvider(std::make_unique<Llama32CBTokenIdProvider>("input_ids", kPadTokenId));
-    m.addCBProvider(std::make_unique<Llama32CBRoPEProvider>(
-        geniex::llama3_2_3b::kHeadDim, geniex::llama3_2_3b::kRopeTheta));
+    m.addCBProvider(
+        std::make_unique<Llama32CBRoPEProvider>(geniex::llama3_2_3b::kHeadDim, geniex::llama3_2_3b::kRopeTheta));
     return m;
 }
 }  // namespace llama3_2_3b
@@ -103,8 +99,8 @@ namespace llama3_2_1b {
 inline cb::CBLLMModel makeModel() {
     cb::CBLLMModel m(geniex::llama3_2_1b::makeSpec());
     m.addCBProvider(std::make_unique<Llama32CBTokenIdProvider>("input_ids", kPadTokenId));
-    m.addCBProvider(std::make_unique<Llama32CBRoPEProvider>(
-        geniex::llama3_2_1b::kHeadDim, geniex::llama3_2_1b::kRopeTheta));
+    m.addCBProvider(
+        std::make_unique<Llama32CBRoPEProvider>(geniex::llama3_2_1b::kHeadDim, geniex::llama3_2_1b::kRopeTheta));
     return m;
 }
 }  // namespace llama3_2_1b

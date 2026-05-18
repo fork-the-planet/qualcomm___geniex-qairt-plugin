@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
+#include "geniex-proc/types.h"
 #include "qwen2_5_vl.h"
 #include "types.h"
-#include "geniex-proc/types.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -21,8 +21,7 @@ static void enable_utf8_io() {
     SetConsoleCP(CP_UTF8);
     DWORD  mode = 0;
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (GetConsoleMode(hOut, &mode))
-        SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    if (GetConsoleMode(hOut, &mode)) SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 }
 #endif
 
@@ -45,15 +44,21 @@ static void printUsage(const char* prog) {
 
 static bool parseArgs(int argc, char** argv, Args& args) {
     for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto next = [&]() -> std::string {
-            return (i + 1 < argc) ? argv[++i] : std::string{};
-        };
-        if      (a == "--max-tokens")    args.max_tokens    = std::stoi(next());
-        else if (a == "--system-prompt") args.system_prompt = next();
-        else if (a == "--verbose")       args.verbose       = true;
-        else if (a == "--help" || a == "-h") { printUsage(argv[0]); return false; }
-        else { std::cerr << "Unknown argument: " << a << "\n"; return false; }
+        std::string a    = argv[i];
+        auto        next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string{}; };
+        if (a == "--max-tokens")
+            args.max_tokens = std::stoi(next());
+        else if (a == "--system-prompt")
+            args.system_prompt = next();
+        else if (a == "--verbose")
+            args.verbose = true;
+        else if (a == "--help" || a == "-h") {
+            printUsage(argv[0]);
+            return false;
+        } else {
+            std::cerr << "Unknown argument: " << a << "\n";
+            return false;
+        }
     }
     return true;
 }
@@ -61,20 +66,20 @@ static bool parseArgs(int argc, char** argv, Args& args) {
 static bool isImageFile(const std::string& path) {
     std::string p = path;
     std::transform(p.begin(), p.end(), p.begin(), ::tolower);
-    return p.ends_with(".jpg") || p.ends_with(".jpeg") || p.ends_with(".png")
-        || p.ends_with(".bmp") || p.ends_with(".gif")  || p.ends_with(".webp");
+    return p.ends_with(".jpg") || p.ends_with(".jpeg") || p.ends_with(".png") || p.ends_with(".bmp") ||
+           p.ends_with(".gif") || p.ends_with(".webp");
 }
 
-static void parseInput(const std::string& input,
-                       std::string& prompt_text,
-                       std::vector<std::string>& image_paths) {
+static void parseInput(const std::string& input, std::string& prompt_text, std::vector<std::string>& image_paths) {
     image_paths.clear();
     std::vector<std::string> text_tokens;
-    std::istringstream iss(input);
-    std::string token;
+    std::istringstream       iss(input);
+    std::string              token;
     while (iss >> token) {
-        if (isImageFile(token)) image_paths.push_back(token);
-        else                    text_tokens.push_back(token);
+        if (isImageFile(token))
+            image_paths.push_back(token);
+        else
+            text_tokens.push_back(token);
     }
     prompt_text.clear();
     for (size_t i = 0; i < text_tokens.size(); ++i) {
@@ -91,11 +96,10 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir =
-        std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl_7b";
+    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen2_5_vl_7b";
 
     geniex::QnnRuntimeConfig runtime_cfg;
-    geniex::VLMConfig config;
+    geniex::VLMConfig        config;
 
     config.llm_config.model_paths = {
         (model_dir / "part1_of_5.bin").string(),
@@ -145,21 +149,19 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        std::string prompt_text;
+        std::string              prompt_text;
         std::vector<std::string> image_paths;
         parseInput(input, prompt_text, image_paths);
 
         // Build messages for this turn only.
         std::vector<geniex::ChatMessage> messages;
-        if (first_turn && !args.system_prompt.empty())
-            messages.push_back({geniex::Role::System, args.system_prompt});
+        if (first_turn && !args.system_prompt.empty()) messages.push_back({geniex::Role::System, args.system_prompt});
         geniex::ChatMessage user_msg{geniex::Role::User, prompt_text};
-        for (const auto& img : image_paths)
-            user_msg.mm_content.push_back({geniex::Modality::Image, img});
+        for (const auto& img : image_paths) user_msg.mm_content.push_back({geniex::Modality::Image, img});
         messages.push_back(std::move(user_msg));
 
         std::string formatted = pipe.applyChatTemplate(messages);
-        first_turn = false;
+        first_turn            = false;
 
         std::cout << "\033[33m";
         auto on_token = [](const char* piece) -> bool {
@@ -167,8 +169,7 @@ int main(int argc, char** argv) {
             return true;
         };
 
-        geniex::GenerateResult result =
-            pipe.generate(formatted, image_paths, gen_cfg, on_token);
+        geniex::GenerateResult result = pipe.generate(formatted, image_paths, gen_cfg, on_token);
         std::cout << "\033[0m\n";
 
         if (result.stop_reason == "error") {
@@ -180,21 +181,17 @@ int main(int argc, char** argv) {
 
         if (args.verbose) {
             std::cout << "\033[1;36m=== Performance ===\033[0m\n"
-                      << "Prompt tokens    : " << result.prompt_tokens    << "\n"
+                      << "Prompt tokens    : " << result.prompt_tokens << "\n"
                       << "Generated tokens : " << result.generated_tokens << "\n"
-                      << "TTFT             : " << std::fixed << std::setprecision(1)
-                      << result.ttft_ms    << " ms\n"
-                      << "Decode time      : " << std::fixed << std::setprecision(1)
-                      << result.decode_ms  << " ms\n"
-                      << "Decode speed     : " << std::fixed << std::setprecision(2)
-                      << result.tokens_per_second << " tokens/s\n"
+                      << "TTFT             : " << std::fixed << std::setprecision(1) << result.ttft_ms << " ms\n"
+                      << "Decode time      : " << std::fixed << std::setprecision(1) << result.decode_ms << " ms\n"
+                      << "Decode speed     : " << std::fixed << std::setprecision(2) << result.tokens_per_second
+                      << " tokens/s\n"
                       << "Stop reason      : " << result.stop_reason << "\n"
                       << "===================\n\n";
         } else {
-            std::cout << "TTFT: " << std::fixed << std::setprecision(1)
-                      << result.ttft_ms << " ms"
-                      << "  |  " << std::setprecision(2)
-                      << result.tokens_per_second << " tokens/s\n\n";
+            std::cout << "TTFT: " << std::fixed << std::setprecision(1) << result.ttft_ms << " ms"
+                      << "  |  " << std::setprecision(2) << result.tokens_per_second << " tokens/s\n\n";
         }
     }
 

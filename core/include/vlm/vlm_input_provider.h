@@ -3,16 +3,16 @@
 
 #pragma once
 
-#include "graph.h"
-#include "types.h"
-#include "llm/input_provider.h"
-#include "llm/llm_types.h"
-#include "geniex_export.h"
-
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include "geniex_export.h"
+#include "graph.h"
+#include "llm/input_provider.h"
+#include "llm/llm_types.h"
+#include "types.h"
 
 namespace geniex {
 
@@ -30,7 +30,7 @@ namespace geniex {
 //              hidden_size must be known either from the caller (loadTable)
 //              or from the owning LLMSpec (onInitialized).
 class GENIEX_VLM_API PrecomputedEmbeddingProvider : public InputProvider {
-public:
+   public:
     explicit PrecomputedEmbeddingProvider(std::string tensor_name = "input_embeds");
 
     // Loads the embedding table from `path`.
@@ -39,9 +39,7 @@ public:
     //  * other   — flat row-major float32 binary; both vocab_size and
     //              hidden_size must be non-zero and match the file size.
     // Idempotent: does nothing if a table is already loaded.
-    void loadTable(const std::string& path,
-                   size_t             vocab_size  = 0,
-                   size_t             hidden_size = 0);
+    void loadTable(const std::string& path, size_t vocab_size = 0, size_t hidden_size = 0);
 
     void onInitialized(const ModelConfig& model_cfg, const LLMSpec& spec) override;
 
@@ -58,11 +56,11 @@ public:
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
-private:
+   private:
     std::string        tensor_name_;
-    std::vector<float> table_;        // flat [vocab_size * hidden_size]
-    std::vector<float> buffer_;       // flat [current_round_tokens * hidden_size]; empty = decode mode
-    size_t             hidden_size_ = 0;
+    std::vector<float> table_;   // flat [vocab_size * hidden_size]
+    std::vector<float> buffer_;  // flat [current_round_tokens * hidden_size]; empty = decode mode
+    size_t             hidden_size_   = 0;
     size_t             buffer_offset_ = 0;  // absolute KV position where buffer[0] starts (= n_past at setBuffer time)
 };
 
@@ -79,13 +77,10 @@ enum class MRoPEInterleaving { BLOCK, STRIDE };
 // into three segments (mrope_section), each driven by one position dimension.
 // Stateful: tracks mrope_deltas_ across conversation turns.
 class GENIEX_VLM_API MRoPEInputProvider : public InputProvider {
-public:
+   public:
     // mrope_section: per-dimension sizes summing to head_dim/2, e.g. {24,20,20}.
-    MRoPEInputProvider(std::vector<int>   mrope_section,
-                       float              theta,
-                       MRoPEInterleaving  style,
-                       std::string        cos_name = "position_ids_cos",
-                       std::string        sin_name = "position_ids_sin");
+    MRoPEInputProvider(std::vector<int> mrope_section, float theta, MRoPEInterleaving style,
+        std::string cos_name = "position_ids_cos", std::string sin_name = "position_ids_sin");
 
     // Pre-computes cos/sin tables from full-sequence 3D position IDs.
     // position_ids: flat [3 * seq_len], layout [temporal..., height..., width...].
@@ -97,31 +92,31 @@ public:
 
     // Accumulated position offset across conversation turns, flat [3].
     const std::vector<int32_t>& mropeDeltas() const;
-    void setMropeDeltas(std::vector<int32_t> deltas);
-    void resetMropeDeltas();
+    void                        setMropeDeltas(std::vector<int32_t> deltas);
+    void                        resetMropeDeltas();
 
     void write(Graph& g, const LLMRunContext& ctx) override;
 
-private:
+   private:
     // Fills out_cos / out_sin [seq_len * half_dim_] from flat [3 * seq_len] pos IDs.
-    void fillCosSin(const std::vector<int32_t>& position_ids, size_t seq_len,
-                    std::vector<float>& out_cos, std::vector<float>& out_sin) const;
+    void fillCosSin(const std::vector<int32_t>& position_ids, size_t seq_len, std::vector<float>& out_cos,
+        std::vector<float>& out_sin) const;
 
-    std::vector<int>     mrope_section_;
-    float                theta_;
-    MRoPEInterleaving    style_;
-    std::string          cos_name_;
-    std::string          sin_name_;
-    size_t               half_dim_ = 0;  // sum of mrope_section_
-    std::vector<float>   inv_freq_;      // cached [half_dim_], computed once at construction
+    std::vector<int>   mrope_section_;
+    float              theta_;
+    MRoPEInterleaving  style_;
+    std::string        cos_name_;
+    std::string        sin_name_;
+    size_t             half_dim_ = 0;  // sum of mrope_section_
+    std::vector<float> inv_freq_;      // cached [half_dim_], computed once at construction
 
-    std::vector<float>   cos_table_;     // flat [current_round_seq_len * half_dim_]; prefill only
-    std::vector<float>   sin_table_;     // flat [current_round_seq_len * half_dim_]; prefill only
-    size_t               seq_len_  = 0;
-    size_t               position_offset_ = 0;  // absolute KV position where table[0] starts (= n_past at setPositionIds time)
-    bool                 has_prefill_positions_ = false;  // set by setPositionIds(), cleared by clearPositionIds()
+    std::vector<float> cos_table_;  // flat [current_round_seq_len * half_dim_]; prefill only
+    std::vector<float> sin_table_;  // flat [current_round_seq_len * half_dim_]; prefill only
+    size_t             seq_len_   = 0;
+    size_t position_offset_       = 0;  // absolute KV position where table[0] starts (= n_past at setPositionIds time)
+    bool   has_prefill_positions_ = false;  // set by setPositionIds(), cleared by clearPositionIds()
 
     std::vector<int32_t> mrope_deltas_;  // flat [3], initialised to {0, 0, 0}
 };
 
-} // namespace geniex
+}  // namespace geniex
