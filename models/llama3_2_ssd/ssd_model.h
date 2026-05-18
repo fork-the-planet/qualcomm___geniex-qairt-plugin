@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "geniex_export.h"
 #include "llm/llm_model.h"
 #include "llm/llm_utils.h"
 #include "ssd_types.h"
@@ -18,7 +19,7 @@ namespace geniex {
 // Decode loop override that performs tree-based self-speculative decoding.
 // Drafts a candidate tree in a single AR-32 pass, then verifies and accepts greedily;
 // typically yields 2-3 tokens per forward pass without a separate draft model.
-class SSDModel : public LLMModel {
+class GENIEX_API SSDModel : public LLMModel {
 public:
     SSDModel(LLMSpec spec, SSDConfig ssd_cfg);
 

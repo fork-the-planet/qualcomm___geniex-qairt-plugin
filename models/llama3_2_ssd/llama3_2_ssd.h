@@ -79,10 +79,9 @@ inline SSDModel makeModel(const std::string& forecast_prefix_path) {
 inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg,
-                                               const ModelConfig& model_cfg,
-                                               const std::string& forecast_prefix_path) {
+                                               const ModelConfig& model_cfg) {
     LLMPipeline pipe;
-    if (!pipe.create(chatTemplate, makeModel(forecast_prefix_path), runtime_cfg, model_cfg))
+    if (!pipe.create(chatTemplate, makeModel(model_cfg.forecast_prefix_path), runtime_cfg, model_cfg))
         return std::nullopt;
     return pipe;
 }
