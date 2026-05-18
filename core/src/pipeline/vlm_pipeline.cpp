@@ -114,7 +114,7 @@ GenerateResult VLMPipeline::generate(const std::string& formatted_prompt, const 
             t_first_token = Clock::now();
             got_first     = true;
         }
-        std::string piece = impl_->tokenizer->decode({tok});
+        std::string piece = impl_->tokenizer->decode_token(tok);
         full_text << piece;
         if (on_token && !piece.empty()) {
             if (!on_token(piece.c_str())) {

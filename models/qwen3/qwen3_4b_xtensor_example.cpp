@@ -331,7 +331,7 @@ int main(int argc, char** argv) {
 
             t_first_token   = std::chrono::high_resolution_clock::now();
             got_first_token = true;
-            std::cout << "\033[33m" << tokenizer->decode({next_token}) << std::flush;
+            std::cout << "\033[33m" << tokenizer->decode_token(next_token) << std::flush;
             generated_tokens.push_back(next_token);
 
             // ── Transfer KV cache from ARN to AR1 ────────────────────────────
@@ -386,7 +386,7 @@ int main(int argc, char** argv) {
                 next_token = static_cast<int32_t>(xt::argmax(logits_ar1)());
 
                 if (next_token == EOS_TOKEN || next_token == 151643) break;
-                std::cout << tokenizer->decode({next_token}) << std::flush;
+                std::cout << tokenizer->decode_token(next_token) << std::flush;
                 generated_tokens.push_back(next_token);
             }
         } catch (const std::exception& e) {

@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
                     t_first_token   = std::chrono::high_resolution_clock::now();
                     got_first_token = true;
                 }
-                std::cout << tokenizer->decode({tok}) << std::flush;
+                std::cout << tokenizer->decode_token(tok) << std::flush;
                 return true;
             });
         } catch (const std::exception& e) {
