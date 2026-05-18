@@ -25,7 +25,6 @@ MANIFEST
 
 # ─── Editor / tooling ────────────────────────────────────────────────────────
 .vscode/
-.claude/
 .cache
 .idea/
 .ruff_cache/
