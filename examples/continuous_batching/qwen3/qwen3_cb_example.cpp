@@ -233,7 +233,7 @@ int main(int argc, char** argv) {
                     if (session_ids[idx] == sid) break;
                 if (idx >= session_ids.size()) return;
 
-                output_text[idx] += tokenizer->decode({tok});
+                output_text[idx] += tokenizer->decode_token(tok);
                 redraw();
             });
         } catch (const std::exception& e) {

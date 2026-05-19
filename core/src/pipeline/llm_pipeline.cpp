@@ -104,7 +104,7 @@ GenerateResult LLMPipeline::generate(
             got_first     = true;
         }
 
-        std::string piece = impl_->tokenizer->decode({tok});
+        std::string piece = impl_->tokenizer->decode_token(tok);
         full_text << piece;
 
         if (on_token && !piece.empty()) {
