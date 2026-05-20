@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "llm_model_registry.h"
+#include "dispatch.h"
 #include "pipeline/llm_pipeline.h"
 #include "types.h"
 
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     if (!parseArgs(argc, argv, args)) return 1;
 
     if (args.list_models) {
-        for (const auto& [name, _] : geniex::llm_model_registry()) std::cout << name << "\n";
+        for (const auto& [name, _] : modelFilesTable()) std::cout << name << "\n";
         return 0;
     }
 
@@ -106,12 +106,6 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const auto& registry = geniex::llm_model_registry();
-    auto        reg_it   = registry.find(args.model);
-    if (reg_it == registry.end()) {
-        std::cerr << "Unknown model '" << args.model << "'. Use --list-models.\n";
-        return 1;
-    }
     const ModelFiles* files = findModelFiles(args.model);
     if (!files) {
         std::cerr << "Model '" << args.model << "' has no file-path entry in tests/llm.cpp modelFilesTable().\n";
@@ -146,7 +140,7 @@ int main(int argc, char** argv) {
 
     std::optional<geniex::LLMPipeline> pipe;
     try {
-        pipe = reg_it->second.make_pipeline(runtime_cfg, model_cfg);
+        pipe = geniex::makeLLMPipeline(runtime_cfg, model_cfg);
     } catch (const std::exception& e) {
         std::cerr << "Pipeline construction threw: " << e.what() << "\n";
         return 1;

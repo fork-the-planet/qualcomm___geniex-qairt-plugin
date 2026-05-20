@@ -13,7 +13,16 @@ set_target_properties(llm_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# Keep in sync with llm_model_registry() and modelFilesTable() in tests/llm.cpp.
+# ── spec_loader_dump ────────────────────────────────────────────────────────
+# Read-only smoke test: parses config.json + metadata.json from each bundle
+# and prints the resulting spec. Does not load QNN graphs.
+add_executable(spec_loader_dump spec_loader_dump.cpp)
+target_link_libraries(spec_loader_dump PRIVATE geniex_core)
+set_target_properties(spec_loader_dump PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# Keep in sync with modelFilesTable() in tests/llm.cpp.
 set(_LLM_MODELS
     qwen3_4b
     qwen3_4b_instruct_2507

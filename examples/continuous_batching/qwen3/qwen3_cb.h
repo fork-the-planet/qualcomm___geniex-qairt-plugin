@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "cb/cb.h"
+#include "llm/llm_spec_loader.h"
 #include "llm/llm_utils.h"
 #include "pipeline/chat_template.h"
 #include "qwen3/qwen3.h"
@@ -85,14 +86,19 @@ inline ChatTemplateFunc chatTemplate = chatMLTemplate;
 // with a `makeModel()` that reuses the matching spec (and the right
 // head_dim / theta, if they differ).
 
-namespace qwen3_4b_instruct_2507 {
-inline cb::CBLLMModel makeModel() {
-    cb::CBLLMModel m(geniex::qwen3_4b_instruct_2507::makeSpec());
-    m.addCBProvider(std::make_unique<Qwen3CBTokenIdProvider>("input_ids", 151645));
-    m.addCBProvider(std::make_unique<Qwen3CBRoPEProvider>(kHeadDim, kRopeTheta));
+// Builds a CB-capable model from a bundle directory. Spec is read from
+// config.json + metadata.json; CB-specific providers wire token-id and RoPE.
+inline cb::CBLLMModel makeModel(const ModelConfig& model_cfg) {
+    const auto bundle = bundleDirOf(model_cfg);
+    auto       hf     = parseHFConfig(bundle);
+    auto       meta   = parseQAIRTMetadata(bundle);
+
+    cb::CBLLMModel m(buildSpecFromConfig(hf, meta));
+    const int32_t  pad_id = hf.eos_token_ids.empty() ? 0 : hf.eos_token_ids.front();
+    m.addCBProvider(std::make_unique<Qwen3CBTokenIdProvider>("input_ids", pad_id));
+    m.addCBProvider(std::make_unique<Qwen3CBRoPEProvider>(hf.head_dim, hf.rope_theta));
     return m;
 }
-}  // namespace qwen3_4b_instruct_2507
 
 }  // namespace qwen3_cb
 }  // namespace geniex

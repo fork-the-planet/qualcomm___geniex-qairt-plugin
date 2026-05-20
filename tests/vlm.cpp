@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
+#include "dispatch.h"
 #include "geniex-proc/types.h"
 #include "pipeline/vlm_pipeline.h"
-#include "qwen2_5_vl/qwen2_5_vl.h"
 #include "types.h"
 
 namespace fs = std::filesystem;
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
 
     std::optional<geniex::VLMPipeline> pipe;
     try {
-        pipe = geniex::qwen2_5_vl_7b::makePipeline(runtime_cfg, config);
+        pipe = geniex::makeVLMPipeline(runtime_cfg, config);
     } catch (const std::exception& e) {
         std::cerr << "Pipeline construction threw: " << e.what() << "\n";
         return 1;
