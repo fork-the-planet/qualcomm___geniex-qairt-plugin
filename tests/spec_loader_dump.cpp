@@ -45,13 +45,11 @@ static void dumpBundle(const std::filesystem::path& dir) {
                   << "  bos_token_id            : " << hf.bos_token_id << "\n"
                   << "  pad_token_id            : " << hf.pad_token_id << "\n"
                   << "  eos_token_ids           : [";
-        for (size_t i = 0; i < hf.eos_token_ids.size(); ++i)
-            std::cout << (i ? ", " : "") << hf.eos_token_ids[i];
+        for (size_t i = 0; i < hf.eos_token_ids.size(); ++i) std::cout << (i ? ", " : "") << hf.eos_token_ids[i];
         std::cout << "]\n";
         if (!hf.mrope_section.empty()) {
             std::cout << "  mrope_section           : [";
-            for (size_t i = 0; i < hf.mrope_section.size(); ++i)
-                std::cout << (i ? ", " : "") << hf.mrope_section[i];
+            for (size_t i = 0; i < hf.mrope_section.size(); ++i) std::cout << (i ? ", " : "") << hf.mrope_section[i];
             std::cout << "]\n";
         }
         if (hf.image_token_id >= 0 || hf.vision_start_token_id >= 0 || hf.video_token_id >= 0) {
@@ -65,15 +63,13 @@ static void dumpBundle(const std::filesystem::path& dir) {
                   << "  shards (" << meta.shards.size() << "):\n";
         for (size_t s = 0; s < meta.shards.size(); ++s) {
             std::cout << "    [" << s + 1 << "] in='" << meta.shards[s].in_state_name << "'  out='"
-                      << meta.shards[s].out_state_name << "'  lm_head_only=" << meta.shards[s].lm_head_only
-                      << "\n";
+                      << meta.shards[s].out_state_name << "'  lm_head_only=" << meta.shards[s].lm_head_only << "\n";
         }
         std::cout << "  shard_layer_ranges      : [";
         for (size_t s = 0; s < meta.shard_layer_ranges.size(); ++s) {
             if (s) std::cout << ", ";
             if (meta.shard_layer_ranges[s])
-                std::cout << "[" << meta.shard_layer_ranges[s]->begin << ".." << meta.shard_layer_ranges[s]->end
-                          << "]";
+                std::cout << "[" << meta.shard_layer_ranges[s]->begin << ".." << meta.shard_layer_ranges[s]->end << "]";
             else
                 std::cout << "<none>";
         }
@@ -125,7 +121,7 @@ int main(int argc, char** argv) {
         for (int i = 1; i < argc; ++i) bundles.emplace_back(argv[i]);
     } else {
         const auto root = std::filesystem::current_path() / "modelfiles";
-        bundles = {
+        bundles         = {
             root / "qwen3_4b",
             root / "qwen3_4b_instruct_2507",
             root / "qwen2_5_vl_7b",

@@ -63,13 +63,13 @@ struct GraphNameParts {
     std::string phase_prefix;  // empty, "prompt", "token", "prefill", "decode"
     size_t      ar    = 0;
     size_t      cl    = 0;
-    size_t      shard = 0;     // 1-based
+    size_t      shard = 0;  // 1-based
     size_t      total = 0;
 };
 
 bool parseGraphName(const std::string& name, GraphNameParts& out) {
     static const std::regex re(R"((?:([a-zA-Z]+)_)?ar(\d+)_cl(\d+)_(\d+)_of_(\d+))");
-    std::smatch m;
+    std::smatch             m;
     if (!std::regex_match(name, m, re)) return false;
     out.phase_prefix = m[1].matched ? m[1].str() : "";
     out.ar           = std::stoul(m[2].str());
@@ -84,7 +84,7 @@ bool parseGraphName(const std::string& name, GraphNameParts& out) {
 // some bundles use, but the canonical schema is the bare `partN_of_M.bin`.
 bool parsePartShardName(const std::string& name, size_t& shard, size_t& total) {
     static const std::regex re(R"((?:.*_)?part(\d+)_of_(\d+)\.bin)");
-    std::smatch m;
+    std::smatch             m;
     if (!std::regex_match(name, m, re)) return false;
     shard = std::stoul(m[1].str());
     total = std::stoul(m[2].str());
@@ -95,7 +95,7 @@ bool parsePartShardName(const std::string& name, size_t& shard, size_t& total) {
 // Returns std::nullopt on mismatch.
 std::optional<size_t> parsePastIndex(const std::string& name) {
     static const std::regex re(R"(past_(?:key|value)_(\d+)_(?:in|out))");
-    std::smatch m;
+    std::smatch             m;
     if (!std::regex_match(name, m, re)) return std::nullopt;
     return std::stoul(m[1].str());
 }
@@ -116,13 +116,12 @@ ParsedHFConfig parseHFConfig(const std::filesystem::path& bundle_dir) {
     if (j.contains("architectures") && j.at("architectures").is_array() && !j.at("architectures").empty()) {
         cfg.architecture = j.at("architectures").front().get<std::string>();
     }
-    cfg.name_or_path            = j.value("_name_or_path", std::string{});
-    cfg.model_type              = j.value("model_type", std::string{});
-    cfg.hidden_size             = j.value("hidden_size", size_t{0});
-    cfg.num_attention_heads     = j.value("num_attention_heads", size_t{0});
-    cfg.num_key_value_heads     = j.value("num_key_value_heads", cfg.num_attention_heads);
-    cfg.head_dim                = j.value("head_dim",
-        cfg.num_attention_heads ? cfg.hidden_size / cfg.num_attention_heads : size_t{0});
+    cfg.name_or_path        = j.value("_name_or_path", std::string{});
+    cfg.model_type          = j.value("model_type", std::string{});
+    cfg.hidden_size         = j.value("hidden_size", size_t{0});
+    cfg.num_attention_heads = j.value("num_attention_heads", size_t{0});
+    cfg.num_key_value_heads = j.value("num_key_value_heads", cfg.num_attention_heads);
+    cfg.head_dim = j.value("head_dim", cfg.num_attention_heads ? cfg.hidden_size / cfg.num_attention_heads : size_t{0});
     cfg.vocab_size              = j.value("vocab_size", size_t{0});
     cfg.num_hidden_layers       = j.value("num_hidden_layers", size_t{0});
     cfg.max_position_embeddings = j.value("max_position_embeddings", size_t{0});
@@ -154,11 +153,11 @@ ParsedHFConfig parseHFConfig(const std::filesystem::path& bundle_dir) {
         std::string type = rs.value("rope_type", rs.value("type", std::string{}));
         if (type == "llama3") {
             Llama3RopeScaling s;
-            s.factor                            = rs.value("factor", 1.0f);
-            s.low_freq_factor                   = rs.value("low_freq_factor", 1.0f);
-            s.high_freq_factor                  = rs.value("high_freq_factor", 4.0f);
-            s.original_max_position_embeddings  = rs.value("original_max_position_embeddings", size_t{8192});
-            cfg.rope_scaling = s;
+            s.factor                           = rs.value("factor", 1.0f);
+            s.low_freq_factor                  = rs.value("low_freq_factor", 1.0f);
+            s.high_freq_factor                 = rs.value("high_freq_factor", 4.0f);
+            s.original_max_position_embeddings = rs.value("original_max_position_embeddings", size_t{8192});
+            cfg.rope_scaling                   = s;
         } else if (type == "longrope" || type == "su") {
             LongRopeScaling s;
             if (rs.contains("long_factor"))
@@ -166,11 +165,11 @@ ParsedHFConfig parseHFConfig(const std::filesystem::path& bundle_dir) {
             if (rs.contains("short_factor"))
                 for (const auto& v : rs.at("short_factor")) s.short_factor.push_back(v.get<float>());
             s.original_max_position_embeddings = rs.value("original_max_position_embeddings", size_t{4096});
-            cfg.rope_scaling = s;
+            cfg.rope_scaling                   = s;
         } else if (type == "partial") {
             PartialRopeScaling s;
-            s.rope_fraction = rs.value("rope_fraction", 1.0f);
-            s.scale         = rs.value("scale", 1.0f);
+            s.rope_fraction  = rs.value("rope_fraction", 1.0f);
+            s.scale          = rs.value("scale", 1.0f);
             cfg.rope_scaling = s;
         } else {
             cfg.rope_scaling = StandardRope{};
@@ -217,8 +216,7 @@ ShardWiring readShardWiring(const json& graph_entry, const std::string& diag_lab
         }
     }
     if (w.in_state.empty() || w.out_state.empty()) {
-        throw std::runtime_error("llm_spec_loader: " + diag_label +
-                                 " is missing a hidden-state input or output");
+        throw std::runtime_error("llm_spec_loader: " + diag_label + " is missing a hidden-state input or output");
     }
     return w;
 }
@@ -240,7 +238,7 @@ void parseVisionPreprocessing(const json& j, ParsedVisionPreprocessing& out) {
 
 ParsedGenieConfig parseGenieConfig(const std::filesystem::path& bundle_dir) {
     ParsedGenieConfig out;
-    auto path = bundle_dir / "genie_config.json";
+    auto              path = bundle_dir / "genie_config.json";
     if (!std::filesystem::exists(path)) return out;
     try {
         auto j = loadJson(path);
@@ -315,8 +313,7 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
     const json* vp_obj = nullptr;
     if (j.contains("vision_preprocessing") && j.at("vision_preprocessing").is_object()) {
         vp_obj = &j.at("vision_preprocessing");
-    } else if (j.contains("genie") && j.at("genie").is_object() &&
-               j.at("genie").contains("vision_preprocessing") &&
+    } else if (j.contains("genie") && j.at("genie").is_object() && j.at("genie").contains("vision_preprocessing") &&
                j.at("genie").at("vision_preprocessing").is_object()) {
         vp_obj = &j.at("genie").at("vision_preprocessing");
     }
@@ -375,7 +372,7 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
                     "llm_spec_loader: could not locate graph entry for shard " + std::to_string(s));
             }
 
-            auto      w  = readShardWiring(*graph_entry, "shard " + std::to_string(s));
+            auto      w = readShardWiring(*graph_entry, "shard " + std::to_string(s));
             ShardSpec sp;
             sp.in_state_name  = w.in_state;
             sp.out_state_name = w.out_state;
@@ -386,8 +383,8 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
                 const size_t lo = *w.kv_layer_indices.begin();
                 const size_t hi = *w.kv_layer_indices.rbegin();
                 if (w.kv_layer_indices.size() != (hi - lo + 1)) {
-                    throw std::runtime_error("llm_spec_loader: shard " + std::to_string(s) +
-                                             " has non-contiguous KV layer indices");
+                    throw std::runtime_error(
+                        "llm_spec_loader: shard " + std::to_string(s) + " has non-contiguous KV layer indices");
                 }
                 out.shard_layer_ranges[s - 1] = LayerRange{lo, hi};
             }
@@ -432,7 +429,7 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
                 throw std::runtime_error(
                     "llm_spec_loader: could not locate partN_of_M entry for shard " + std::to_string(s));
             }
-            auto      w  = readShardWiring(*graph_entry, "part" + std::to_string(s));
+            auto      w = readShardWiring(*graph_entry, "part" + std::to_string(s));
             ShardSpec sp;
             sp.in_state_name  = w.in_state;
             sp.out_state_name = w.out_state;
@@ -443,8 +440,8 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
                 const size_t lo = *w.kv_layer_indices.begin();
                 const size_t hi = *w.kv_layer_indices.rbegin();
                 if (w.kv_layer_indices.size() != (hi - lo + 1)) {
-                    throw std::runtime_error("llm_spec_loader: part" + std::to_string(s) +
-                                             " has non-contiguous KV layer indices");
+                    throw std::runtime_error(
+                        "llm_spec_loader: part" + std::to_string(s) + " has non-contiguous KV layer indices");
                 }
                 out.shard_layer_ranges[s - 1] = LayerRange{lo, hi};
             }
@@ -460,16 +457,16 @@ LLMSpec buildSpecFromConfig(const ParsedHFConfig& hf, const ParsedQAIRTMetadata&
 
     spec.state_blocks = {makeKVOnlyStateBlock(meta.shard_layer_ranges)};
 
-    spec.seq_len_prefill   = meta.seq_len_prefill;
-    spec.seq_len_decode    = meta.seq_len_decode;
-    spec.hidden_size       = hf.hidden_size;
-    spec.num_heads         = hf.num_attention_heads;
-    spec.num_kv_heads      = hf.num_key_value_heads;
-    spec.head_dim          = hf.head_dim;
-    spec.vocab_size        = hf.vocab_size;
-    spec.context_lengths   = meta.context_lengths;
+    spec.seq_len_prefill    = meta.seq_len_prefill;
+    spec.seq_len_decode     = meta.seq_len_decode;
+    spec.hidden_size        = hf.hidden_size;
+    spec.num_heads          = hf.num_attention_heads;
+    spec.num_kv_heads       = hf.num_key_value_heads;
+    spec.head_dim           = hf.head_dim;
+    spec.vocab_size         = hf.vocab_size;
+    spec.context_lengths    = meta.context_lengths;
     spec.graph_name_pattern = meta.graph_name_pattern;
-    spec.eos_token_ids     = hf.eos_token_ids;
+    spec.eos_token_ids      = hf.eos_token_ids;
     return spec;
 }
 
@@ -483,8 +480,7 @@ std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedHFConfig& hf) {
                 // (which export pre-baked RoPE tables anyway). Log so it's
                 // visible if a future bundle starts depending on the scaling.
                 GENIEX_LOG_INFO(
-                    "llm_spec_loader: rope_scaling=llama3 (factor={}); using standard RoPE provider",
-                    s.factor);
+                    "llm_spec_loader: rope_scaling=llama3 (factor={}); using standard RoPE provider", s.factor);
                 return std::make_unique<RoPEInputProvider>(hf.head_dim, hf.rope_theta);
             } else if constexpr (std::is_same_v<T, LongRopeScaling>) {
                 const size_t orig = s.original_max_position_embeddings ? s.original_max_position_embeddings : 4096;
@@ -492,8 +488,7 @@ std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedHFConfig& hf) {
                 return std::make_unique<LongRoPEInputProvider>(
                     hf.head_dim, hf.rope_theta, s.long_factor, static_cast<int>(maxp), static_cast<int>(orig));
             } else if constexpr (std::is_same_v<T, PartialRopeScaling>) {
-                return std::make_unique<PartialRoPEInputProvider>(
-                    hf.head_dim, hf.rope_theta, s.rope_fraction, s.scale);
+                return std::make_unique<PartialRoPEInputProvider>(hf.head_dim, hf.rope_theta, s.rope_fraction, s.scale);
             } else {
                 return std::make_unique<RoPEInputProvider>(hf.head_dim, hf.rope_theta);
             }
@@ -515,9 +510,8 @@ std::unique_ptr<InputProvider> makeEmbeddingProvider(const ParsedHFConfig& hf, c
     if (first == "input_embeds" || first == "inputs_embeds") {
         return std::make_unique<EmbeddingInputProvider>(first);
     }
-    throw std::runtime_error(
-        "llm_spec_loader: unrecognised first-shard input '" + first +
-        "' — expected 'input_ids', 'input_embeds', or 'inputs_embeds'");
+    throw std::runtime_error("llm_spec_loader: unrecognised first-shard input '" + first +
+                             "' — expected 'input_ids', 'input_embeds', or 'inputs_embeds'");
 }
 
 std::filesystem::path bundleDirOf(const ModelConfig& model_cfg) {

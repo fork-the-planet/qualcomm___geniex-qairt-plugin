@@ -43,27 +43,25 @@
 #include <optional>
 #include <string>
 
-#include "llm/llm_spec_loader.h"
-#include "logging.h"
-#include "pipeline/llm_pipeline.h"
-#include "pipeline/vlm_pipeline.h"
-#include "types.h"
-
 #include "falcon3/falcon3.h"
 #include "llama3/llama3.h"
 #include "llama3_2_ssd/llama3_2_ssd.h"
+#include "llm/llm_spec_loader.h"
+#include "logging.h"
 #include "phi3_5/phi3_5.h"
+#include "pipeline/llm_pipeline.h"
+#include "pipeline/vlm_pipeline.h"
 #include "qwen2_5/qwen2_5.h"
 #include "qwen2_5_vl/qwen2_5_vl.h"
 #include "qwen3/qwen3.h"
+#include "types.h"
 
 namespace geniex {
 
 namespace dispatch_detail {
 
 inline std::string toLower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
@@ -74,9 +72,9 @@ inline bool containsCaseInsensitive(const std::string& haystack, const std::stri
 // Combined signature of the bundle: HF architecture + HF name_or_path + Genie
 // dialog type. All read at dispatch time.
 struct BundleSignature {
-    std::string architecture;   // config.json `architectures[0]`
-    std::string name_or_path;   // config.json `_name_or_path`
-    std::string dialog_type;    // genie_config.json `dialog.type`, defaults to "basic"
+    std::string architecture;  // config.json `architectures[0]`
+    std::string name_or_path;  // config.json `_name_or_path`
+    std::string dialog_type;   // genie_config.json `dialog.type`, defaults to "basic"
 };
 
 inline BundleSignature signatureOf(const ModelConfig& model_cfg) {
@@ -100,7 +98,7 @@ inline BundleSignature signatureOf(const ModelConfig& model_cfg) {
 inline ModelConfig autoDiscoverForecastPrefix(ModelConfig model_cfg) {
     if (model_cfg.forecast_prefix_path.has_value()) return model_cfg;
     try {
-        const auto bundle = bundleDirOf(model_cfg);
+        const auto bundle    = bundleDirOf(model_cfg);
         const auto candidate = bundle / "forecast-prefix" / "kv-cache.primary.qnn-htp";
         if (std::filesystem::exists(candidate)) {
             model_cfg.forecast_prefix_path = candidate.string();
@@ -116,8 +114,8 @@ inline ModelConfig autoDiscoverForecastPrefix(ModelConfig model_cfg) {
 // Single LLM entry point. Dispatches to the correct family factory based on
 // the bundle's standard QAIRT distribution files (config.json + genie_config.json).
 // Returns std::nullopt for unknown / VLM architectures.
-inline std::optional<LLMPipeline> makeLLMPipeline(const QnnRuntimeConfig& runtime_cfg,
-                                                  const ModelConfig& model_cfg_in) {
+inline std::optional<LLMPipeline> makeLLMPipeline(
+    const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg_in) {
     const auto sig = dispatch_detail::signatureOf(model_cfg_in);
     if (sig.architecture.empty()) return std::nullopt;
 
@@ -126,8 +124,7 @@ inline std::optional<LLMPipeline> makeLLMPipeline(const QnnRuntimeConfig& runtim
     // because it doesn't require the caller to know the model is special.
     if (sig.dialog_type == "ssd-q1") {
         if (sig.architecture != "LlamaForCausalLM") {
-            GENIEX_LOG_ERROR("dispatch: ssd-q1 dialog requested with unsupported architecture '{}'",
-                             sig.architecture);
+            GENIEX_LOG_ERROR("dispatch: ssd-q1 dialog requested with unsupported architecture '{}'", sig.architecture);
             return std::nullopt;
         }
         const auto cfg = dispatch_detail::autoDiscoverForecastPrefix(model_cfg_in);
@@ -143,8 +140,7 @@ inline std::optional<LLMPipeline> makeLLMPipeline(const QnnRuntimeConfig& runtim
     }
     if (sig.architecture == "Qwen3ForCausalLM") return qwen3::makePipeline(runtime_cfg, model_cfg_in);
     if (sig.architecture == "Qwen2ForCausalLM") return qwen2_5::makePipeline(runtime_cfg, model_cfg_in);
-    if (sig.architecture == "Phi3ForCausalLM" || sig.architecture == "Phi3VForCausalLM")
-        return phi3_5::makePipeline(runtime_cfg, model_cfg_in);
+    if (sig.architecture == "Phi3ForCausalLM") return phi3_5::makePipeline(runtime_cfg, model_cfg_in);
 
     GENIEX_LOG_ERROR("dispatch: no LLM factory for architecture '{}'", sig.architecture);
     return std::nullopt;
@@ -156,8 +152,7 @@ inline std::optional<VLMPipeline> makeVLMPipeline(const QnnRuntimeConfig& runtim
     const auto sig = dispatch_detail::signatureOf(config.llm_config);
     if (sig.architecture.empty()) return std::nullopt;
 
-    if (sig.architecture == "Qwen2_5_VLForConditionalGeneration")
-        return qwen2_5_vl::makePipeline(runtime_cfg, config);
+    if (sig.architecture == "Qwen2_5_VLForConditionalGeneration") return qwen2_5_vl::makePipeline(runtime_cfg, config);
 
     GENIEX_LOG_ERROR("dispatch: no VLM factory for architecture '{}'", sig.architecture);
     return std::nullopt;

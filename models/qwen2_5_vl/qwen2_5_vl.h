@@ -26,8 +26,8 @@ namespace qwen2_5_vl {
 // ── Vision-tower internals (not exposed in the bundle's config.json) ─────────
 // These describe the qwen2-vl ViT itself, not the LLM tower; they are the same
 // across every Qwen2.5-VL bundle and would only change if the family changed.
-static constexpr int   kVitWindowSize = 112;     // pixels
-static constexpr int   kVitRopeDim    = 40;      // half_dim*2 = cos/sin emb dim
+static constexpr int   kVitWindowSize = 112;  // pixels
+static constexpr int   kVitRopeDim    = 40;   // half_dim*2 = cos/sin emb dim
 static constexpr float kVitRopeTheta  = 10000.0f;
 
 // Default <|image_pad|> token ID. Used as a fallback when config.json's

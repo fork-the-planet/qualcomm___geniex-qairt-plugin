@@ -36,16 +36,16 @@ std::vector<float> Qwen25VLVisionEncoder::encode(const PixelData& pixel_data) {
         throw std::runtime_error("Qwen25VLVisionEncoder: setPreprocessing/setHiddenSize not called before encode");
     }
 
-    const int    grid_t            = 1;
-    const int    grid_h            = image_height_ / patch_size_;
-    const int    grid_w            = image_width_ / patch_size_;
-    const size_t num_patches       = static_cast<size_t>(grid_t * grid_h * grid_w);
-    const size_t sm_unit           = static_cast<size_t>(spatial_merge_size_ * spatial_merge_size_);
-    const size_t n_groups          = num_patches / sm_unit;
-    const size_t num_image_tokens  = num_patches / sm_unit;
-    const size_t patch_feature_sz  = static_cast<size_t>(3 * temporal_patch_size_ * patch_size_ * patch_size_);
-    const size_t per_image_pixels  = num_patches * patch_feature_sz;
-    const size_t per_image_tokens  = num_image_tokens * hidden_size_;
+    const int    grid_t           = 1;
+    const int    grid_h           = image_height_ / patch_size_;
+    const int    grid_w           = image_width_ / patch_size_;
+    const size_t num_patches      = static_cast<size_t>(grid_t * grid_h * grid_w);
+    const size_t sm_unit          = static_cast<size_t>(spatial_merge_size_ * spatial_merge_size_);
+    const size_t n_groups         = num_patches / sm_unit;
+    const size_t num_image_tokens = num_patches / sm_unit;
+    const size_t patch_feature_sz = static_cast<size_t>(3 * temporal_patch_size_ * patch_size_ * patch_size_);
+    const size_t per_image_pixels = num_patches * patch_feature_sz;
+    const size_t per_image_tokens = num_image_tokens * hidden_size_;
 
     for (const auto& thw : pixel_data.image_grid_thw) {
         if (thw[0] != grid_t || thw[1] != grid_h || thw[2] != grid_w) {
@@ -71,8 +71,8 @@ std::vector<float> Qwen25VLVisionEncoder::encode(const PixelData& pixel_data) {
     const auto rope_cos = qwen_vit::windowReorder(rope_cos_nat, n_groups, sm_unit, kVitRopeDim, window_index);
     const auto rope_sin = qwen_vit::windowReorder(rope_sin_nat, n_groups, sm_unit, kVitRopeDim, window_index);
 
-    constexpr float kAllowed = 0.0f;
-    constexpr float kBlocked = -1e9f;
+    constexpr float kAllowed    = 0.0f;
+    constexpr float kBlocked    = -1e9f;
     const auto      window_mask = qwen_vit::buildBlockAttentionMask(num_patches, cu_window, kAllowed, kBlocked);
     const auto      full_mask =
         qwen_vit::buildBlockAttentionMask(num_patches, {0, static_cast<int64_t>(num_patches)}, kAllowed, kBlocked);
@@ -107,8 +107,9 @@ std::vector<float> Qwen25VLVisionEncoder::encode(const PixelData& pixel_data) {
         float* out_slot = image_features.data() + img * per_image_tokens;
         for (size_t i = 0; i < reverse_index.size(); ++i) {
             const size_t src = static_cast<size_t>(reverse_index[i]);
-            std::memcpy(
-                out_slot + i * hidden_size_, tokens_reordered.data() + src * hidden_size_, hidden_size_ * sizeof(float));
+            std::memcpy(out_slot + i * hidden_size_,
+                tokens_reordered.data() + src * hidden_size_,
+                hidden_size_ * sizeof(float));
         }
     }
 

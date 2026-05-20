@@ -67,16 +67,16 @@ struct ParsedHFConfig {
     // Used to disambiguate same-architecture families (Falcon3 vs Llama).
     std::string name_or_path;
 
-    std::string model_type;          // e.g. "qwen3", "llama", "phi3", "qwen2_5_vl_text"
-    size_t      hidden_size         = 0;
-    size_t      num_attention_heads = 0;
-    size_t      num_key_value_heads = 0;
-    size_t      head_dim            = 0;
-    size_t      vocab_size          = 0;
-    size_t      num_hidden_layers   = 0;
+    std::string model_type;  // e.g. "qwen3", "llama", "phi3", "qwen2_5_vl_text"
+    size_t      hidden_size             = 0;
+    size_t      num_attention_heads     = 0;
+    size_t      num_key_value_heads     = 0;
+    size_t      head_dim                = 0;
+    size_t      vocab_size              = 0;
+    size_t      num_hidden_layers       = 0;
     size_t      max_position_embeddings = 0;
 
-    float       rope_theta = 10000.0f;
+    float       rope_theta   = 10000.0f;
     RopeScaling rope_scaling = StandardRope{};
 
     int32_t              bos_token_id = -1;
@@ -87,11 +87,11 @@ struct ParsedHFConfig {
     //   rope_scaling.mrope_section
     //   vision_start_token_id / vision_end_token_id / image_token_id / video_token_id
     // Empty / -1 when not applicable.
-    std::vector<int>  mrope_section;
-    int32_t           vision_start_token_id = -1;
-    int32_t           vision_end_token_id   = -1;
-    int32_t           image_token_id        = -1;
-    int32_t           video_token_id        = -1;
+    std::vector<int> mrope_section;
+    int32_t          vision_start_token_id = -1;
+    int32_t          vision_end_token_id   = -1;
+    int32_t          image_token_id        = -1;
+    int32_t          video_token_id        = -1;
 };
 
 // Vision preprocessing knobs read from metadata.json's `vision_preprocessing`
