@@ -34,7 +34,7 @@ inline SSDModel makeModel(const ModelConfig& model_cfg) {
     auto       gc     = parseGenieConfig(bundle);
 
     const std::string forecast_prefix_path = model_cfg.forecast_prefix_path.value_or("");
-    SSDModel m(buildSpec(meta, gc), makeSSDConfig(forecast_prefix_path, gc.rope_theta));
+    SSDModel          m(buildSpec(meta, gc), makeSSDConfig(forecast_prefix_path, gc.rope_theta));
     m.addInputProvider(makeEmbeddingProvider(meta, gc));
     m.addInputProvider(makeRoPEProvider(meta, gc));
     return m;

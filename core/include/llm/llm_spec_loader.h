@@ -55,13 +55,12 @@ struct PartialRopeScaling {
 };
 
 struct MRopeScaling {
-    std::vector<int> mrope_section;        // sums to head_dim/2
+    std::vector<int> mrope_section;  // sums to head_dim/2
     int              spatial_merge_size = 2;
     int              time_step          = 50;
 };
 
-using RopeScaling = std::variant<StandardRope, Llama3RopeScaling, LongRopeScaling,
-                                 PartialRopeScaling, MRopeScaling>;
+using RopeScaling = std::variant<StandardRope, Llama3RopeScaling, LongRopeScaling, PartialRopeScaling, MRopeScaling>;
 
 // ── Vision-preprocessing block (VLM only) ────────────────────────────────────
 struct ParsedVisionPreprocessing {
@@ -157,14 +156,14 @@ GENIEX_API LLMSpec buildSpec(const ParsedQAIRTMetadata& meta, const ParsedGenieC
 
 // Picks the matching RoPE input provider implementation from gc.rope_scaling.
 // head_dim comes from meta; rope_theta from gc; falls back to standard RoPE.
-GENIEX_API std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta,
-                                                           const ParsedGenieConfig&   gc);
+GENIEX_API std::unique_ptr<InputProvider> makeRoPEProvider(
+    const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc);
 
 // Picks the embedding-input provider for shard 0 based on its expected input
 // tensor name. Returns a TokenIdInputProvider for "input_ids" or an
 // EmbeddingInputProvider for "input_embeds" / "inputs_embeds".
-GENIEX_API std::unique_ptr<InputProvider> makeEmbeddingProvider(const ParsedQAIRTMetadata& meta,
-                                                                const ParsedGenieConfig&   gc);
+GENIEX_API std::unique_ptr<InputProvider> makeEmbeddingProvider(
+    const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc);
 
 // Returns the directory that contains the modelfile bundle for `model_cfg`.
 // Inferred as the parent directory of model_cfg.model_paths[0].

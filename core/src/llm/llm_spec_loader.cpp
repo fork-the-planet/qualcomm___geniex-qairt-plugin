@@ -204,8 +204,7 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         const json* cl_array = nullptr;
         if (j.contains("context_lengths") && j.at("context_lengths").is_array()) {
             cl_array = &j.at("context_lengths");
-        } else if (j.contains("genie") && j.at("genie").is_object() &&
-                   j.at("genie").contains("context_lengths") &&
+        } else if (j.contains("genie") && j.at("genie").is_object() && j.at("genie").contains("context_lengths") &&
                    j.at("genie").at("context_lengths").is_array()) {
             cl_array = &j.at("genie").at("context_lengths");
         }
@@ -222,8 +221,7 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         const json* vp_obj = nullptr;
         if (j.contains("vision_preprocessing") && j.at("vision_preprocessing").is_object()) {
             vp_obj = &j.at("vision_preprocessing");
-        } else if (j.contains("genie") && j.at("genie").is_object() &&
-                   j.at("genie").contains("vision_preprocessing") &&
+        } else if (j.contains("genie") && j.at("genie").is_object() && j.at("genie").contains("vision_preprocessing") &&
                    j.at("genie").at("vision_preprocessing").is_object()) {
             vp_obj = &j.at("genie").at("vision_preprocessing");
         }
@@ -311,7 +309,7 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
     out.shards.resize(total_shards);
     out.shard_layer_ranges.assign(total_shards, std::nullopt);
 
-    size_t max_past_key_idx = 0;
+    size_t max_past_key_idx   = 0;
     auto   absorb_hyperparams = [&](const ShardWiring& w) {
         if (out.hidden_size == 0 && w.in_state_shape.size() >= 3) {
             out.hidden_size = w.in_state_shape[w.in_state_shape.size() - 1];
@@ -332,10 +330,9 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
     for (size_t s = 1; s <= total_shards; ++s) {
         auto it = per_shard_entry.find(s);
         if (it == per_shard_entry.end() || it->second == nullptr) {
-            throw std::runtime_error(
-                "llm_spec_loader: could not locate graph entry for shard " + std::to_string(s));
+            throw std::runtime_error("llm_spec_loader: could not locate graph entry for shard " + std::to_string(s));
         }
-        auto      w  = readShardWiring(*it->second, "shard " + std::to_string(s));
+        auto      w = readShardWiring(*it->second, "shard " + std::to_string(s));
         ShardSpec sp;
         sp.in_state_name  = w.in_state;
         sp.out_state_name = w.out_state;
@@ -477,7 +474,7 @@ ParsedGenieConfig parseGenieConfig(const std::filesystem::path& bundle_dir) {
 // ─────────────────────────────────────────────────────────────────────────────
 LLMSpec buildSpec(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc) {
     LLMSpec spec;
-    spec.shards = meta.shards;
+    spec.shards       = meta.shards;
     spec.state_blocks = {makeKVOnlyStateBlock(meta.shard_layer_ranges)};
 
     spec.seq_len_prefill    = meta.seq_len_prefill;
@@ -505,8 +502,7 @@ std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta,
                 // provider matches today's behavior. Logged so it's visible
                 // if a future bundle starts depending on the scaling.
                 GENIEX_LOG_INFO(
-                    "llm_spec_loader: rope_scaling=llama3 (factor={}); using standard RoPE provider",
-                    s.factor);
+                    "llm_spec_loader: rope_scaling=llama3 (factor={}); using standard RoPE provider", s.factor);
                 return std::make_unique<RoPEInputProvider>(meta.head_dim, gc.rope_theta);
             } else if constexpr (std::is_same_v<T, LongRopeScaling>) {
                 const size_t orig = s.original_max_position_embeddings ? s.original_max_position_embeddings : 4096;
@@ -522,8 +518,7 @@ std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta,
                 // Caller (VLM family) wires a dedicated MRoPEInputProvider with
                 // the full mrope_section; for the LLM dispatch this branch is
                 // unreachable. Falling back here keeps the function total.
-                GENIEX_LOG_INFO(
-                    "llm_spec_loader: rope_scaling=mrope (mrope_section={}); using standard RoPE provider",
+                GENIEX_LOG_INFO("llm_spec_loader: rope_scaling=mrope (mrope_section={}); using standard RoPE provider",
                     s.mrope_section.size());
                 return std::make_unique<RoPEInputProvider>(meta.head_dim, gc.rope_theta);
             } else {

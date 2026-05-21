@@ -97,12 +97,9 @@ struct LLMSpec {
     size_t seq_len_prefill = 0;
     size_t seq_len_decode  = 0;
     size_t hidden_size     = 0;
-    // num_attention_heads is intentionally absent: the compiled QNN graph
-    // performs all attention math, so the host side only needs num_kv_heads
-    // (the height dim of past_key) and head_dim.
-    size_t num_kv_heads    = 0;
-    size_t head_dim        = 0;
-    size_t vocab_size      = 0;
+    size_t num_kv_heads = 0;
+    size_t head_dim     = 0;
+    size_t vocab_size   = 0;
 
     // KV buffer size variants, sorted ascending. e.g. {640, 1152, 2176, 4096}.
     // Single entry = one fixed context length.

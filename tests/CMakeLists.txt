@@ -13,15 +13,6 @@ set_target_properties(llm_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
-# ── spec_loader_dump ────────────────────────────────────────────────────────
-# Read-only smoke test: parses config.json + metadata.json from each bundle
-# and prints the resulting spec. Does not load QNN graphs.
-add_executable(spec_loader_dump spec_loader_dump.cpp)
-target_link_libraries(spec_loader_dump PRIVATE geniex_core)
-set_target_properties(spec_loader_dump PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-)
-
 # Bundle directory names under modelfiles/. Each must contain metadata.json
 # + genie_config.json + tokenizer.json + the listed ctx-bin shards.
 set(_LLM_MODELS
