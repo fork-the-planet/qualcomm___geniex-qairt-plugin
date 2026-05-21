@@ -16,21 +16,24 @@
 #include "llm/llm_types.h"
 #include "types.h"
 
-// Reads a QAIRT distributed model bundle (config.json + metadata.json) and
-// produces an LLMSpec + matching CPU-side InputProviders, so that family
-// runtimes do not need to hardcode shape/wiring constants.
+// Reads a QAIRT distributed model bundle and produces an LLMSpec + matching
+// CPU-side InputProviders. Modelled on Genie's behaviour (Genie/src/qualla/
+// engines/qnn-htp/): every numerical hyperparameter is inferred from the
+// compiled-graph tensor shapes recorded in metadata.json. Anything the
+// tensors can't carry (RoPE base/scaling, EOS/BOS, dialog type) is read
+// from genie_config.json. We do NOT consult HuggingFace config.json.
 //
-// Bundle layout (matches modelfiles/qwen3_4b_instruct_2507/):
-//   config.json              — HuggingFace-style transformer config
-//   metadata.json            — QAIRT export metadata (per-graph I/O tensors)
-//   genie_config.json        — optional; lists ctx-bins (used by directory helper)
-//   tokenizer.json           — sentencepiece/BPE tokenizer
-//   htp_backend_ext_config.json — HTP backend extension config (optional)
-//   *.bin                    — compiled context binary shards
+// Bundle layout we depend on:
+//   metadata.json     — QAIRT export metadata: model_id, graph names,
+//                       per-graph I/O tensor specs (dtype, shape, quant params).
+//   genie_config.json — Genie SDK config: dialog.type, context tokens, RoPE
+//                       parameters, embedding LUT spec.
+//   tokenizer.json    — sentencepiece/BPE tokenizer (read by LLMPipeline).
+//   *.bin             — compiled context-binary shards.
 
 namespace geniex {
 
-// RoPE scaling variants supported in HF config.json's "rope_scaling" field.
+// ── RoPE scaling variants (mirrors Genie's RopeScalingParams::RopeType) ──────
 struct StandardRope {};
 
 struct Llama3RopeScaling {
@@ -51,51 +54,16 @@ struct PartialRopeScaling {
     float scale;
 };
 
-using RopeScaling = std::variant<StandardRope, Llama3RopeScaling, LongRopeScaling, PartialRopeScaling>;
-
-// Parsed HuggingFace config.json. Only the fields required by buildSpecFromConfig
-// and the input-provider factories are kept.
-struct ParsedHFConfig {
-    // First entry of config.json's "architectures" array (e.g. "Qwen3ForCausalLM",
-    // "LlamaForCausalLM", "Phi3ForCausalLM", "Qwen2_5_VLForConditionalGeneration").
-    // Empty when absent. Note: Falcon3 also reports "LlamaForCausalLM" — use
-    // `name_or_path` to disambiguate.
-    std::string architecture;
-
-    // config.json's "_name_or_path" — the original HuggingFace repo path
-    // (e.g. "meta-llama/Llama-3.2-3B-Instruct", "tiiuae/Falcon3-7B-Instruct").
-    // Used to disambiguate same-architecture families (Falcon3 vs Llama).
-    std::string name_or_path;
-
-    std::string model_type;  // e.g. "qwen3", "llama", "phi3", "qwen2_5_vl_text"
-    size_t      hidden_size             = 0;
-    size_t      num_attention_heads     = 0;
-    size_t      num_key_value_heads     = 0;
-    size_t      head_dim                = 0;
-    size_t      vocab_size              = 0;
-    size_t      num_hidden_layers       = 0;
-    size_t      max_position_embeddings = 0;
-
-    float       rope_theta   = 10000.0f;
-    RopeScaling rope_scaling = StandardRope{};
-
-    int32_t              bos_token_id = -1;
-    int32_t              pad_token_id = -1;
-    std::vector<int32_t> eos_token_ids;
-
-    // VLM-only fields. Populated when present in config.json (HF qwen2-vl style):
-    //   rope_scaling.mrope_section
-    //   vision_start_token_id / vision_end_token_id / image_token_id / video_token_id
-    // Empty / -1 when not applicable.
-    std::vector<int> mrope_section;
-    int32_t          vision_start_token_id = -1;
-    int32_t          vision_end_token_id   = -1;
-    int32_t          image_token_id        = -1;
-    int32_t          video_token_id        = -1;
+struct MRopeScaling {
+    std::vector<int> mrope_section;        // sums to head_dim/2
+    int              spatial_merge_size = 2;
+    int              time_step          = 50;
 };
 
-// Vision preprocessing knobs read from metadata.json's `vision_preprocessing`
-// block. All fields are zero when the bundle is not a VLM.
+using RopeScaling = std::variant<StandardRope, Llama3RopeScaling, LongRopeScaling,
+                                 PartialRopeScaling, MRopeScaling>;
+
+// ── Vision-preprocessing block (VLM only) ────────────────────────────────────
 struct ParsedVisionPreprocessing {
     int                image_width         = 0;
     int                image_height        = 0;
@@ -106,41 +74,50 @@ struct ParsedVisionPreprocessing {
     std::vector<float> normalize_std;
 };
 
-// Parsed QAIRT metadata.json. Captures only the runtime-wiring fields.
+// ── Parsed metadata.json ─────────────────────────────────────────────────────
+// Carries everything inferable from the compiled graphs' tensor shapes:
+// shard wiring, per-shard KV ranges, AR/CL set, hidden_size, num_kv_heads,
+// head_dim, vocab_size, num_hidden_layers. This matches what Genie reads
+// directly from the QNN system context at load time.
 struct ParsedQAIRTMetadata {
-    // Per-shard hidden-state wiring (in_state_name / out_state_name).
-    std::vector<ShardSpec> shards;
+    // Top-level metadata.json fields.
+    std::string model_id;  // e.g. "qwen3_4b", "llama_v3_2_3b_instruct_ssd"
 
-    // Per-shard inclusive layer ranges (one std::optional per shard; nullopt for
-    // shards without KV state, e.g. an embedding-only or lm-head-only shard).
+    // Shard wiring.
+    std::vector<ShardSpec>                 shards;
     std::vector<std::optional<LayerRange>> shard_layer_ranges;
 
-    // Distinct context lengths the export supports (sorted ascending).
-    // Sourced from `cl<N>` graph-name suffixes (LLM bundles) or from the
-    // top-level `context_lengths` array (VLM bundles).
+    // Inferred from each graph's `attention_mask` last dim (or, for VLM, the
+    // top-level `genie.context_lengths` array). Sorted ascending.
     std::vector<size_t> context_lengths;
 
+    // Inferred from `attention_mask.shape[2]` (or AR-suffix in graph name).
     size_t seq_len_prefill = 0;
     size_t seq_len_decode  = 0;
 
-    // Pattern recovered from the graph names. Empty for VLM bundles, where the
-    // metadata uses bare `partN_of_M.bin` keys with no AR/CL suffix.
+    // Empty for VLM bundles (bare `partN_of_M.bin` keys).
     std::string graph_name_pattern;
 
-    // Optional vision-preprocessing block (VLM bundles only).
-    std::optional<ParsedVisionPreprocessing> vision_preprocessing;
+    // Tensor-shape-inferred LLM hyperparameters (Genie does the same:
+    // see nsp-graph.cpp / nsp-model.cpp).
+    size_t hidden_size       = 0;  // inputs_embeds.shape[2] / hidden-state.shape[2]
+    size_t num_kv_heads      = 0;  // past_key_*.shape[0]
+    size_t head_dim          = 0;  // past_key_*.shape[2]
+    size_t vocab_size        = 0;  // logits last dim
+    size_t num_hidden_layers = 0;  // max past_key_<N>_in across all shards + 1
 
-    // Optional vision-encoder graph entry (VLM bundles). Empty string means
-    // the bundle has no separate vision graph.
-    std::string vision_encoder_graph;
+    // Optional VLM-only fields.
+    std::optional<ParsedVisionPreprocessing> vision_preprocessing;
+    std::string                              vision_encoder_graph;  // empty if absent
 };
 
-// Subset of `genie_config.json` we care about for runtime dispatch.
-// Other fields (sampler defaults, HTP tuning, embedding LUT path) can be
-// added here as they become useful.
+// ── Parsed genie_config.json ─────────────────────────────────────────────────
+// Subset of the Genie SDK config that the runtime needs after metadata-driven
+// inference covers the hardware shapes. Field names match Genie's
+// nsp-utils/nsp-params.cpp.
 struct ParsedGenieConfig {
-    // `dialog.type` — selects the decoding strategy. Known values:
-    //   "basic"        — standard LLM (default if file is absent)
+    // dialog.type — selects decoding strategy.
+    //   "basic"        — standard LLM (default)
     //   "ssd-q1"       — Self-Speculative Decoding
     //   "spd"          — Speculative Decoding
     //   "lade"         — Lookahead Decoding
@@ -148,33 +125,46 @@ struct ParsedGenieConfig {
     //   "multistream"  — Multi-stream
     //   "eaglet"       — EAGLE-style speculation
     std::string dialog_type = "basic";
+
+    // dialog.context tokens.
+    int32_t              bos_token_id = -1;
+    std::vector<int32_t> eos_token_ids;  // accepts scalar or array
+    int32_t              pad_token_id = -1;
+
+    // dialog.engine.model.positional-encoding.{rope-theta, rope-scaling}.
+    // Falls back to dialog.engine.backend.QnnHtp.rope-theta if the explicit
+    // positional-encoding block is absent.
+    float       rope_theta   = 10000.0f;
+    RopeScaling rope_scaling = StandardRope{};
+
+    // dialog.embedding.{lut-path} — set when an external embedding LUT ships
+    // with the bundle (VLM, 8B-LLM with off-graph embedding).
+    std::optional<std::string> embedding_lut_path;
 };
 
-// Reads HuggingFace-style config.json from the bundle directory.
-// Throws std::runtime_error on missing / malformed config.
-GENIEX_API ParsedHFConfig parseHFConfig(const std::filesystem::path& bundle_dir);
+// ── Loader entry points ──────────────────────────────────────────────────────
 
-// Reads genie_config.json. Returns an all-defaults struct if the file is
-// absent (most modelfile bundles ship one, but it's not strictly required).
-GENIEX_API ParsedGenieConfig parseGenieConfig(const std::filesystem::path& bundle_dir);
-
-// Reads QAIRT metadata.json from the bundle directory.
-// Throws std::runtime_error on missing / malformed metadata.
+// Reads metadata.json. Throws std::runtime_error on missing / malformed file.
 GENIEX_API ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir);
 
-// Combines the two parsed structures into a fully-populated LLMSpec.
-GENIEX_API LLMSpec buildSpecFromConfig(const ParsedHFConfig& hf, const ParsedQAIRTMetadata& meta);
+// Reads genie_config.json. Returns an all-defaults struct if the file is
+// absent (most bundles ship one, but it's not strictly required).
+GENIEX_API ParsedGenieConfig parseGenieConfig(const std::filesystem::path& bundle_dir);
 
-// Picks the matching RoPE input provider implementation from `hf.rope_scaling`.
-// Falls back to the standard provider if the scaling variant is unrecognised.
-GENIEX_API std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedHFConfig& hf);
+// Composes the metadata-derived fields with the genie-config-derived fields
+// into a fully-populated LLMSpec.
+GENIEX_API LLMSpec buildSpec(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc);
+
+// Picks the matching RoPE input provider implementation from gc.rope_scaling.
+// head_dim comes from meta; rope_theta from gc; falls back to standard RoPE.
+GENIEX_API std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta,
+                                                           const ParsedGenieConfig&   gc);
 
 // Picks the embedding-input provider for shard 0 based on its expected input
-// tensor name. Returns a TokenIdInputProvider when the first shard takes
-// "input_ids" (on-device embedding) or an EmbeddingInputProvider when it
-// takes "input_embeds" / "inputs_embeds" (CPU-side embedding lookup).
-GENIEX_API std::unique_ptr<InputProvider> makeEmbeddingProvider(
-    const ParsedHFConfig& hf, const ParsedQAIRTMetadata& meta);
+// tensor name. Returns a TokenIdInputProvider for "input_ids" or an
+// EmbeddingInputProvider for "input_embeds" / "inputs_embeds".
+GENIEX_API std::unique_ptr<InputProvider> makeEmbeddingProvider(const ParsedQAIRTMetadata& meta,
+                                                                const ParsedGenieConfig&   gc);
 
 // Returns the directory that contains the modelfile bundle for `model_cfg`.
 // Inferred as the parent directory of model_cfg.model_paths[0].
@@ -182,8 +172,7 @@ GENIEX_API std::filesystem::path bundleDirOf(const ModelConfig& model_cfg);
 
 // Convenience: derive a ModelConfig from a bundle directory by reading
 // genie_config.json (for ctx-bins ordering), tokenizer.json, and
-// htp_backend_ext_config.json. Used by example executables so they only
-// have to know the bundle directory.
+// htp_backend_ext_config.json.
 GENIEX_API ModelConfig modelConfigFromDirectory(const std::filesystem::path& bundle_dir);
 
 }  // namespace geniex

@@ -90,12 +90,12 @@ inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 // 1B / 3B variants — only head_dim / theta differ, both supplied by config.json.
 inline cb::CBLLMModel makeModel(const ModelConfig& model_cfg) {
     const auto bundle = bundleDirOf(model_cfg);
-    auto       hf     = parseHFConfig(bundle);
     auto       meta   = parseQAIRTMetadata(bundle);
+    auto       gc     = parseGenieConfig(bundle);
 
-    cb::CBLLMModel m(buildSpecFromConfig(hf, meta));
+    cb::CBLLMModel m(buildSpec(meta, gc));
     m.addCBProvider(std::make_unique<Llama32CBTokenIdProvider>("input_ids", kPadTokenId));
-    m.addCBProvider(std::make_unique<Llama32CBRoPEProvider>(hf.head_dim, hf.rope_theta));
+    m.addCBProvider(std::make_unique<Llama32CBRoPEProvider>(meta.head_dim, gc.rope_theta));
     return m;
 }
 

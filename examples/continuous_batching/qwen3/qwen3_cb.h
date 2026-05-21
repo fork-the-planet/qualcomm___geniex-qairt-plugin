@@ -90,13 +90,13 @@ inline ChatTemplateFunc chatTemplate = chatMLTemplate;
 // config.json + metadata.json; CB-specific providers wire token-id and RoPE.
 inline cb::CBLLMModel makeModel(const ModelConfig& model_cfg) {
     const auto bundle = bundleDirOf(model_cfg);
-    auto       hf     = parseHFConfig(bundle);
     auto       meta   = parseQAIRTMetadata(bundle);
+    auto       gc     = parseGenieConfig(bundle);
 
-    cb::CBLLMModel m(buildSpecFromConfig(hf, meta));
-    const int32_t  pad_id = hf.eos_token_ids.empty() ? 0 : hf.eos_token_ids.front();
+    cb::CBLLMModel m(buildSpec(meta, gc));
+    const int32_t  pad_id = gc.eos_token_ids.empty() ? 0 : gc.eos_token_ids.front();
     m.addCBProvider(std::make_unique<Qwen3CBTokenIdProvider>("input_ids", pad_id));
-    m.addCBProvider(std::make_unique<Qwen3CBRoPEProvider>(hf.head_dim, hf.rope_theta));
+    m.addCBProvider(std::make_unique<Qwen3CBRoPEProvider>(meta.head_dim, gc.rope_theta));
     return m;
 }
 

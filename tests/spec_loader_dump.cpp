@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 // SPDX-License-Identifier: BSD-3-Clause
 //
-// Verification harness: parses config.json + metadata.json from one or more
-// bundle directories and prints the resulting LLMSpec / ParsedHFConfig /
-// ParsedQAIRTMetadata. Read-only — does not load any QNN graphs.
+// Verification harness: parses metadata.json + genie_config.json from one or
+// more bundle directories and prints the inferred LLMSpec / ParsedQAIRTMetadata
+// / ParsedGenieConfig. Read-only — does not load any QNN graphs.
 
 #include <filesystem>
 #include <iostream>
@@ -16,6 +16,7 @@ static const char* ropeTypeName(const geniex::RopeScaling& rs) {
     if (std::holds_alternative<geniex::Llama3RopeScaling>(rs)) return "llama3";
     if (std::holds_alternative<geniex::LongRopeScaling>(rs)) return "longrope";
     if (std::holds_alternative<geniex::PartialRopeScaling>(rs)) return "partial";
+    if (std::holds_alternative<geniex::MRopeScaling>(rs)) return "mrope";
     return "standard";
 }
 
@@ -24,42 +25,17 @@ static void dumpBundle(const std::filesystem::path& dir) {
               << "Bundle: " << dir.string() << "\n"
               << "═══════════════════════════════════════════════════════════════\n";
     try {
-        auto hf   = geniex::parseHFConfig(dir);
         auto meta = geniex::parseQAIRTMetadata(dir);
-        auto spec = geniex::buildSpecFromConfig(hf, meta);
-
-        std::cout << "\n--- ParsedHFConfig (from config.json) ---\n"
-                  << "  architecture            : " << hf.architecture << "\n"
-                  << "  name_or_path            : " << hf.name_or_path << "\n"
-                  << "  dialog_type             : " << geniex::parseGenieConfig(dir).dialog_type << "\n"
-                  << "  model_type              : " << hf.model_type << "\n"
-                  << "  hidden_size             : " << hf.hidden_size << "\n"
-                  << "  num_attention_heads     : " << hf.num_attention_heads << "\n"
-                  << "  num_key_value_heads     : " << hf.num_key_value_heads << "\n"
-                  << "  head_dim                : " << hf.head_dim << "\n"
-                  << "  vocab_size              : " << hf.vocab_size << "\n"
-                  << "  num_hidden_layers       : " << hf.num_hidden_layers << "\n"
-                  << "  max_position_embeddings : " << hf.max_position_embeddings << "\n"
-                  << "  rope_theta              : " << hf.rope_theta << "\n"
-                  << "  rope_scaling.type       : " << ropeTypeName(hf.rope_scaling) << "\n"
-                  << "  bos_token_id            : " << hf.bos_token_id << "\n"
-                  << "  pad_token_id            : " << hf.pad_token_id << "\n"
-                  << "  eos_token_ids           : [";
-        for (size_t i = 0; i < hf.eos_token_ids.size(); ++i) std::cout << (i ? ", " : "") << hf.eos_token_ids[i];
-        std::cout << "]\n";
-        if (!hf.mrope_section.empty()) {
-            std::cout << "  mrope_section           : [";
-            for (size_t i = 0; i < hf.mrope_section.size(); ++i) std::cout << (i ? ", " : "") << hf.mrope_section[i];
-            std::cout << "]\n";
-        }
-        if (hf.image_token_id >= 0 || hf.vision_start_token_id >= 0 || hf.video_token_id >= 0) {
-            std::cout << "  vision_start_token_id   : " << hf.vision_start_token_id << "\n"
-                      << "  vision_end_token_id     : " << hf.vision_end_token_id << "\n"
-                      << "  image_token_id          : " << hf.image_token_id << "\n"
-                      << "  video_token_id          : " << hf.video_token_id << "\n";
-        }
+        auto gc   = geniex::parseGenieConfig(dir);
+        auto spec = geniex::buildSpec(meta, gc);
 
         std::cout << "\n--- ParsedQAIRTMetadata (from metadata.json) ---\n"
+                  << "  model_id                : " << meta.model_id << "\n"
+                  << "  hidden_size             : " << meta.hidden_size << " (inputs_embeds.shape[-1])\n"
+                  << "  num_kv_heads            : " << meta.num_kv_heads << " (past_key.shape[0])\n"
+                  << "  head_dim                : " << meta.head_dim << " (past_key.shape[2])\n"
+                  << "  vocab_size              : " << meta.vocab_size << " (logits.shape[-1])\n"
+                  << "  num_hidden_layers       : " << meta.num_hidden_layers << " (max past_key_<N> + 1)\n"
                   << "  shards (" << meta.shards.size() << "):\n";
         for (size_t s = 0; s < meta.shards.size(); ++s) {
             std::cout << "    [" << s + 1 << "] in='" << meta.shards[s].in_state_name << "'  out='"
@@ -73,12 +49,11 @@ static void dumpBundle(const std::filesystem::path& dir) {
             else
                 std::cout << "<none>";
         }
-        std::cout << "]\n";
-        std::cout << "  context_lengths         : [";
+        std::cout << "]\n  context_lengths         : [";
         for (size_t i = 0; i < meta.context_lengths.size(); ++i)
             std::cout << (i ? ", " : "") << meta.context_lengths[i];
-        std::cout << "]\n";
-        std::cout << "  seq_len_prefill         : " << meta.seq_len_prefill << "\n"
+        std::cout << "]\n"
+                  << "  seq_len_prefill         : " << meta.seq_len_prefill << "\n"
                   << "  seq_len_decode          : " << meta.seq_len_decode << "\n"
                   << "  graph_name_pattern      : '" << meta.graph_name_pattern << "'\n"
                   << "  vision_encoder_graph    : '" << meta.vision_encoder_graph << "'\n";
@@ -92,11 +67,30 @@ static void dumpBundle(const std::filesystem::path& dir) {
                       << "    spatial_merge_size    : " << vp.spatial_merge_size << "\n";
         }
 
+        std::cout << "\n--- ParsedGenieConfig (from genie_config.json) ---\n"
+                  << "  dialog_type             : " << gc.dialog_type << "\n"
+                  << "  bos_token_id            : " << gc.bos_token_id << "\n"
+                  << "  pad_token_id            : " << gc.pad_token_id << "\n"
+                  << "  eos_token_ids           : [";
+        for (size_t i = 0; i < gc.eos_token_ids.size(); ++i)
+            std::cout << (i ? ", " : "") << gc.eos_token_ids[i];
+        std::cout << "]\n"
+                  << "  rope_theta              : " << gc.rope_theta << "\n"
+                  << "  rope_scaling.type       : " << ropeTypeName(gc.rope_scaling) << "\n";
+        if (auto* m = std::get_if<geniex::MRopeScaling>(&gc.rope_scaling); m && !m->mrope_section.empty()) {
+            std::cout << "  mrope_section           : [";
+            for (size_t i = 0; i < m->mrope_section.size(); ++i)
+                std::cout << (i ? ", " : "") << m->mrope_section[i];
+            std::cout << "]\n";
+        }
+        if (gc.embedding_lut_path) {
+            std::cout << "  embedding_lut_path      : " << *gc.embedding_lut_path << "\n";
+        }
+
         std::cout << "\n--- LLMSpec (composed) ---\n"
                   << "  shards.size             : " << spec.shards.size() << "\n"
                   << "  state_blocks.size       : " << spec.state_blocks.size() << "\n"
                   << "  hidden_size             : " << spec.hidden_size << "\n"
-                  << "  num_heads               : " << spec.num_heads << "\n"
                   << "  num_kv_heads            : " << spec.num_kv_heads << "\n"
                   << "  head_dim                : " << spec.head_dim << "\n"
                   << "  vocab_size              : " << spec.vocab_size << "\n"

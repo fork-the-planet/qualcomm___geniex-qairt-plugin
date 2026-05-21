@@ -170,31 +170,37 @@ void Qwen25VLModel::clearPositions() {
 std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg, const VLMConfig& config) {
     try {
         const auto bundle = bundleDirOf(config.llm_config);
-        auto       hf     = parseHFConfig(bundle);
         auto       meta   = parseQAIRTMetadata(bundle);
-        auto       spec   = buildSpecFromConfig(hf, meta);
+        auto       gc     = parseGenieConfig(bundle);
+        auto       spec   = buildSpec(meta, gc);
 
         if (!meta.vision_preprocessing) {
             GENIEX_LOG_ERROR("qwen2_5_vl::makeModel: bundle has no vision_preprocessing block");
             return nullptr;
         }
-        if (hf.mrope_section.empty()) {
-            GENIEX_LOG_ERROR("qwen2_5_vl::makeModel: config.json missing rope_scaling.mrope_section");
-            return nullptr;
+
+        // mrope_section comes from genie_config.json's
+        // dialog.engine.model.positional-encoding.rope-scaling (rope-type
+        // "qwen2vl-mrope"). Default to {16,24,24} if the bundle declares
+        // mrope but the section is missing, matching Genie's fallback.
+        std::vector<int> mrope_section;
+        if (auto* mrope = std::get_if<MRopeScaling>(&gc.rope_scaling)) {
+            mrope_section = mrope->mrope_section;
         }
+        if (mrope_section.empty()) mrope_section = {16, 24, 24};
 
         auto vis_enc = std::make_unique<Qwen25VLVisionEncoder>();
         vis_enc->setPreprocessing(*meta.vision_preprocessing);
-        vis_enc->setHiddenSize(hf.hidden_size);
+        vis_enc->setHiddenSize(meta.hidden_size);
         if (!vis_enc->initialize(runtime_cfg, config.vision_config)) return nullptr;
 
         auto model = std::make_unique<Qwen25VLModel>(std::move(spec));
         model->setVisionEncoder(std::move(vis_enc));
         model->setMRoPEProvider(
-            std::make_unique<MRoPEInputProvider>(hf.mrope_section, hf.rope_theta, MRoPEInterleaving::BLOCK));
+            std::make_unique<MRoPEInputProvider>(mrope_section, gc.rope_theta, MRoPEInterleaving::BLOCK));
 
-        const int32_t image_token_id = hf.image_token_id >= 0 ? hf.image_token_id : kDefaultImageTokenId;
-        model->setVisionTokenIds(hf.vision_start_token_id, image_token_id);
+        // Vision token IDs are family-level constants (see qwen2_5_vl.h).
+        model->setVisionTokenIds(kVisionStartTokenId, kImageTokenId);
         model->setSpatialMergeSize(meta.vision_preprocessing->spatial_merge_size);
 
         if (!model->initialize(runtime_cfg, config.llm_config)) return nullptr;

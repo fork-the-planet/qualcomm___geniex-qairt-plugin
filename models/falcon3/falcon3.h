@@ -87,12 +87,12 @@ namespace falcon3 {
 
 inline LLMModel makeModel(const ModelConfig& model_cfg) {
     const auto bundle = bundleDirOf(model_cfg);
-    auto       hf     = parseHFConfig(bundle);
     auto       meta   = parseQAIRTMetadata(bundle);
+    auto       gc     = parseGenieConfig(bundle);
 
-    LLMModel m(buildSpecFromConfig(hf, meta));
-    m.addInputProvider(makeEmbeddingProvider(hf, meta));
-    m.addInputProvider(makeRoPEProvider(hf));
+    LLMModel m(buildSpec(meta, gc));
+    m.addInputProvider(makeEmbeddingProvider(meta, gc));
+    m.addInputProvider(makeRoPEProvider(meta, gc));
     return m;
 }
 

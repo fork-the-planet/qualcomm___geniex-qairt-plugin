@@ -3,45 +3,34 @@
 
 #pragma once
 
-// Architecture-driven pipeline dispatcher.
+// model_id-driven pipeline dispatcher.
 //
 // Replaces the per-variant llm_model_registry / vlm_model_registry tables: the
-// runtime reads the bundle's standard QAIRT distribution files and routes to
-// the matching family factory. Adding a new variant of an existing
-// architecture requires no source change — drop the bundle into
-// modelfiles/<name>/ and call makeLLMPipeline / makeVLMPipeline.
+// runtime reads `metadata.json`'s `model_id` field and routes to the matching
+// family factory via prefix matching. Adding a new variant of an existing
+// family requires no source change — drop the bundle into modelfiles/<name>/
+// and call makeLLMPipeline / makeVLMPipeline.
 //
 // Dispatch rules (in priority order):
-//   genie_config.json `dialog.type`              architecture                       → factory
-//   ─────────────────────────────────────────────────────────────────────────────────────────────────────
-//   "ssd-q1"                                     LlamaForCausalLM                   → llama3_2_3b_ssd::makePipeline
-//   "basic" (or absent)                          LlamaForCausalLM, "falcon" in path → falcon3::makePipeline
-//   "basic" (or absent)                          LlamaForCausalLM                   → llama3::makePipeline
-//   "basic" (or absent)                          Qwen3ForCausalLM                   → qwen3::makePipeline
-//   "basic" (or absent)                          Qwen2ForCausalLM                   → qwen2_5::makePipeline
-//   "basic" (or absent)                          Phi3ForCausalLM / Phi3VForCausalLM → phi3_5::makePipeline
-//   (n/a)                                        Qwen2_5_VLForConditionalGeneration → qwen2_5_vl::makePipeline (VLM)
+//   metadata.json `model_id` prefix          → factory
+//   ─────────────────────────────────────────────────────────────
+//   qwen2_5_vl_*                             → qwen2_5_vl::makePipeline (VLM)
+//   qwen3_*                                  → qwen3::makePipeline
+//   qwen2_5_*                                → qwen2_5::makePipeline
+//   falcon_v3_*                              → falcon3::makePipeline
+//   llama_v3_*_ssd                           → llama3_2_3b_ssd::makePipeline
+//   llama_v3_*                               → llama3::makePipeline
+//   phi_3_5_*                                → phi3_5::makePipeline
 //
-// Why two signals:
-//   - `architectures[0]` is set by HuggingFace `transformers` and identifies the
-//     model class (Llama vs Qwen vs Phi vs VL). It alone can't distinguish:
-//       * SSD vs plain Llama (same arch, same shapes)
-//       * Falcon3 vs Llama-3 (Falcon3 reports architectures=["LlamaForCausalLM"])
-//   - `genie_config.json`'s `dialog.type` (the same field Genie itself uses for
-//     this decision in Genie/src/Dialog.cpp) declares the decoding strategy
-//     authoritatively. We use it for SSD; Genie uses it for SPD/LADE/etc. too.
-//   - `_name_or_path` ("tiiuae/Falcon3-…" vs "meta-llama/Llama-…") is the only
-//     in-bundle signal that distinguishes Falcon3 from Llama-3.
-//
-// SSD runtime detail: when dispatching to SSD, we auto-discover the forecast
-// prefix file under `<bundle>/forecast-prefix/` if the caller did not set
-// model_cfg.forecast_prefix_path explicitly.
+// LLM vs VLM, SSD vs plain Llama, and Falcon3 vs Llama-3 are all decided
+// purely from `model_id`. We do not need `dialog.type`, the bundle's per-
+// graph filename pattern (ar*_cl* vs partN_of_M.bin), or
+// `architectures` / `_name_or_path` from config.json.
 
-#include <algorithm>
-#include <cctype>
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "falcon3/falcon3.h"
 #include "llama3/llama3.h"
@@ -60,41 +49,26 @@ namespace geniex {
 
 namespace dispatch_detail {
 
-inline std::string toLower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return s;
-}
-
-inline bool containsCaseInsensitive(const std::string& haystack, const std::string& needle) {
-    return toLower(haystack).find(toLower(needle)) != std::string::npos;
-}
-
-// Combined signature of the bundle: HF architecture + HF name_or_path + Genie
-// dialog type. All read at dispatch time.
-struct BundleSignature {
-    std::string architecture;  // config.json `architectures[0]`
-    std::string name_or_path;  // config.json `_name_or_path`
-    std::string dialog_type;   // genie_config.json `dialog.type`, defaults to "basic"
-};
-
-inline BundleSignature signatureOf(const ModelConfig& model_cfg) {
-    BundleSignature sig;
+inline std::string modelIdOf(const ModelConfig& model_cfg) {
     try {
         const auto bundle = bundleDirOf(model_cfg);
-        auto       hf     = parseHFConfig(bundle);
-        auto       gc     = parseGenieConfig(bundle);
-        sig.architecture  = hf.architecture;
-        sig.name_or_path  = hf.name_or_path;
-        sig.dialog_type   = gc.dialog_type;
+        return parseQAIRTMetadata(bundle).model_id;
     } catch (const std::exception& e) {
-        GENIEX_LOG_ERROR("dispatch: cannot read config.json: {}", e.what());
+        GENIEX_LOG_ERROR("dispatch: cannot read metadata.json: {}", e.what());
+        return {};
     }
-    return sig;
 }
 
-// If `forecast_prefix_path` is unset and the bundle contains a
-// `forecast-prefix/kv-cache.primary.qnn-htp` file, populate it. Returns the
-// (possibly mutated) ModelConfig.
+inline bool startsWith(std::string_view s, std::string_view prefix) {
+    return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
+}
+
+inline bool endsWith(std::string_view s, std::string_view suffix) {
+    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+// Auto-discovers the SSD forecast prefix file under the bundle if the caller
+// didn't set model_cfg.forecast_prefix_path explicitly.
 inline ModelConfig autoDiscoverForecastPrefix(ModelConfig model_cfg) {
     if (model_cfg.forecast_prefix_path.has_value()) return model_cfg;
     try {
@@ -104,57 +78,45 @@ inline ModelConfig autoDiscoverForecastPrefix(ModelConfig model_cfg) {
             model_cfg.forecast_prefix_path = candidate.string();
         }
     } catch (...) {
-        // bundleDirOf may throw if model_paths is empty; nothing to autodiscover.
     }
     return model_cfg;
 }
 
 }  // namespace dispatch_detail
 
-// Single LLM entry point. Dispatches to the correct family factory based on
-// the bundle's standard QAIRT distribution files (config.json + genie_config.json).
-// Returns std::nullopt for unknown / VLM architectures.
+// Single LLM entry point. Routes by metadata.json's `model_id` prefix.
+// Returns std::nullopt for unknown / VLM model_ids.
 inline std::optional<LLMPipeline> makeLLMPipeline(
     const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg_in) {
-    const auto sig = dispatch_detail::signatureOf(model_cfg_in);
-    if (sig.architecture.empty()) return std::nullopt;
+    using namespace dispatch_detail;
+    const std::string model_id = modelIdOf(model_cfg_in);
+    if (model_id.empty()) return std::nullopt;
 
-    // SSD: declared by Genie's own `dialog.type == "ssd-q1"`. The dialog.type
-    // signal is more reliable than checking model_cfg.forecast_prefix_path
-    // because it doesn't require the caller to know the model is special.
-    if (sig.dialog_type == "ssd-q1") {
-        if (sig.architecture != "LlamaForCausalLM") {
-            GENIEX_LOG_ERROR("dispatch: ssd-q1 dialog requested with unsupported architecture '{}'", sig.architecture);
-            return std::nullopt;
-        }
-        const auto cfg = dispatch_detail::autoDiscoverForecastPrefix(model_cfg_in);
+    // SSD: model_id ends in "_ssd". Auto-populate the forecast prefix path.
+    if (endsWith(model_id, "_ssd")) {
+        const auto cfg = autoDiscoverForecastPrefix(model_cfg_in);
         return llama3_2_3b_ssd::makePipeline(runtime_cfg, cfg);
     }
 
-    // Standard LLM dispatch by architecture string.
-    if (sig.architecture == "LlamaForCausalLM") {
-        if (dispatch_detail::containsCaseInsensitive(sig.name_or_path, "falcon")) {
-            return falcon3::makePipeline(runtime_cfg, model_cfg_in);
-        }
-        return llama3::makePipeline(runtime_cfg, model_cfg_in);
-    }
-    if (sig.architecture == "Qwen3ForCausalLM") return qwen3::makePipeline(runtime_cfg, model_cfg_in);
-    if (sig.architecture == "Qwen2ForCausalLM") return qwen2_5::makePipeline(runtime_cfg, model_cfg_in);
-    if (sig.architecture == "Phi3ForCausalLM") return phi3_5::makePipeline(runtime_cfg, model_cfg_in);
+    if (startsWith(model_id, "qwen3_")) return qwen3::makePipeline(runtime_cfg, model_cfg_in);
+    if (startsWith(model_id, "qwen2_5_")) return qwen2_5::makePipeline(runtime_cfg, model_cfg_in);
+    if (startsWith(model_id, "falcon_v3_")) return falcon3::makePipeline(runtime_cfg, model_cfg_in);
+    if (startsWith(model_id, "llama_v3_")) return llama3::makePipeline(runtime_cfg, model_cfg_in);
+    if (startsWith(model_id, "phi_3_5_")) return phi3_5::makePipeline(runtime_cfg, model_cfg_in);
 
-    GENIEX_LOG_ERROR("dispatch: no LLM factory for architecture '{}'", sig.architecture);
+    GENIEX_LOG_ERROR("dispatch: no LLM factory matches model_id '{}'", model_id);
     return std::nullopt;
 }
 
-// Single VLM entry point. Dispatches to the correct family factory based on
-// config.json's architecture string.
+// Single VLM entry point. Routes by metadata.json's `model_id` prefix.
 inline std::optional<VLMPipeline> makeVLMPipeline(const QnnRuntimeConfig& runtime_cfg, const VLMConfig& config) {
-    const auto sig = dispatch_detail::signatureOf(config.llm_config);
-    if (sig.architecture.empty()) return std::nullopt;
+    using namespace dispatch_detail;
+    const std::string model_id = modelIdOf(config.llm_config);
+    if (model_id.empty()) return std::nullopt;
 
-    if (sig.architecture == "Qwen2_5_VLForConditionalGeneration") return qwen2_5_vl::makePipeline(runtime_cfg, config);
+    if (startsWith(model_id, "qwen2_5_vl_")) return qwen2_5_vl::makePipeline(runtime_cfg, config);
 
-    GENIEX_LOG_ERROR("dispatch: no VLM factory for architecture '{}'", sig.architecture);
+    GENIEX_LOG_ERROR("dispatch: no VLM factory matches model_id '{}'", model_id);
     return std::nullopt;
 }
 

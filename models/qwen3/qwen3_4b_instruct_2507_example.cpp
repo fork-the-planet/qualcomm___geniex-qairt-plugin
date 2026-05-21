@@ -75,10 +75,10 @@ int main(int argc, char** argv) {
 
     geniex::ModelConfig model_cfg;
     model_cfg.model_paths = {
-        (model_dir / "qwen3_4b_instruct_2507_part_1_of_4.bin").string(),
-        (model_dir / "qwen3_4b_instruct_2507_part_2_of_4.bin").string(),
-        (model_dir / "qwen3_4b_instruct_2507_part_3_of_4.bin").string(),
-        (model_dir / "qwen3_4b_instruct_2507_part_4_of_4.bin").string(),
+        (model_dir / "qwen3_4b_instruct_2507_w4a16_part_1_of_4.bin").string(),
+        (model_dir / "qwen3_4b_instruct_2507_w4a16_part_2_of_4.bin").string(),
+        (model_dir / "qwen3_4b_instruct_2507_w4a16_part_3_of_4.bin").string(),
+        (model_dir / "qwen3_4b_instruct_2507_w4a16_part_4_of_4.bin").string(),
     };
     model_cfg.tokenizer_path = (model_dir / "tokenizer.json").string();
     // No embedding_path needed – embedding runs on-device in shard 0.

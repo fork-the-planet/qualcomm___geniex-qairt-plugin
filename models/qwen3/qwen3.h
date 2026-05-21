@@ -14,17 +14,17 @@
 namespace geniex {
 namespace qwen3 {
 
-// Builds an LLMModel from a bundle pointed to by model_cfg.model_paths.
-// All architectural details come from config.json + metadata.json — only
-// the input-provider lineup is family-fixed here.
+// Family factory for all Qwen3 variants. Spec is built from the bundle's
+// metadata.json (tensor shapes) + genie_config.json (RoPE / tokens / dialog
+// type); we never consult HuggingFace config.json.
 inline LLMModel makeModel(const ModelConfig& model_cfg) {
     const auto bundle = bundleDirOf(model_cfg);
-    auto       hf     = parseHFConfig(bundle);
     auto       meta   = parseQAIRTMetadata(bundle);
+    auto       gc     = parseGenieConfig(bundle);
 
-    LLMModel m(buildSpecFromConfig(hf, meta));
-    m.addInputProvider(makeEmbeddingProvider(hf, meta));
-    m.addInputProvider(makeRoPEProvider(hf));
+    LLMModel m(buildSpec(meta, gc));
+    m.addInputProvider(makeEmbeddingProvider(meta, gc));
+    m.addInputProvider(makeRoPEProvider(meta, gc));
     return m;
 }
 

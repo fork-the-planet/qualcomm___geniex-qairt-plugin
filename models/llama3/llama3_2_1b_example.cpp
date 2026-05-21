@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
     if (!parseArgs(argc, argv, args)) return 1;
 
     const auto model_dir =
-        std::filesystem::current_path() / "modelfiles" / "llama_v3_2_1b_instruct-genie-w4-qualcomm_snapdragon_x_elite";
+        std::filesystem::current_path() / "modelfiles" / "llama_v3_2_1b_instruct";
 
     // All QNN runtime paths are left as std::nullopt → auto-detected from
     // htp-files/ installed alongside geniex_core.
@@ -84,9 +84,9 @@ int main(int argc, char** argv) {
 
     geniex::ModelConfig model_cfg;
     model_cfg.model_paths = {
-        (model_dir / "llama_v3_2_1b_instruct_part_1_of_3.bin").string(),
-        (model_dir / "llama_v3_2_1b_instruct_part_2_of_3.bin").string(),
-        (model_dir / "llama_v3_2_1b_instruct_part_3_of_3.bin").string(),
+        (model_dir / "llama_v3_2_1b_instruct_w4_part_1_of_3.bin").string(),
+        (model_dir / "llama_v3_2_1b_instruct_w4_part_2_of_3.bin").string(),
+        (model_dir / "llama_v3_2_1b_instruct_w4_part_3_of_3.bin").string(),
     };
     model_cfg.tokenizer_path = (model_dir / "tokenizer.json").string();
     // No embedding_path needed – embedding runs on-device in shard 0.

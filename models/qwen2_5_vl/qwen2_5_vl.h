@@ -30,9 +30,12 @@ static constexpr int   kVitWindowSize = 112;  // pixels
 static constexpr int   kVitRopeDim    = 40;   // half_dim*2 = cos/sin emb dim
 static constexpr float kVitRopeTheta  = 10000.0f;
 
-// Default <|image_pad|> token ID. Used as a fallback when config.json's
-// image_token_id is null (current Qwen2.5-VL HF configs).
-static constexpr int32_t kDefaultImageTokenId = 151655;
+// Vision-related token IDs. These are family-level constants because the
+// runtime no longer reads HuggingFace config.json, and current Qwen2.5-VL
+// `genie_config.json` files don't carry them either.
+//   <|vision_start|> 151652   <|vision_end|> 151653   <|image_pad|> 151655
+static constexpr int32_t kVisionStartTokenId = 151652;
+static constexpr int32_t kImageTokenId       = 151655;
 
 // Single-graph QNN vision encoder for Qwen2.5-VL. Inputs/outputs match the
 // graph schema declared in the bundle's metadata.json `vision_encoder.bin`.
@@ -43,7 +46,7 @@ class Qwen25VLVisionEncoder : public QnnVisionEncoder {
     void setPreprocessing(const ParsedVisionPreprocessing& vp);
 
     // LLM hidden size — needed to assemble per-image output buffers. Set from
-    // ParsedHFConfig.hidden_size before initialize().
+    // ParsedQAIRTMetadata.hidden_size before initialize().
     void setHiddenSize(size_t hidden) { hidden_size_ = hidden; }
 
     std::vector<float> encode(const PixelData& pixel_data) override;

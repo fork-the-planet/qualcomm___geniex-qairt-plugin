@@ -121,9 +121,9 @@ int main(int argc, char** argv) {
     // Initialize model (LLMModel handles QNN setup and graph ordering).
     // No input providers added — all tensor management is done manually.
     std::cout << "\033[1;36mLoading model...\033[0m\n";
-    auto             hf   = geniex::parseHFConfig(model_dir);
     auto             meta = geniex::parseQAIRTMetadata(model_dir);
-    geniex::LLMModel model(geniex::buildSpecFromConfig(hf, meta));
+    auto             gc   = geniex::parseGenieConfig(model_dir);
+    geniex::LLMModel model(geniex::buildSpec(meta, gc));
     try {
         if (!model.initialize(runtime_cfg, model_cfg)) {
             std::cerr << "Failed to initialize model.\n";
