@@ -185,8 +185,7 @@ void LLMModel::discoverShardTensorNames() {
             if (out_name.empty() && !isSpecialTensor(t.name)) out_name = t.name;
         }
         if (in_name.empty() || out_name.empty()) {
-            throw std::runtime_error("LLMModel: shard " + std::to_string(s + 1) +
-                                     " (graph '" + g.name() +
+            throw std::runtime_error("LLMModel: shard " + std::to_string(s + 1) + " (graph '" + g.name() +
                                      "') has no non-special input/output tensor");
         }
         spec_.shards[s].in_state_name  = in_name;

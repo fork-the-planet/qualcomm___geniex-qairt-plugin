@@ -101,11 +101,11 @@ std::vector<size_t> readShape(const json& tensor_entry) {
 // because they contain no slashes or dots.
 struct ShardWiring {
     std::set<size_t>    kv_layer_indices;
-    std::vector<size_t> in_state_shape;   // first non-special input shape (for hidden_size)
-    std::vector<size_t> out_state_shape;  // first non-special output shape (fallback)
-    std::vector<size_t> past_key_shape;   // first past_key_* shape (for num_kv_heads / head_dim)
-    std::vector<size_t> logits_shape;     // for vocab_size
-    std::string         first_input_name; // raw JSON key of the first non-special input
+    std::vector<size_t> in_state_shape;    // first non-special input shape (for hidden_size)
+    std::vector<size_t> out_state_shape;   // first non-special output shape (fallback)
+    std::vector<size_t> past_key_shape;    // first past_key_* shape (for num_kv_heads / head_dim)
+    std::vector<size_t> logits_shape;      // for vocab_size
+    std::string         first_input_name;  // raw JSON key of the first non-special input
 };
 
 ShardWiring readShardWiring(const json& graph_entry, const std::string& /*diag_label*/) {
@@ -122,9 +122,9 @@ ShardWiring readShardWiring(const json& graph_entry, const std::string& /*diag_l
                 continue;
             }
             if (!in_state_seen) {
-                w.in_state_shape = readShape(it.value());
+                w.in_state_shape   = readShape(it.value());
                 w.first_input_name = key;
-                in_state_seen    = true;
+                in_state_seen      = true;
             }
         }
     }
