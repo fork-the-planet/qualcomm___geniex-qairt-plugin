@@ -17,23 +17,22 @@
 #include "types.h"
 
 // Reads a QAIRT distributed model bundle and produces an LLMSpec + matching
-// CPU-side InputProviders. Modelled on Genie's behaviour (Genie/src/qualla/
-// engines/qnn-htp/): every numerical hyperparameter is inferred from the
-// compiled-graph tensor shapes recorded in metadata.json. Anything the
+// CPU-side InputProviders. Every numerical hyperparameter is inferred from
+// the compiled-graph tensor shapes recorded in metadata.json. Anything the
 // tensors can't carry (RoPE base/scaling, EOS/BOS, dialog type) is read
 // from genie_config.json. We do NOT consult HuggingFace config.json.
 //
 // Bundle layout we depend on:
 //   metadata.json     — QAIRT export metadata: model_id, graph names,
 //                       per-graph I/O tensor specs (dtype, shape, quant params).
-//   genie_config.json — Genie SDK config: dialog.type, context tokens, RoPE
+//   genie_config.json — runtime config: dialog.type, context tokens, RoPE
 //                       parameters, embedding LUT spec.
 //   tokenizer.json    — sentencepiece/BPE tokenizer (read by LLMPipeline).
 //   *.bin             — compiled context-binary shards.
 
 namespace geniex {
 
-// ── RoPE scaling variants (mirrors Genie's RopeScalingParams::RopeType) ──────
+// ── RoPE scaling variants ──────
 struct StandardRope {};
 
 struct Llama3RopeScaling {
@@ -76,8 +75,7 @@ struct ParsedVisionPreprocessing {
 // ── Parsed metadata.json ─────────────────────────────────────────────────────
 // Carries everything inferable from the compiled graphs' tensor shapes:
 // shard wiring, per-shard KV ranges, AR/CL set, hidden_size, num_kv_heads,
-// head_dim, vocab_size, num_hidden_layers. This matches what Genie reads
-// directly from the QNN system context at load time.
+// head_dim, vocab_size, num_hidden_layers.
 struct ParsedQAIRTMetadata {
     // Top-level metadata.json fields.
     std::string model_id;  // e.g. "qwen3_4b", "llama_v3_2_3b_instruct_ssd"
@@ -97,8 +95,7 @@ struct ParsedQAIRTMetadata {
     // Empty for VLM bundles (bare `partN_of_M.bin` keys).
     std::string graph_name_pattern;
 
-    // Tensor-shape-inferred LLM hyperparameters (Genie does the same:
-    // see nsp-graph.cpp / nsp-model.cpp).
+    // Tensor-shape-inferred LLM hyperparameters.
     size_t hidden_size       = 0;  // inputs_embeds.shape[2] / hidden-state.shape[2]
     size_t num_kv_heads      = 0;  // past_key_*.shape[0]
     size_t head_dim          = 0;  // past_key_*.shape[2]
@@ -108,12 +105,18 @@ struct ParsedQAIRTMetadata {
     // Optional VLM-only fields.
     std::optional<ParsedVisionPreprocessing> vision_preprocessing;
     std::string                              vision_encoder_graph;  // empty if absent
+
+    // First non-special input tensor name on shard 0, as recorded in
+    // metadata.json (typically "input_ids" or "inputs_embeds"). Used only by
+    // the embedding-provider factory to decide between TokenIdInputProvider
+    // and EmbeddingInputProvider. Hidden-state wiring tensor names are not
+    // populated by the loader — see LLMModel::discoverShardTensorNames.
+    std::string first_shard_input_hint;
 };
 
 // ── Parsed genie_config.json ─────────────────────────────────────────────────
-// Subset of the Genie SDK config that the runtime needs after metadata-driven
-// inference covers the hardware shapes. Field names match Genie's
-// nsp-utils/nsp-params.cpp.
+// Subset of the runtime config the loader needs after metadata-driven
+// inference covers the hardware shapes.
 struct ParsedGenieConfig {
     // dialog.type — selects decoding strategy.
     //   "basic"        — standard LLM (default)

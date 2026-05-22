@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "llm/llm_utils.h"  // isKVTensor / isSpecialTensor
 #include "logging.h"
 #include "utils/detail/json.hpp"
 
@@ -30,29 +31,6 @@ json loadJson(const std::filesystem::path& path) {
     } catch (const std::exception& e) {
         throw std::runtime_error("llm_spec_loader: failed to parse " + path.string() + ": " + e.what());
     }
-}
-
-// Convert ONNX-style tensor name (slashes and dots) to the QNN runtime form
-// used inside the compiled context binary.
-std::string canonicalTensorName(std::string name) {
-    for (auto& c : name) {
-        if (c == '/' || c == '.') c = '_';
-    }
-    return name;
-}
-
-bool isSpecialInput(const std::string& name) {
-    if (name == "attention_mask") return true;
-    if (name.rfind("position_ids", 0) == 0) return true;
-    if (name.rfind("past_key_", 0) == 0) return true;
-    if (name.rfind("past_value_", 0) == 0) return true;
-    return false;
-}
-
-bool isSpecialOutput(const std::string& name) {
-    if (name.rfind("past_key_", 0) == 0) return true;
-    if (name.rfind("past_value_", 0) == 0) return true;
-    return false;
 }
 
 // Captures (ar, cl, shard, total) and an optional phase prefix from an LLM-
@@ -114,32 +92,39 @@ std::vector<size_t> readShape(const json& tensor_entry) {
     return shape;
 }
 
-// Per-shard wiring and KV layer indices, all read from one graph entry.
+// Per-shard hyperparameter signal extracted from one graph entry. Hidden-state
+// *tensor names* are NOT collected here — those are read from the live QNN
+// graph after load (see LLMModel::discoverShardTensorNames). The one
+// exception is `first_input_name`, used only by makeEmbeddingProvider to
+// decide between TokenIdInputProvider ("input_ids") and EmbeddingInputProvider
+// ("inputs_embeds"); those two strings are stable across the JSON / QNN forms
+// because they contain no slashes or dots.
 struct ShardWiring {
-    std::string         in_state;
-    std::string         out_state;
     std::set<size_t>    kv_layer_indices;
-    std::vector<size_t> in_state_shape;
-    std::vector<size_t> out_state_shape;
-    std::vector<size_t> past_key_shape;
-    std::vector<size_t> logits_shape;
+    std::vector<size_t> in_state_shape;   // first non-special input shape (for hidden_size)
+    std::vector<size_t> out_state_shape;  // first non-special output shape (fallback)
+    std::vector<size_t> past_key_shape;   // first past_key_* shape (for num_kv_heads / head_dim)
+    std::vector<size_t> logits_shape;     // for vocab_size
+    std::string         first_input_name; // raw JSON key of the first non-special input
 };
 
-ShardWiring readShardWiring(const json& graph_entry, const std::string& diag_label) {
+ShardWiring readShardWiring(const json& graph_entry, const std::string& /*diag_label*/) {
     ShardWiring w;
+    bool        in_state_seen = false, out_state_seen = false;
     if (graph_entry.contains("inputs") && graph_entry.at("inputs").is_object()) {
         for (auto it = graph_entry.at("inputs").begin(); it != graph_entry.at("inputs").end(); ++it) {
             const std::string& key = it.key();
-            if (isSpecialInput(key)) {
+            if (isSpecialTensor(key)) {
                 if (auto idx = parsePastIndex(key)) w.kv_layer_indices.insert(*idx);
                 if (key.rfind("past_key_", 0) == 0 && w.past_key_shape.empty()) {
                     w.past_key_shape = readShape(it.value());
                 }
                 continue;
             }
-            if (w.in_state.empty()) {
-                w.in_state       = canonicalTensorName(key);
+            if (!in_state_seen) {
                 w.in_state_shape = readShape(it.value());
+                w.first_input_name = key;
+                in_state_seen    = true;
             }
         }
     }
@@ -147,20 +132,17 @@ ShardWiring readShardWiring(const json& graph_entry, const std::string& diag_lab
         for (auto it = graph_entry.at("outputs").begin(); it != graph_entry.at("outputs").end(); ++it) {
             const std::string& key = it.key();
             if (key == "logits") w.logits_shape = readShape(it.value());
-            if (isSpecialOutput(key)) {
+            if (isSpecialTensor(key)) {
                 if (key.rfind("past_key_", 0) == 0 && w.past_key_shape.empty()) {
                     w.past_key_shape = readShape(it.value());
                 }
                 continue;
             }
-            if (w.out_state.empty()) {
-                w.out_state       = canonicalTensorName(key);
+            if (!out_state_seen) {
                 w.out_state_shape = readShape(it.value());
+                out_state_seen    = true;
             }
         }
-    }
-    if (w.in_state.empty() || w.out_state.empty()) {
-        throw std::runtime_error("llm_spec_loader: " + diag_label + " is missing a hidden-state input or output");
     }
     return w;
 }
@@ -332,12 +314,17 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         if (it == per_shard_entry.end() || it->second == nullptr) {
             throw std::runtime_error("llm_spec_loader: could not locate graph entry for shard " + std::to_string(s));
         }
-        auto      w = readShardWiring(*it->second, "shard " + std::to_string(s));
-        ShardSpec sp;
-        sp.in_state_name  = w.in_state;
-        sp.out_state_name = w.out_state;
-        sp.lm_head_only   = w.kv_layer_indices.empty() && w.out_state == "logits" && s > 1;
-        out.shards[s - 1] = sp;
+        auto w = readShardWiring(*it->second, "shard " + std::to_string(s));
+        // Tensor names (in_state_name / out_state_name) and lm_head_only are
+        // populated later by LLMModel::discoverShardTensorNames() from the
+        // live QNN graph, since AI Hub's metadata.json uses ONNX-source names
+        // ("/model/.../Gather_output_0") while the compiled bin uses the
+        // QAIRT-sanitized form ("_model_..._Gather_output_0").
+        out.shards[s - 1] = ShardSpec{};
+
+        // Record shard 0's first-input name (raw JSON key) so the embedding
+        // provider factory can decide between input_ids and inputs_embeds.
+        if (s == 1) out.first_shard_input_hint = w.first_input_name;
 
         if (!w.kv_layer_indices.empty()) {
             const size_t lo = *w.kv_layer_indices.begin();
@@ -365,7 +352,7 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
-// Maps Genie's rope-type strings to our RopeScaling variant.
+// Maps the rope-type strings to our RopeScaling variant.
 RopeScaling parseRopeScaling(const json& rs) {
     if (!rs.is_object()) return StandardRope{};
     const std::string type = rs.value("rope-type", rs.value("type", std::string{"default"}));
@@ -529,10 +516,7 @@ std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta,
 }
 
 std::unique_ptr<InputProvider> makeEmbeddingProvider(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc) {
-    if (meta.shards.empty()) {
-        throw std::runtime_error("llm_spec_loader: cannot pick embedding provider — no shards parsed");
-    }
-    const std::string& first = meta.shards.front().in_state_name;
+    const std::string& first = meta.first_shard_input_hint;
     if (first == "input_ids") {
         int32_t pad = gc.pad_token_id;
         if (pad < 0) pad = gc.eos_token_ids.empty() ? 0 : gc.eos_token_ids.front();

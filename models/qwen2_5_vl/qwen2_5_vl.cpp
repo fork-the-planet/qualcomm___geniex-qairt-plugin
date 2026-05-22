@@ -182,7 +182,7 @@ std::unique_ptr<Qwen25VLModel> makeModel(const QnnRuntimeConfig& runtime_cfg, co
         // mrope_section comes from genie_config.json's
         // dialog.engine.model.positional-encoding.rope-scaling (rope-type
         // "qwen2vl-mrope"). Default to {16,24,24} if the bundle declares
-        // mrope but the section is missing, matching Genie's fallback.
+        // mrope but the section is missing.
         std::vector<int> mrope_section;
         if (auto* mrope = std::get_if<MRopeScaling>(&gc.rope_scaling)) {
             mrope_section = mrope->mrope_section;
