@@ -107,8 +107,8 @@ void PrecomputedEmbeddingProvider::clearBuffer() {
 void PrecomputedEmbeddingProvider::write(Graph& g, const LLMRunContext& ctx) {
     if (!g.hasInput(tensor_name_)) return;
 
-    const auto&  spec     = g.inputSpec(tensor_name_);
-    size_t       capacity = 1;
+    const auto& spec     = g.inputSpec(tensor_name_);
+    size_t      capacity = 1;
     for (auto d : spec.shape) capacity *= d;
 
     if (!buffer_.empty() && ctx.phase == 0) {
@@ -239,8 +239,8 @@ void MRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     // Pad cos/sin to graph capacity (cos=1, sin=0 = identity rotation) so
     // short prefill chunks don't leave stale RoPE values in trailing rows.
     auto write_padded = [&](Graph& gg, const std::string& name, const float* src, size_t valid_count) {
-        const auto&  spec     = gg.inputSpec(name);
-        size_t       capacity = 1;
+        const auto& spec     = gg.inputSpec(name);
+        size_t      capacity = 1;
         for (auto d : spec.shape) capacity *= d;
         if (valid_count >= capacity) {
             gg.write(name, src, valid_count);
