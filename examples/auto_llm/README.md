@@ -1,16 +1,43 @@
 # auto_llm
 
-Family-free LLM example. Runs any text-only QAIRT bundle without a per-model
-header — every numeric hyperparameter comes from `metadata.json`, every
-runtime knob from `genie_config.json`, and the chat template from
-`tokenizer_config.json` via `geniex-proc::Tokenizer::apply_chat_template`.
+Demonstrates loading a basic LLM (anything representable by `LLMModel`)
+entirely at runtime, with no model name or model spec hardcoded into the
+caller's code. Everything the runtime needs comes from files in the bundle
+directory.
 
-The encapsulation in `auto_llm.h` (`geniex::auto_llm::makeModel`,
-`geniex::auto_llm::makePipeline`, `geniex::auto_llm::Pipeline`) mirrors the
-shape of the per-family files (`models/qwen3/qwen3.h` etc.) but with no
-hardcoded `LLMSpec`, no `ChatTemplateFunc` binding, and full message-history
-chat-template rendering. It's a sketch of where those per-family files can
-converge once the runtime stops needing model-specific specs.
+## What this example shows
+
+A "basic LLM" today still requires the caller to write a per-family file
+(`models/qwen3/qwen3.h`, `models/llama3/llama3.h`, …) that picks the right
+chat template formatter and the right input providers. This example shows
+that's no longer necessary for any LLM that:
+
+- Can be represented by `LLMModel` (no custom decode loop, prefill flow,
+  or KV management).
+- Uses the same two CPU-side input providers — embedding + RoPE — that
+  every existing LLM family already uses.
+
+The two blockers historically preventing a generic loader were:
+
+1. **Chat template** had to be a `ChatTemplateFunc` bound at pipeline
+   creation. The `Pipeline` class in [`auto_llm.h`](./auto_llm.h) lifts
+   that constraint by reading the Jinja chat template from the bundle's
+   `tokenizer_config.json` at runtime, via
+   `geniex-proc::Tokenizer::apply_chat_template`.
+2. **Input providers** had to be added by family-specific code. This
+   example assumes the embedding + RoPE pair, sourced from the bundle's
+   metadata via `geniex::makeEmbeddingProvider` /
+   `geniex::makeRoPEProvider`. No other LLM provider exists in the
+   codebase today, so the assumption holds for every LLM family.
+
+The result is one entry point that runs any text-only QAIRT LLM bundle:
+
+```cpp
+auto pipe = geniex::auto_llm::makePipeline(runtime_cfg, model_cfg);
+auto out  = pipe->generateChat(messages, gen_cfg);
+```
+
+No model name in the caller's code, no model spec, no template binding.
 
 ## Bundle layout
 
@@ -28,16 +55,30 @@ converge once the runtime stops needing model-specific specs.
 
 This is the standard layout produced by AI Hub's QAIRT export today.
 
-## Usage
+## Build
+
+From the `geniex-qairt` repo root:
+
+```pwsh
+cmake -S . -B build -DGENIEX_BUILD_EXAMPLES=ON
+cmake --build build --target auto_llm --config Release
+```
+
+The binary lands at `build\bin\Release\auto_llm.exe`.
+
+## Run
 
 ```pwsh
 .\build\bin\Release\auto_llm.exe `
-    --model-dir <path>\modelfiles\qwen3_4b `
+    --model-dir <path>\<to>\<model_dir> `
     --max-tokens 256 `
     --verbose
 ```
 
-Flags:
+Multi-turn REPL: type a prompt, the model streams the reply, repeat. Type
+`exit` / `quit` or send EOF to leave.
+
+### Flags
 
 | Flag | Description |
 |------|-------------|
@@ -47,32 +88,3 @@ Flags:
 | `--max-tokens <n>`          | Max tokens generated per turn (default 512). |
 | `--enable-thinking`         | Plumbs `{"enable_thinking":true}` into the Jinja context for reasoning models that read the field (Qwen3). No-op on templates that don't. |
 | `--verbose`                 | Print TTFT / TPS metrics each turn. |
-
-## Multi-turn
-
-The pipeline keeps the model's KV cache aligned with the conversation
-history; the example never calls `pipe.reset()` between successful turns.
-On a generation failure, the user turn that triggered it is dropped and the
-KV cache is reset so the next turn starts clean.
-
-## Composition compared to per-family files
-
-```cpp
-// Per-family (e.g. models/qwen3/qwen3.h):
-auto pipe = qwen3::makePipeline(runtime_cfg, model_cfg);
-pipe->setSystemPrompt("You are helpful.");          // first turn only
-auto prompt = pipe->applyChatTemplate(user_text);   // last user msg only
-auto result = pipe->generate(prompt, gen_cfg);
-
-// Generic (auto_llm.h):
-auto pipe = geniex::auto_llm::makePipeline(runtime_cfg, model_cfg);
-auto result = pipe->generateChat(messages, gen_cfg, opts);
-//                                ^^^^^^^^
-//                                Full history, every turn.
-```
-
-The per-family path passes only the latest user message into a stateful
-`ChatTemplateFunc`. The generic path passes the full message vector into a
-Jinja template so multi-turn details (Qwen3 thinking-tag stripping, tool
-call / tool response interleaving, reasoning content carryover) work as the
-upstream model card specifies.
