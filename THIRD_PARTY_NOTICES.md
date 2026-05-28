@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Geniex-QAIRT-plugin is licensed under the BSD 3-Clause License (see
+GenieX-QAIRT-plugin is licensed under the BSD 3-Clause License (see
 [`LICENSE.txt`](LICENSE.txt)). It ships with or depends on the following
 third-party components, each governed by its own license.
 
