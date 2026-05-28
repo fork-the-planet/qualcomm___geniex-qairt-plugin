@@ -1,4 +1,4 @@
-<h1 align="center">Geniex-QAIRT-plugin</h1>
+<h1 align="center">GenieX-QAIRT-plugin</h1>
 
 <p align="center">A framework for running generative AI models on Snapdragon NPUs.</p>
 
@@ -144,7 +144,7 @@ expectations.
 
 ## License
 
-Geniex-QAIRT-plugin is licensed under the
+GenieX-QAIRT-plugin is licensed under the
 [BSD 3-Clause License](https://spdx.org/licenses/BSD-3-Clause.html). See
 [LICENSE.txt](LICENSE.txt) for the full license text.
 

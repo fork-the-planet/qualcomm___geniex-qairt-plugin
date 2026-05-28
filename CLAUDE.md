@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Geniex-QAIRT-plugin: a C++20 inference runtime for generative AI models on Snapdragon NPUs via Qualcomm AI Runtime (QAIRT). Backend plugin for the `geniex` framework, analogous to what vLLM provides for CUDA but targeting NPU hardware with static graph execution constraints.
+GenieX-QAIRT-plugin: a C++20 inference runtime for generative AI models on Snapdragon NPUs via Qualcomm AI Runtime (QAIRT). Backend plugin for the `geniex` framework, analogous to what vLLM provides for CUDA but targeting NPU hardware with static graph execution constraints.
 
 ## Architecture
 

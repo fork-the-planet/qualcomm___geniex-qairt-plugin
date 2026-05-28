@@ -1,6 +1,6 @@
-# Geniex Runtime: QNN Backend Documentation
+# GenieX Runtime: QNN Backend Documentation
 
-This document provides comprehensive documentation for the Geniex QNN runtime. If you're familiar with frameworks like vLLM or SGLang for GPU-based LLM inference, this guide will help you understand the architectural decisions and constraints unique to Qualcomm AI Runtime (QAIRT).
+This document provides comprehensive documentation for the GenieX QNN runtime. If you're familiar with frameworks like vLLM or SGLang for GPU-based LLM inference, this guide will help you understand the architectural decisions and constraints unique to Qualcomm AI Runtime (QAIRT).
 
 ## Table of Contents
 
@@ -54,7 +54,7 @@ The core philosophy: we achieve high-performance inference while respecting the 
 
 ### From Dynamic to Static Execution
 
-| PyTorch/vLLM | Geniex/QAIRT |
+| PyTorch/vLLM | GenieX/QAIRT |
 |--------------|--------------|
 | Dynamic shapes at runtime | Fixed tensor shapes at compile time |
 | In-place tensor operations | All operations pre-compiled into static graphs |
