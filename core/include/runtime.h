@@ -124,7 +124,6 @@ inline int detect_htp_arch() {
         fn = reinterpret_cast<remote_handle_control_t>(GetProcAddress(lib, "remote_handle_control"));
         if (!fn) {
             GENIEX_LOG_WARN("HTP detect: remote_handle_control not found in libcdsprpc.dll");
-            FreeLibrary(lib);
             s_arch = 0;
             return;
         }
@@ -132,6 +131,8 @@ inline int detect_htp_arch() {
 #else  // __ANDROID__ and __linux__
        // libcdsprpc.so is a system library on Android; on Linux the Qualcomm
        // FastRPC driver installs it; if absent, detection returns 0.
+       // libcdsprpc is pulled in transitively by the QNN HTP stub anyway,
+       // so we keep this mapping live for the process.
         void* lib = dlopen("libcdsprpc.so", RTLD_NOW | RTLD_LOCAL);
         if (!lib) {
             GENIEX_LOG_WARN("HTP detect: failed to load libcdsprpc.so: {}", dlerror());
@@ -143,7 +144,6 @@ inline int detect_htp_arch() {
             dlsym(lib, "remote_handle_control"));
         if (!fn) {
             GENIEX_LOG_WARN("HTP detect: remote_handle_control not found in libcdsprpc.so");
-            dlclose(lib);
             s_arch = 0;
             return;
         }
@@ -163,11 +163,6 @@ inline int detect_htp_arch() {
         int err = fn(DSPRPC_GET_DSP_INFO, &cap, sizeof(cap));
         if (err != 0) {
             GENIEX_LOG_WARN("HTP detect: DSPRPC_GET_DSP_INFO failed (err={})", err);
-#ifdef _WIN32
-            FreeLibrary(lib);
-#else
-            dlclose(lib);
-#endif
             s_arch = 0;
             return;
         }
@@ -200,12 +195,7 @@ inline int detect_htp_arch() {
         }
 
         if (s_arch > 0) GENIEX_LOG_INFO("Detected HTP arch: v{}", s_arch);
-
-#ifdef _WIN32
-        FreeLibrary(lib);
-#else
-        dlclose(lib);
-#endif
+        // `lib` intentionally leaked
     });
 
     return s_arch;
