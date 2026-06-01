@@ -118,6 +118,10 @@ class GENIEX_API LLMModel : public Model {
 
     // KV input tensor names across all shards, derived from the KV state block patterns.
     std::unordered_set<std::string> buildKVInputNameSet() const;
+
+    // One-shot fill of every KV input buffer with the encoded-zero pattern
+    // for its dtype
+    void initKVBuffers();
 };
 
 }  // namespace geniex

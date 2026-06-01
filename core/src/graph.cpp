@@ -8,6 +8,7 @@
 #include <map>
 #include <stdexcept>
 #include <type_traits>
+#include <vector>
 
 #include "QnnTypeMacros.hpp"
 #include "QnnTypes.h"
@@ -44,20 +45,22 @@ static size_t tensorByteSize(const Qnn_Tensor_t* t) {
     return n * it->second;
 }
 
-template <typename T>
-static void floatToTfN(T* out, const float* in, int32_t offset, float scale, size_t n) {
+template <typename T, typename Src>
+static void floatToTfN(T* out, const Src* in, int32_t offset, float scale, size_t n) {
     static_assert(std::is_unsigned<T>::value, "floatToTfN: unsigned types only");
+    static_assert(std::is_floating_point<Src>::value, "floatToTfN: src must be floating-point");
     const double max_val      = static_cast<double>((T)-1);  // 2^bits - 1
     const double encoding_min = offset * static_cast<double>(scale);
     const double encoding_max = (max_val + offset) * static_cast<double>(scale);
     const double range        = encoding_max - encoding_min;
+
     for (size_t i = 0; i < n; ++i) {
-        int v = static_cast<int>(std::round(max_val * (in[i] - encoding_min) / range));
-        if (v < 0)
-            v = 0;
-        else if (v > (int)max_val)
-            v = (int)max_val;
-        out[i] = static_cast<T>(v);
+        double q = max_val * (static_cast<double>(in[i]) - encoding_min) / range;
+        if (q < 0.0)
+            q = 0.0;
+        else if (q > max_val)
+            q = max_val;
+        out[i] = static_cast<T>(q);  // truncation toward zero
     }
 }
 
@@ -73,12 +76,83 @@ static void castToFloat(float* out, const T* in, size_t n) {
     for (size_t i = 0; i < n; ++i) out[i] = static_cast<float>(in[i]);
 }
 
-template <typename T>
-static void castFromFloat(T* out, const float* in, size_t n) {
-    for (size_t i = 0; i < n; ++i) out[i] = static_cast<T>(in[i]);
+template <typename Dst, typename Src>
+static void castFromFloat(Dst* out, const Src* in, size_t n) {
+    static_assert(std::is_floating_point<Src>::value, "castFromFloat: src must be floating-point");
+    for (size_t i = 0; i < n; ++i) out[i] = static_cast<Dst>(in[i]);
 }
 
 namespace geniex {
+
+namespace {
+
+// Shared dispatch for Graph::write(name, float*|double*, n). Templated on Src
+// so the caller controls the input precision.
+template <typename Src>
+static void writeFloatLike(const std::string& tensor_name, const std::string& graph_name, const Qnn_Tensor_t& t,
+    void* buf, const Src* src, size_t n) {
+    static_assert(std::is_floating_point<Src>::value, "writeFloatLike: src must be floating-point");
+
+    const size_t buf_bytes  = tensorByteSize(&t);
+    const auto   dtype      = QNN_TENSOR_GET_DATA_TYPE(t);
+    const size_t elem_bytes = (dtype == QNN_DATATYPE_FLOAT_32 || dtype == QNN_DATATYPE_INT_32)            ? 4
+                              : (dtype == QNN_DATATYPE_FLOAT_16 || dtype == QNN_DATATYPE_UFIXED_POINT_16) ? 2
+                                                                                                          : 1;
+    const size_t needed     = n * elem_bytes;
+    if (needed > buf_bytes) {
+        throw std::runtime_error("Graph::write overflow on graph '" + graph_name + "' tensor '" + tensor_name +
+                                 "': caller passed n=" + std::to_string(n) + " elements (" + std::to_string(needed) +
+                                 " bytes) but buffer is only " + std::to_string(buf_bytes) + " bytes (" +
+                                 std::to_string(buf_bytes / elem_bytes) + " elements)");
+    }
+
+    switch (dtype) {
+        case QNN_DATATYPE_FLOAT_32:
+            if constexpr (std::is_same_v<Src, float>) {
+                std::memcpy(buf, src, n * sizeof(float));
+            } else {
+                // double -> float at the buffer boundary; downstream HTP graphs read float32.
+                castFromFloat(static_cast<float*>(buf), src, n);
+            }
+            break;
+        case QNN_DATATYPE_FLOAT_16: {
+            // floatToFloat16 takes float; narrow once if Src is double.
+            if constexpr (std::is_same_v<Src, float>) {
+                floatToFloat16(static_cast<uint16_t*>(buf), src, n);
+            } else {
+                std::vector<float> tmp(n);
+                for (size_t i = 0; i < n; ++i) tmp[i] = static_cast<float>(src[i]);
+                floatToFloat16(static_cast<uint16_t*>(buf), tmp.data(), n);
+            }
+            break;
+        }
+        case QNN_DATATYPE_UFIXED_POINT_16: {
+            const auto qp = QNN_TENSOR_GET_QUANT_PARAMS(t);
+            if (qp.quantizationEncoding == QNN_QUANTIZATION_ENCODING_SCALE_OFFSET)
+                floatToTfN(
+                    static_cast<uint16_t*>(buf), src, qp.scaleOffsetEncoding.offset, qp.scaleOffsetEncoding.scale, n);
+            else
+                castFromFloat(static_cast<uint16_t*>(buf), src, n);
+            break;
+        }
+        case QNN_DATATYPE_UFIXED_POINT_8: {
+            const auto qp = QNN_TENSOR_GET_QUANT_PARAMS(t);
+            if (qp.quantizationEncoding == QNN_QUANTIZATION_ENCODING_SCALE_OFFSET)
+                floatToTfN(
+                    static_cast<uint8_t*>(buf), src, qp.scaleOffsetEncoding.offset, qp.scaleOffsetEncoding.scale, n);
+            else
+                castFromFloat(static_cast<uint8_t*>(buf), src, n);
+            break;
+        }
+        case QNN_DATATYPE_INT_32:
+            castFromFloat(static_cast<int32_t*>(buf), src, n);
+            break;
+        default:
+            throw std::runtime_error("Graph::write: unsupported dtype for '" + tensor_name + "'");
+    }
+}
+
+}  // namespace
 
 Graph::Graph(qnn_wrapper_api::GraphInfo_t* graph_info, QnnApi* api, IOTensor* io_tensor)
     : graph_info_(graph_info), api_(api), io_tensor_(io_tensor), name_(graph_info ? graph_info->graphName : "") {}
@@ -207,51 +281,13 @@ const std::string& Graph::name() const { return name_; }
 void Graph::write(const std::string& name, const float* src, size_t n) {
     void*               buf = input_buffer_ptrs_.at(name);
     const Qnn_Tensor_t& t   = inputs_[input_index_.at(name)];
+    writeFloatLike(name, name_, t, buf, src, n);
+}
 
-    const size_t buf_bytes  = tensorByteSize(&t);
-    const auto   dtype      = QNN_TENSOR_GET_DATA_TYPE(t);
-    const size_t elem_bytes = (dtype == QNN_DATATYPE_FLOAT_32 || dtype == QNN_DATATYPE_INT_32)            ? 4
-                              : (dtype == QNN_DATATYPE_FLOAT_16 || dtype == QNN_DATATYPE_UFIXED_POINT_16) ? 2
-                                                                                                          : 1;
-    const size_t needed     = n * elem_bytes;
-    if (needed > buf_bytes) {
-        throw std::runtime_error("Graph::write(float*) overflow on graph '" + name_ + "' tensor '" + name +
-                                 "': caller passed n=" + std::to_string(n) + " elements (" + std::to_string(needed) +
-                                 " bytes) but buffer is only " + std::to_string(buf_bytes) + " bytes (" +
-                                 std::to_string(buf_bytes / elem_bytes) + " elements)");
-    }
-
-    switch (QNN_TENSOR_GET_DATA_TYPE(t)) {
-        case QNN_DATATYPE_FLOAT_32:
-            std::memcpy(buf, src, n * sizeof(float));
-            break;
-        case QNN_DATATYPE_FLOAT_16:
-            floatToFloat16(static_cast<uint16_t*>(buf), src, n);
-            break;
-        case QNN_DATATYPE_UFIXED_POINT_16: {
-            const auto qp = QNN_TENSOR_GET_QUANT_PARAMS(t);
-            if (qp.quantizationEncoding == QNN_QUANTIZATION_ENCODING_SCALE_OFFSET)
-                floatToTfN(
-                    static_cast<uint16_t*>(buf), src, qp.scaleOffsetEncoding.offset, qp.scaleOffsetEncoding.scale, n);
-            else
-                castFromFloat(static_cast<uint16_t*>(buf), src, n);
-            break;
-        }
-        case QNN_DATATYPE_UFIXED_POINT_8: {
-            const auto qp = QNN_TENSOR_GET_QUANT_PARAMS(t);
-            if (qp.quantizationEncoding == QNN_QUANTIZATION_ENCODING_SCALE_OFFSET)
-                floatToTfN(
-                    static_cast<uint8_t*>(buf), src, qp.scaleOffsetEncoding.offset, qp.scaleOffsetEncoding.scale, n);
-            else
-                castFromFloat(static_cast<uint8_t*>(buf), src, n);
-            break;
-        }
-        case QNN_DATATYPE_INT_32:
-            castFromFloat(static_cast<int32_t*>(buf), src, n);
-            break;
-        default:
-            throw std::runtime_error("Graph::write(float*): unsupported dtype for '" + name + "'");
-    }
+void Graph::write(const std::string& name, const double* src, size_t n) {
+    void*               buf = input_buffer_ptrs_.at(name);
+    const Qnn_Tensor_t& t   = inputs_[input_index_.at(name)];
+    writeFloatLike(name, name_, t, buf, src, n);
 }
 
 void Graph::write(const std::string& name, const int32_t* src, size_t n) {

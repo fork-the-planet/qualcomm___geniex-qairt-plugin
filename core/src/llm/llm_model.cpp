@@ -19,6 +19,65 @@
 
 namespace geniex {
 
+namespace {
+// Encoded "zero" for a KV tensor. For quantized dtypes Genie picks the
+// midpoint of the unsigned range (qualla/engines/qnn-htp/KVCache/kvmanager.cpp
+// :68-79 — assumes symmetric zero-point at midpoint, matches Qwen2.5-VL /
+// Qwen3 exporters). For float dtypes "zero" is the literal 0 byte.
+//
+// uint8  -> 0x80   (= 1<<7,  zero_point=128)
+// uint16 -> 0x8000 (= 1<<15, zero_point=32768) — written via fill_n
+// float  -> 0x00
+//
+// `supported=false` => skip the fill (caller leaves allocator-zero).
+struct EncodedZero {
+    bool     supported = false;
+    bool     wide      = false;  // true => use uint16 fill_n; false => memset
+    uint8_t  byte_val  = 0;      // for memset
+    uint16_t u16_val   = 0;      // for fill_n when wide
+};
+
+EncodedZero encodedZeroForDtype(Qnn_DataType_t dt) {
+    switch (dt) {
+        case QNN_DATATYPE_UFIXED_POINT_8:
+        case QNN_DATATYPE_UINT_8:
+            return {true, false, 0x80, 0};
+        case QNN_DATATYPE_SFIXED_POINT_8:
+        case QNN_DATATYPE_INT_8:
+        case QNN_DATATYPE_BOOL_8:
+            return {true, false, 0x00, 0};
+        case QNN_DATATYPE_UFIXED_POINT_16:
+        case QNN_DATATYPE_UINT_16:
+            return {true, true, 0x00, 0x8000};
+        case QNN_DATATYPE_SFIXED_POINT_16:
+        case QNN_DATATYPE_INT_16:
+        case QNN_DATATYPE_FLOAT_16:
+            return {true, true, 0x00, 0x0000};
+        case QNN_DATATYPE_FLOAT_32:
+        case QNN_DATATYPE_INT_32:
+        case QNN_DATATYPE_UINT_32:
+        case QNN_DATATYPE_SFIXED_POINT_32:
+        case QNN_DATATYPE_UFIXED_POINT_32:
+            return {true, false, 0x00, 0};
+        default:
+            return {};
+    }
+}
+
+// Fill `dst` (n_bytes long) with the encoded-zero pattern for `dt`. No-op for
+// unknown dtypes.
+void fillEncodedZero(void* dst, size_t n_bytes, Qnn_DataType_t dt) {
+    const auto z = encodedZeroForDtype(dt);
+    if (!z.supported) return;
+    if (z.wide) {
+        const size_t n_elems = n_bytes / 2;
+        std::fill_n(static_cast<uint16_t*>(dst), n_elems, z.u16_val);
+    } else {
+        std::memset(dst, z.byte_val, n_bytes);
+    }
+}
+}  // namespace
+
 /*static*/ std::string LLMModel::fmtPattern(const std::string& pattern, size_t layer_idx) {
     std::string       result      = pattern;
     const std::string placeholder = "{}";
@@ -159,6 +218,8 @@ bool LLMModel::onInitialized() {
     for (auto& p : input_providers_) {
         p->onInitialized(model_cfg_, spec_);
     }
+
+    initKVBuffers();
 
     return true;
 }
@@ -329,8 +390,9 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
                     std::memmove(
                         buf + row * new_kv_len * elem_size, buf + row * old_kv_len * elem_size, copy_len * elem_size);
                     if (copy_len < new_kv_len)
-                        std::memset(
-                            buf + (row * new_kv_len + copy_len) * elem_size, 0, (new_kv_len - copy_len) * elem_size);
+                        fillEncodedZero(buf + (row * new_kv_len + copy_len) * elem_size,
+                            (new_kv_len - copy_len) * elem_size,
+                            spec.dtype);
                 }
             } else {
                 for (size_t row = 0; row < n_rows; ++row)
@@ -353,8 +415,9 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
                     std::memmove(
                         buf + h * new_kv_len * token_size, buf + h * old_kv_len * token_size, copy_len * token_size);
                     if (copy_len < new_kv_len)
-                        std::memset(
-                            buf + (h * new_kv_len + copy_len) * token_size, 0, (new_kv_len - copy_len) * token_size);
+                        fillEncodedZero(buf + (h * new_kv_len + copy_len) * token_size,
+                            (new_kv_len - copy_len) * token_size,
+                            spec.dtype);
                 }
             } else {
                 for (size_t h = 0; h < n_heads; ++h)
@@ -628,15 +691,19 @@ void LLMModel::resetKVCache() {
     sampler_.reset();
     sampler_cfg_valid_ = false;
 
+    initKVBuffers();
+}
+
+void LLMModel::initKVBuffers() {
     const auto   kv_names     = buildKVInputNameSet();
     const size_t total_graphs = 2 * shard_count_ * num_cl_;
     for (size_t gi = 0; gi < total_graphs; ++gi) {
         Graph& g = graph(gi);
         for (const auto& spec : g.inputSpecs()) {
-            if (kv_names.count(spec.name)) {
-                std::vector<uint8_t> zeros(spec.byteCount(), 0);
-                g.write(spec.name, zeros.data(), zeros.size());
-            }
+            if (!kv_names.count(spec.name)) continue;
+            void* buf = g.inputPtr(spec.name);
+            if (!buf) continue;
+            fillEncodedZero(buf, spec.byteCount(), spec.dtype);
         }
     }
 }
