@@ -5,8 +5,10 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "dispatch.h"
+#include "geniex-proc/types.h"
 #include "llm/llm_spec_loader.h"
 #include "pipeline/llm_pipeline.h"
 #include "types.h"
@@ -122,7 +124,10 @@ int main(int argc, char** argv) {
 
     std::string formatted_prompt;
     try {
-        formatted_prompt = pipe->applyChatTemplate(args.prompt);
+        std::vector<geniex::ChatMessage> messages = {
+            {geniex::Role::User, args.prompt},
+        };
+        formatted_prompt = pipe->applyChatTemplate(messages);
     } catch (const std::exception& e) {
         std::cerr << "applyChatTemplate() threw: " << e.what() << "\n";
         return 1;

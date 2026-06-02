@@ -4,10 +4,24 @@
 #include "pipeline/chat_template.h"
 
 #include <cstdio>
+#include <string>
+#include <vector>
+
+#include "geniex-proc/types.h"
 
 namespace geniex {
 
 namespace {
+
+// Returns the leading Role::System content, or empty when absent. Non-leading
+// System messages are ignored: emitting them would create duplicate system
+// blocks and invalidate the cached KV prefix.
+std::string extractSystemPrompt(const std::vector<ChatMessage>& messages) {
+    if (!messages.empty() && messages.front().role == Role::System) {
+        return messages.front().content;
+    }
+    return {};
+}
 
 // Minimal JSON string-content escaper for splicing user-provided strings
 // (tool name / description) into a JSON object literal. Handles the escapes
@@ -109,23 +123,37 @@ void appendChatMLToolsSystem(std::string& out, const std::string& system_prompt,
 
 }  // namespace
 
-std::string chatMLTemplate(
-    const std::string& user_message, const std::string& system_prompt, const ChatTools& tools, bool enable_thinking) {
-    std::string result;
+std::string chatMLTemplate(const std::vector<ChatMessage>& messages, const ChatTools& tools, bool enable_thinking) {
+    std::string       result;
+    const std::string system_prompt = extractSystemPrompt(messages);
     if (!tools.empty()) {
         appendChatMLToolsSystem(result, system_prompt, tools);
     } else if (!system_prompt.empty()) {
         result += "<|im_start|>system\n" + system_prompt + "<|im_end|>\n";
     }
-    result += "<|im_start|>user\n" + user_message + "<|im_end|>\n";
+    for (const auto& m : messages) {
+        switch (m.role) {
+            case Role::User:
+                result += "<|im_start|>user\n" + m.content + "<|im_end|>\n";
+                break;
+            case Role::Assistant:
+                result += "<|im_start|>assistant\n" + m.content + "<|im_end|>\n";
+                break;
+            case Role::System:
+            default:
+                // System handled above; Tool / unknown roles not rendered.
+                break;
+        }
+    }
     result += "<|im_start|>assistant\n";
     if (!enable_thinking) result += "<think>\n\n</think>\n\n";
     return result;
 }
 
-std::string phiChatTemplate(const std::string& user_message, const std::string& system_prompt, const ChatTools& tools,
-    bool /*enable_thinking*/) {
-    std::string result;
+std::string phiChatTemplate(
+    const std::vector<ChatMessage>& messages, const ChatTools& tools, bool /*enable_thinking*/) {
+    std::string       result;
+    const std::string system_prompt = extractSystemPrompt(messages);
     if (!system_prompt.empty() || !tools.empty()) {
         result += "<|system|>";
         result += system_prompt;
@@ -138,7 +166,19 @@ std::string phiChatTemplate(const std::string& user_message, const std::string& 
         }
         result += "<|end|>\n";
     }
-    result += "<|user|>\n" + user_message + "<|end|>\n";
+    for (const auto& m : messages) {
+        switch (m.role) {
+            case Role::User:
+                result += "<|user|>\n" + m.content + "<|end|>\n";
+                break;
+            case Role::Assistant:
+                result += "<|assistant|>" + m.content + "<|end|>\n";
+                break;
+            case Role::System:
+            default:
+                break;
+        }
+    }
     result += "<|assistant|>";
     return result;
 }
@@ -152,9 +192,10 @@ std::string phiChatTemplate(const std::string& user_message, const std::string& 
 //     preceded by a "Given the following functions..." instruction.
 //   - Response format: {"name": function_name, "parameters": {args}}
 //     (note: "parameters", not "arguments" — this is Llama3's convention).
-std::string llama3ChatTemplate(const std::string& user_message, const std::string& system_prompt,
-    const ChatTools& tools, bool /*enable_thinking*/) {
-    std::string out = "<|begin_of_text|>";
+std::string llama3ChatTemplate(
+    const std::vector<ChatMessage>& messages, const ChatTools& tools, bool /*enable_thinking*/) {
+    std::string       out           = "<|begin_of_text|>";
+    const std::string system_prompt = extractSystemPrompt(messages);
 
     // System block — emitted when system_prompt is set, or when tools are
     // present (tools require the capability preamble).
@@ -175,28 +216,47 @@ std::string llama3ChatTemplate(const std::string& user_message, const std::strin
         out += "<|eot_id|>";
     }
 
-    out += "<|start_header_id|>user<|end_header_id|>\n\n";
-
-    if (!tools.empty()) {
-        // Inject tool list into the user turn, one JSON object per line.
-        out +=
-            "Given the following functions, please respond with a JSON for a "
-            "function call with its proper arguments that best answers the given prompt.\n\n"
-            "Respond in the format {\"name\": function name, \"parameters\": dictionary "
-            "of argument name and its value}. Do not use variables.\n\n";
-        for (const auto& t : tools) {
-            out += "{\"type\": \"function\", \"function\": {\"name\": \"";
-            appendJsonEscaped(out, t.name);
-            out += "\", \"description\": \"";
-            appendJsonEscaped(out, t.description);
-            out += "\", \"parameters\": ";
-            out += t.parameters_json.empty() ? "{}" : t.parameters_json;
-            out += "}}\n";
+    // Llama3 spec injects the tool list into the first user turn, not the
+    // system block. `tools_injected` guards against re-injection on later turns.
+    bool tools_injected = false;
+    for (const auto& m : messages) {
+        switch (m.role) {
+            case Role::User: {
+                out += "<|start_header_id|>user<|end_header_id|>\n\n";
+                if (!tools.empty() && !tools_injected) {
+                    out +=
+                        "Given the following functions, please respond with a JSON for a "
+                        "function call with its proper arguments that best answers the given prompt.\n\n"
+                        "Respond in the format {\"name\": function name, \"parameters\": dictionary "
+                        "of argument name and its value}. Do not use variables.\n\n";
+                    for (const auto& t : tools) {
+                        out += "{\"type\": \"function\", \"function\": {\"name\": \"";
+                        appendJsonEscaped(out, t.name);
+                        out += "\", \"description\": \"";
+                        appendJsonEscaped(out, t.description);
+                        out += "\", \"parameters\": ";
+                        out += t.parameters_json.empty() ? "{}" : t.parameters_json;
+                        out += "}}\n";
+                    }
+                    out += "\n";
+                    tools_injected = true;
+                }
+                out += m.content;
+                out += "<|eot_id|>";
+                break;
+            }
+            case Role::Assistant:
+                out += "<|start_header_id|>assistant<|end_header_id|>\n\n";
+                out += m.content;
+                out += "<|eot_id|>";
+                break;
+            case Role::System:
+            default:
+                break;
         }
-        out += "\n";
     }
 
-    out += user_message + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
+    out += "<|start_header_id|>assistant<|end_header_id|>\n\n";
     return out;
 }
 

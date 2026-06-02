@@ -41,9 +41,7 @@ struct LLMPipeline::Impl {
     std::unique_ptr<LLMModel>          model;
     std::unique_ptr<geniex::Tokenizer> tokenizer;
     ChatTemplateFunc                   chat_template = chatMLTemplate;
-    std::string                        system_prompt;
-    ChatTools                          tools;
-    bool                               ready = false;
+    bool                               ready         = false;
 };
 
 LLMPipeline::LLMPipeline() : impl_(std::make_unique<Impl>()) {}
@@ -87,15 +85,9 @@ void LLMPipeline::reset() {
     if (impl_->model) impl_->model->resetKVCache();
 }
 
-void LLMPipeline::setSystemPrompt(const std::string& prompt) { impl_->system_prompt = prompt; }
-
-void LLMPipeline::setTools(ChatTools tools) { impl_->tools = std::move(tools); }
-
-std::string LLMPipeline::applyChatTemplate(const std::string& user_message, bool enable_thinking) {
-    std::string result = impl_->chat_template(user_message, impl_->system_prompt, impl_->tools, enable_thinking);
-    impl_->system_prompt.clear();
-    impl_->tools.clear();
-    return result;
+std::string LLMPipeline::applyChatTemplate(
+    const std::vector<ChatMessage>& messages, const ChatTools& tools, bool enable_thinking) const {
+    return impl_->chat_template(messages, tools, enable_thinking);
 }
 
 GenerateResult LLMPipeline::generate(

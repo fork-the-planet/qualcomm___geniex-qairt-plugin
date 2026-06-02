@@ -17,8 +17,14 @@ namespace geniex {
 // Tool calls are supported: when tools are non-empty a <tools>...</tools> block
 // is injected into the system message, mirroring the official Falcon3 Jinja
 // chat template.
-inline std::string falcon3ChatTemplate(const std::string& user_message, const std::string& system_prompt,
-    const ChatTools& tools, bool /*enable_thinking*/) {
+inline std::string falcon3ChatTemplate(
+    const std::vector<ChatMessage>& messages, const ChatTools& tools, bool /*enable_thinking*/) {
+    // Extract leading system prompt (contract: at most one Role::System, first).
+    std::string system_prompt;
+    if (!messages.empty() && messages.front().role == Role::System) {
+        system_prompt = messages.front().content;
+    }
+
     std::string result;
     if (!tools.empty()) {
         result += "<|system|>\n";
@@ -78,7 +84,15 @@ inline std::string falcon3ChatTemplate(const std::string& user_message, const st
             result += "<|system|>\n" + system_prompt + "\n";
         }
     }
-    result += "<|user|>\n" + user_message + "\n";
+
+    // Emit user/assistant turns in order; ignore other roles.
+    for (const auto& m : messages) {
+        if (m.role == Role::User) {
+            result += "<|user|>\n" + m.content + "\n";
+        } else if (m.role == Role::Assistant) {
+            result += "<|assistant|>\n" + m.content + "\n";
+        }
+    }
     result += "<|assistant|>\n";
     return result;
 }

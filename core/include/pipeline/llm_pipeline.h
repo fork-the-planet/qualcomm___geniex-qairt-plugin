@@ -9,7 +9,9 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <vector>
 
+#include "geniex-proc/types.h"  // ChatMessage
 #include "geniex_export.h"
 #include "llm/llm_model.h"
 #include "pipeline/chat_template.h"
@@ -55,26 +57,14 @@ class GENIEX_API LLMPipeline {
     // Clears KV state and resets to the start of a new conversation.
     void reset();
 
-    // Sets a system prompt to be injected on the next applyChatTemplate() call.
-    // The prompt is consumed (cleared) once applyChatTemplate() is called, so
-    // it must be set again if needed for a subsequent turn. Typical usage is to
-    // call setSystemPrompt() once before the first turn of a conversation.
-    void setSystemPrompt(const std::string& prompt);
-
-    // Sets the tools (already parsed from JSON at the SDK plugin layer) to be
-    // injected on the next applyChatTemplate() call. Tools are consumed
-    // (cleared) once applyChatTemplate() is called and must be re-staged each
-    // turn that should expose tools to the model. Pass an empty vector to
-    // clear without re-staging. Whether tools are actually rendered depends on
-    // the configured chat-template formatter; formatters without tool-call
-    // support silently ignore them.
-    void setTools(ChatTools tools);
-
-    // Formats a user message with the chat template, injecting any pending
-    // system prompt set via setSystemPrompt() and any pending tools set via
-    // setTools(). Both the system prompt and tools state are cleared after
-    // this call; call setSystemPrompt() / setTools() again to re-inject.
-    std::string applyChatTemplate(const std::string& user_message, bool enable_thinking = true);
+    // Stateless: renders `messages` through the configured chat-template
+    // formatter. See chat_template.h for the message-list contract; in
+    // particular, the caller (not this method) is responsible for
+    // first-turn default-system injection and for not re-emitting a
+    // system block on later turns — doing so would invalidate the cached
+    // KV prefix.
+    std::string applyChatTemplate(
+        const std::vector<ChatMessage>& messages, const ChatTools& tools = {}, bool enable_thinking = true) const;
 
     // on_token is called with each decoded text piece; return false to stop early.
     GenerateResult generate(const std::string& prompt_utf8, const GenerationConfig& gen_cfg = {},
