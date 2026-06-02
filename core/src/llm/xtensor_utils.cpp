@@ -10,9 +10,9 @@ namespace geniex {
 namespace xt_utils {
 
 RotaryEmbedding::RotaryEmbedding(int dim, float theta, float scale) {
-    auto idx       = xt::arange<float>(0, dim, 2);
-    this->inv_freq = 1.f / xt::pow(theta, idx / static_cast<float>(dim));
-    this->scale    = scale;
+    auto idx       = xt::arange<double>(0, dim, 2);
+    this->inv_freq = 1.0 / xt::pow(static_cast<double>(theta), idx / static_cast<double>(dim));
+    this->scale    = static_cast<double>(scale);
 }
 
 std::pair<xt::xarray<float>, xt::xarray<float>> RotaryEmbedding::forward(
@@ -21,12 +21,17 @@ std::pair<xt::xarray<float>, xt::xarray<float>> RotaryEmbedding::forward(
     std::size_t S = position_ids.shape()[1];
     std::size_t D = inv_freq.shape()[0];
 
-    xt::xarray<float> pos_f   = xt::cast<float>(position_ids);
-    auto              pos3d   = xt::reshape_view(pos_f, std::vector<std::size_t>{B, S, 1});
-    auto              inv3d   = xt::broadcast(inv_freq, std::vector<std::size_t>{B, S, D});
-    xt::xarray<float> freqs   = pos3d * inv3d;
-    xt::xarray<float> cos_out = xt::cos(freqs) * scale;
-    xt::xarray<float> sin_out = xt::sin(freqs) * scale;
+    xt::xarray<double> pos_d = xt::cast<double>(position_ids);
+    auto               pos3d = xt::reshape_view(pos_d, std::vector<std::size_t>{B, S, 1});
+    auto               inv3d = xt::broadcast(inv_freq, std::vector<std::size_t>{B, S, D});
+    xt::xarray<double> freqs = pos3d * inv3d;
+    xt::xarray<double> cos_d = xt::cos(freqs) * scale;
+    xt::xarray<double> sin_d = xt::sin(freqs) * scale;
+    // Narrow to float at the boundary so downstream xtensor code keeps running
+    // in float. The double pre-narrow values are what go through any subsequent
+    // quant path inside the xtensor example pipeline.
+    xt::xarray<float> cos_out = xt::cast<float>(cos_d);
+    xt::xarray<float> sin_out = xt::cast<float>(sin_d);
     return {cos_out, sin_out};
 }
 

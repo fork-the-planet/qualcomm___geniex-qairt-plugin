@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "llm/llm_utils.h"
 #include "types.h"
 #include "xtensor/io/xnpy.hpp"
 
@@ -132,12 +133,36 @@ void TokenIdInputProvider::write(Graph& g, const LLMRunContext& ctx) {
 RoPEInputProvider::RoPEInputProvider(size_t head_dim, float theta, std::string cos_name, std::string sin_name)
     : rope_(head_dim, theta), cos_name_(std::move(cos_name)), sin_name_(std::move(sin_name)) {}
 
+namespace {
+
+// Build a position-id vector padded with 0 from `curr_len` up to `capacity_rows`.
+std::vector<int32_t> paddedPositionIds(size_t n_past, size_t curr_len, size_t capacity_rows) {
+    const size_t         total = std::max(curr_len, capacity_rows);
+    std::vector<int32_t> ids(total, 0);
+    for (size_t i = 0; i < curr_len && i < total; ++i) ids[i] = static_cast<int32_t>(n_past + i);
+    return ids;
+}
+
+// Returns the row count (= elements / half_dim) of a RoPE cos/sin tensor.
+// Falls back to curr_len if the named tensor doesn't exist or half_dim is 0.
+size_t ropeCapacityRows(const Graph& g, const std::string& name, size_t half_dim, size_t curr_len) {
+    if (!g.hasInput(name) || half_dim == 0) return curr_len;
+    const auto& spec = g.inputSpec(name);
+    size_t      cap  = 1;
+    for (auto d : spec.shape) cap *= d;
+    return cap / half_dim;
+}
+
+}  // namespace
+
 void RoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     const bool has_cos = g.hasInput(cos_name_);
     const bool has_sin = g.hasInput(sin_name_);
     if (!has_cos && !has_sin) return;
 
-    auto [cos_vec, sin_vec] = rope_.forward(get_position_ids(ctx.n_past, ctx.curr_len));
+    const size_t half_dim   = rope_.halfDim();
+    const size_t rows       = ropeCapacityRows(g, has_cos ? cos_name_ : sin_name_, half_dim, ctx.curr_len);
+    auto [cos_vec, sin_vec] = rope_.forward(paddedPositionIds(ctx.n_past, ctx.curr_len, rows));
     if (has_cos) g.write(cos_name_, cos_vec.data(), cos_vec.size());
     if (has_sin) g.write(sin_name_, sin_vec.data(), sin_vec.size());
 }
@@ -153,7 +178,9 @@ void LongRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     const bool has_sin = g.hasInput(sin_name_);
     if (!has_cos && !has_sin) return;
 
-    auto [cos_vec, sin_vec] = rope_.forward(get_position_ids(ctx.n_past, ctx.curr_len));
+    const size_t half_dim   = rope_.halfDim();
+    const size_t rows       = ropeCapacityRows(g, has_cos ? cos_name_ : sin_name_, half_dim, ctx.curr_len);
+    auto [cos_vec, sin_vec] = rope_.forward(paddedPositionIds(ctx.n_past, ctx.curr_len, rows));
     if (has_cos) g.write(cos_name_, cos_vec.data(), cos_vec.size());
     if (has_sin) g.write(sin_name_, sin_vec.data(), sin_vec.size());
 }
@@ -167,7 +194,9 @@ void PartialRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
     const bool has_sin = g.hasInput(sin_name_);
     if (!has_cos && !has_sin) return;
 
-    auto [cos_vec, sin_vec] = rope_.forward(get_position_ids(ctx.n_past, ctx.curr_len));
+    const size_t half_dim   = rope_.halfDim();
+    const size_t rows       = ropeCapacityRows(g, has_cos ? cos_name_ : sin_name_, half_dim, ctx.curr_len);
+    auto [cos_vec, sin_vec] = rope_.forward(paddedPositionIds(ctx.n_past, ctx.curr_len, rows));
     if (has_cos) g.write(cos_name_, cos_vec.data(), cos_vec.size());
     if (has_sin) g.write(sin_name_, sin_vec.data(), sin_vec.size());
 }

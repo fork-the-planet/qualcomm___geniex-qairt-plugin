@@ -100,20 +100,21 @@ class GENIEX_VLM_API MRoPEInputProvider : public InputProvider {
 
    private:
     // Fills out_cos / out_sin [seq_len * half_dim_] from flat [3 * seq_len] pos IDs.
-    void fillCosSin(const std::vector<int32_t>& position_ids, size_t seq_len, std::vector<float>& out_cos,
-        std::vector<float>& out_sin) const;
+    // All math is in `double` to match Genie. See agents/worklog.md / RotaryEmbedding.
+    void fillCosSin(const std::vector<int32_t>& position_ids, size_t seq_len, std::vector<double>& out_cos,
+        std::vector<double>& out_sin) const;
 
-    std::vector<int>   mrope_section_;
-    float              theta_;
-    MRoPEInterleaving  style_;
-    std::string        cos_name_;
-    std::string        sin_name_;
-    size_t             half_dim_ = 0;  // sum of mrope_section_
-    std::vector<float> inv_freq_;      // cached [half_dim_], computed once at construction
+    std::vector<int>    mrope_section_;
+    float               theta_;
+    MRoPEInterleaving   style_;
+    std::string         cos_name_;
+    std::string         sin_name_;
+    size_t              half_dim_ = 0;  // sum of mrope_section_
+    std::vector<double> inv_freq_;      // cached [half_dim_], computed once at construction (double)
 
-    std::vector<float> cos_table_;  // flat [current_round_seq_len * half_dim_]; prefill only
-    std::vector<float> sin_table_;  // flat [current_round_seq_len * half_dim_]; prefill only
-    size_t             seq_len_   = 0;
+    std::vector<double> cos_table_;  // flat [current_round_seq_len * half_dim_]; prefill only (double)
+    std::vector<double> sin_table_;  // flat [current_round_seq_len * half_dim_]; prefill only (double)
+    size_t              seq_len_  = 0;
     size_t position_offset_       = 0;  // absolute KV position where table[0] starts (= n_past at setPositionIds time)
     bool   has_prefill_positions_ = false;  // set by setPositionIds(), cleared by clearPositionIds()
 

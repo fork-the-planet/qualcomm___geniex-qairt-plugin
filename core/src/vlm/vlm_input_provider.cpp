@@ -146,8 +146,9 @@ MRoPEInputProvider::MRoPEInputProvider(
     half_dim_ = static_cast<size_t>(std::accumulate(mrope_section_.begin(), mrope_section_.end(), 0));
 
     inv_freq_.resize(half_dim_);
+    const double theta_d = static_cast<double>(theta_);
     for (size_t i = 0; i < half_dim_; ++i) {
-        inv_freq_[i] = 1.0f / std::pow(theta_, float(i) / float(half_dim_));
+        inv_freq_[i] = 1.0 / std::pow(theta_d, static_cast<double>(i) / static_cast<double>(half_dim_));
     }
 }
 
@@ -174,13 +175,13 @@ void MRoPEInputProvider::setMropeDeltas(std::vector<int32_t> deltas) { mrope_del
 void MRoPEInputProvider::resetMropeDeltas() { mrope_deltas_.assign(3, 0); }
 
 void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids, size_t seq_len,
-    std::vector<float>& out_cos, std::vector<float>& out_sin) const {
+    std::vector<double>& out_cos, std::vector<double>& out_sin) const {
     // freqs: flat [3 * seq_len * half_dim_], freqs[dim][t][i] = pos * inv_freq_[i]
-    std::vector<float> freqs(3 * seq_len * half_dim_);
+    std::vector<double> freqs(3 * seq_len * half_dim_);
     for (int dim = 0; dim < 3; ++dim) {
         for (size_t t = 0; t < seq_len; ++t) {
-            const float pos = float(position_ids[dim * seq_len + t]);
-            float*      row = freqs.data() + (dim * seq_len + t) * half_dim_;
+            const double pos = static_cast<double>(position_ids[dim * seq_len + t]);
+            double*      row = freqs.data() + (dim * seq_len + t) * half_dim_;
             for (size_t i = 0; i < half_dim_; ++i) {
                 row[i] = pos * inv_freq_[i];
             }
@@ -195,9 +196,9 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids, si
         for (size_t dim = 0; dim < mrope_section_.size() && off < half_dim_; ++dim) {
             const size_t len = std::min<size_t>(mrope_section_[dim], half_dim_ - off);
             for (size_t t = 0; t < seq_len; ++t) {
-                const float* src     = freqs.data() + (dim * seq_len + t) * half_dim_;
-                float*       cos_row = out_cos.data() + t * half_dim_;
-                float*       sin_row = out_sin.data() + t * half_dim_;
+                const double* src     = freqs.data() + (dim * seq_len + t) * half_dim_;
+                double*       cos_row = out_cos.data() + t * half_dim_;
+                double*       sin_row = out_sin.data() + t * half_dim_;
                 for (size_t i = off; i < off + len; ++i) {
                     cos_row[i] = std::cos(src[i]);
                     sin_row[i] = std::sin(src[i]);
@@ -208,9 +209,9 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids, si
     } else {
         // STRIDE: temporal fills all, then height/width override at stride-3 offsets.
         for (size_t t = 0; t < seq_len; ++t) {
-            const float* src     = freqs.data() + t * half_dim_;  // dim=0
-            float*       cos_row = out_cos.data() + t * half_dim_;
-            float*       sin_row = out_sin.data() + t * half_dim_;
+            const double* src     = freqs.data() + t * half_dim_;  // dim=0
+            double*       cos_row = out_cos.data() + t * half_dim_;
+            double*       sin_row = out_sin.data() + t * half_dim_;
             for (size_t i = 0; i < half_dim_; ++i) {
                 cos_row[i] = std::cos(src[i]);
                 sin_row[i] = std::sin(src[i]);
@@ -222,7 +223,7 @@ void MRoPEInputProvider::fillCosSin(const std::vector<int32_t>& position_ids, si
             const int length = mrope_section_[dim] * 3;
             for (int i = offset; i < length && i < static_cast<int>(half_dim_); i += 3) {
                 for (size_t t = 0; t < seq_len; ++t) {
-                    const float f              = freqs[(dim * seq_len + t) * half_dim_ + i];
+                    const double f             = freqs[(dim * seq_len + t) * half_dim_ + i];
                     out_cos[t * half_dim_ + i] = std::cos(f);
                     out_sin[t * half_dim_ + i] = std::sin(f);
                 }
@@ -238,7 +239,7 @@ void MRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
 
     // Pad cos/sin to graph capacity (cos=1, sin=0 = identity rotation) so
     // short prefill chunks don't leave stale RoPE values in trailing rows.
-    auto write_padded = [&](Graph& gg, const std::string& name, const float* src, size_t valid_count) {
+    auto write_padded = [&](Graph& gg, const std::string& name, const double* src, size_t valid_count) {
         const auto& spec     = gg.inputSpec(name);
         size_t      capacity = 1;
         for (auto d : spec.shape) capacity *= d;
@@ -246,8 +247,8 @@ void MRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
             gg.write(name, src, valid_count);
             return;
         }
-        const bool         is_cos = (name == cos_name_);
-        std::vector<float> buf(capacity, is_cos ? 1.0f : 0.0f);
+        const bool          is_cos = (name == cos_name_);
+        std::vector<double> buf(capacity, is_cos ? 1.0 : 0.0);
         std::copy_n(src, valid_count, buf.data());
         gg.write(name, buf.data(), capacity);
     };
@@ -266,7 +267,7 @@ void MRoPEInputProvider::write(Graph& g, const LLMRunContext& ctx) {
             for (int d = 0; d < 3; ++d) pos3d[d * ctx.curr_len + t] = base + static_cast<int32_t>(t) + mrope_deltas_[d];
         }
 
-        std::vector<float> cos_buf, sin_buf;
+        std::vector<double> cos_buf, sin_buf;
         fillCosSin(pos3d, ctx.curr_len, cos_buf, sin_buf);
         const size_t count = ctx.curr_len * half_dim_;
         if (has_cos) write_padded(g, cos_name_, cos_buf.data(), count);

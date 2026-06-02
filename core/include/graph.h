@@ -49,9 +49,18 @@ class GENIEX_API Graph {
     const std::string& name() const;
 
     // Converts src to the tensor's native dtype and writes it into the named
-    // input buffer. float: memcpy for FLOAT_32, quantize for UFIXED_POINT_8/16,
-    // cast for INT_32. int32_t: direct memcpy, no quantization.
+    // input buffer.
+    //   float / double:  memcpy for FLOAT_32 (narrowing for double),
+    //                    fp16-narrow for FLOAT_16,
+    //                    truncating quant for UFIXED_POINT_8/16,
+    //                    plain cast for INT_32.
+    //                    The double overload preserves precision through the
+    //                    quant pipeline (in→quant→trunc all in double); use it
+    //                    for tensors whose downstream byte-pattern needs to
+    //                    bit-match Genie (e.g. RoPE position_ids_cos/sin).
+    //   int32_t:         direct memcpy, no quantization.
     void write(const std::string& name, const float* src, size_t element_count);
+    void write(const std::string& name, const double* src, size_t element_count);
     void write(const std::string& name, const int32_t* src, size_t element_count);
 
     // Copies bytes verbatim with no type conversion.

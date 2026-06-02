@@ -19,8 +19,8 @@ namespace xt_utils {
 
 class RotaryEmbedding {
    public:
-    xt::xarray<float> inv_freq;
-    float             scale = 1.f;
+    xt::xarray<double> inv_freq;
+    double             scale = 1.0;
 
     RotaryEmbedding() = default;
     RotaryEmbedding(int dim, float theta = 10000.f, float scale = 1.f);
