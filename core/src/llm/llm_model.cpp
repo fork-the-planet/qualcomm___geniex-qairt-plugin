@@ -136,8 +136,7 @@ bool LLMModel::onInitialized() {
     // Discover CL / AR / phase-prefix from the loaded QNN graph names. The
     // regex tolerates an optional alphabetic prefix (Genie's `prompt_` /
     // `token_`, absent on AI Hub IoT exports).
-    static const std::regex graph_name_re(
-        R"((?:[A-Za-z]+_)?ar(\d+)_cl(\d+)_(\d+)_of_(\d+))");
+    static const std::regex graph_name_re(R"((?:[A-Za-z]+_)?ar(\d+)_cl(\d+)_(\d+)_of_(\d+))");
 
     struct ParsedGraph {
         bool   ok    = false;
@@ -162,8 +161,7 @@ bool LLMModel::onInitialized() {
     for (const auto& g : graphs_) {
         const auto p = parseGraphName(g.name());
         if (!p.ok) {
-            GENIEX_LOG_ERROR(
-                "LLMModel: graph name '{}' does not match '(<phase>_)?arN_clM_S_of_T'", g.name());
+            GENIEX_LOG_ERROR("LLMModel: graph name '{}' does not match '(<phase>_)?arN_clM_S_of_T'", g.name());
             return false;
         }
         cl_set.insert(p.cl);
@@ -179,10 +177,10 @@ bool LLMModel::onInitialized() {
     num_cl_               = spec_.context_lengths.size();
 
     auto sortKey = [&](const std::string& name) -> std::tuple<int, int, int> {
-        const auto p = parseGraphName(name);
-        const int phase  = (p.ar == spec_.seq_len_prefill) ? 0 : 1;
-        const int shard  = (p.shard > 0) ? static_cast<int>(p.shard) - 1 : 0;
-        int       cl_idx = 0;
+        const auto p      = parseGraphName(name);
+        const int  phase  = (p.ar == spec_.seq_len_prefill) ? 0 : 1;
+        const int  shard  = (p.shard > 0) ? static_cast<int>(p.shard) - 1 : 0;
+        int        cl_idx = 0;
         for (size_t i = 0; i < spec_.context_lengths.size(); ++i) {
             if (spec_.context_lengths[i] == p.cl) {
                 cl_idx = static_cast<int>(i);
