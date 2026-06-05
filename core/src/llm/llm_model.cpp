@@ -10,6 +10,8 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <regex>
+#include <set>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -116,10 +118,7 @@ LLMModel::LLMModel(LLMSpec spec) : spec_(std::move(spec)) {}
 
 bool LLMModel::onInitialized() {
     shard_count_ = spec_.shards.size();
-    num_cl_      = spec_.context_lengths.size();
-
     if (shard_count_ == 0) return false;
-    if (num_cl_ == 0) return false;
 
     kv_state_block_idx_ = std::numeric_limits<size_t>::max();
     for (size_t block_idx = 0; block_idx < spec_.state_blocks.size(); ++block_idx) {
@@ -134,63 +133,60 @@ bool LLMModel::onInitialized() {
         throw std::runtime_error("KV state block shard_layer_ranges size must match shard count");
     }
 
-    // QNN loads graphs in arbitrary order; reorder them so graphIndex() assumptions hold.
-    struct Seg {
-        bool        ph;
-        std::string text;
-    };
-    std::vector<Seg> segs;
-    for (size_t p = 0; p < spec_.graph_name_pattern.size();) {
-        auto o = spec_.graph_name_pattern.find('{', p);
-        if (o == std::string::npos) {
-            segs.push_back({false, spec_.graph_name_pattern.substr(p)});
-            break;
-        }
-        if (o > p) segs.push_back({false, spec_.graph_name_pattern.substr(p, o - p)});
-        auto c = spec_.graph_name_pattern.find('}', o);
-        segs.push_back({true, spec_.graph_name_pattern.substr(o + 1, c - o - 1)});
-        p = c + 1;
-    }
+    // Discover CL / AR / phase-prefix from the loaded QNN graph names. The
+    // regex tolerates an optional alphabetic prefix (Genie's `prompt_` /
+    // `token_`, absent on AI Hub IoT exports).
+    static const std::regex graph_name_re(R"((?:[A-Za-z]+_)?ar(\d+)_cl(\d+)_(\d+)_of_(\d+))");
 
-    auto parseGraphName = [&](const std::string& name) -> std::map<std::string, std::string> {
-        std::map<std::string, std::string> r;
-        size_t                             p = 0;
-        for (size_t i = 0; i < segs.size(); ++i) {
-            if (!segs[i].ph) {
-                if (name.compare(p, segs[i].text.size(), segs[i].text) != 0) return {};
-                p += segs[i].text.size();
-            } else {
-                std::string next_lit;
-                for (size_t j = i + 1; j < segs.size(); ++j)
-                    if (!segs[j].ph) {
-                        next_lit = segs[j].text;
-                        break;
-                    }
-                size_t end = next_lit.empty() ? name.size() : name.find(next_lit, p);
-                if (end == std::string::npos) return {};
-                r[segs[i].text] = name.substr(p, end - p);
-                p               = end;
-            }
-        }
-        return r;
+    struct ParsedGraph {
+        bool   ok    = false;
+        size_t ar    = 0;
+        size_t cl    = 0;
+        size_t shard = 0;
     };
-
-    const std::string pf_str  = std::to_string(spec_.seq_len_prefill);
-    auto              sortKey = [&](const std::string& name) -> std::tuple<int, int, int> {
-        auto v = parseGraphName(name);
-        if (v.empty()) return {0, 0, 0};
-        int phase = (v.count("ar") && v.at("ar") == pf_str) ? 0 : 1;
-        int shard = 0;
+    auto parseGraphName = [&](const std::string& name) -> ParsedGraph {
+        std::smatch m;
+        if (!std::regex_match(name, m, graph_name_re)) return {};
         try {
-            if (v.count("shard")) shard = std::stoi(v.at("shard")) - 1;
+            return {true, std::stoul(m[1].str()), std::stoul(m[2].str()), std::stoul(m[3].str())};
         } catch (...) {
+            return {};
         }
-        int cl_idx = 0;
-        for (size_t i = 0; i < spec_.context_lengths.size(); ++i)
-            if (v.count("cl") && v.at("cl") == std::to_string(spec_.context_lengths[i])) {
-                cl_idx = (int)i;
+    };
+
+    // Every loaded graph must parse. An unmatched name would otherwise sort
+    // into an arbitrary slot and trip Graph::write much later.
+    std::set<size_t> cl_set;
+    std::set<size_t> ar_set;
+    for (const auto& g : graphs_) {
+        const auto p = parseGraphName(g.name());
+        if (!p.ok) {
+            GENIEX_LOG_ERROR("LLMModel: graph name '{}' does not match '(<phase>_)?arN_clM_S_of_T'", g.name());
+            return false;
+        }
+        cl_set.insert(p.cl);
+        ar_set.insert(p.ar);
+    }
+    if (cl_set.empty() || ar_set.empty()) {
+        GENIEX_LOG_ERROR("LLMModel: no graphs loaded");
+        return false;
+    }
+    spec_.context_lengths.assign(cl_set.begin(), cl_set.end());
+    spec_.seq_len_prefill = *ar_set.rbegin();
+    spec_.seq_len_decode  = *ar_set.begin();
+    num_cl_               = spec_.context_lengths.size();
+
+    auto sortKey = [&](const std::string& name) -> std::tuple<int, int, int> {
+        const auto p      = parseGraphName(name);
+        const int  phase  = (p.ar == spec_.seq_len_prefill) ? 0 : 1;
+        const int  shard  = (p.shard > 0) ? static_cast<int>(p.shard) - 1 : 0;
+        int        cl_idx = 0;
+        for (size_t i = 0; i < spec_.context_lengths.size(); ++i) {
+            if (spec_.context_lengths[i] == p.cl) {
+                cl_idx = static_cast<int>(i);
                 break;
             }
+        }
         return {phase, shard, cl_idx};
     };
 

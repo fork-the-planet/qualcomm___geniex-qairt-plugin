@@ -88,36 +88,21 @@ inline StateBlockSpec makeKVOnlyStateBlock(
 
 // Architecture and tensor naming parameters for a split-decoder LLM.
 struct LLMSpec {
-    // Per-shard hidden-state descriptors, in order.
-    std::vector<ShardSpec> shards;
-
-    // State/cache blocks. For current models this is usually a single KV block.
+    std::vector<ShardSpec>      shards;
     std::vector<StateBlockSpec> state_blocks;
 
-    size_t seq_len_prefill = 0;
-    size_t seq_len_decode  = 0;
-    size_t hidden_size     = 0;
-    size_t num_kv_heads    = 0;
-    size_t head_dim        = 0;
-    size_t vocab_size      = 0;
+    // Tensor-shape-derived hyperparameters; populated by the loader.
+    size_t hidden_size  = 0;
+    size_t num_kv_heads = 0;
+    size_t head_dim     = 0;
+    size_t vocab_size   = 0;
 
-    // KV buffer size variants, sorted ascending. e.g. {640, 1152, 2176, 4096}.
-    // Single entry = one fixed context length.
-    std::vector<size_t> context_lengths = {4096};
+    // Populated by LLMModel::onInitialized from the loaded QNN graph names.
+    // Empty until the model has initialized.
+    size_t              seq_len_prefill = 0;
+    size_t              seq_len_decode  = 0;
+    std::vector<size_t> context_lengths;
 
-    // Pattern for inferring (phase, shard, cl_idx) from graph names at load time.
-    // Placeholders: {ar}    = AR sequence length (prefill or decode)
-    //               {cl}    = context length
-    //               {shard} = 1-based shard index
-    //               {total} = total number of shards
-    //               {phase} = phase string (e.g. "prefill" or "decode"), used by some
-    //                         model export conventions; not used by sortKey() itself.
-    // Additional placeholders beyond the ones above are allowed but are silently ignored
-    // by sortKey() when parsing graph names.
-    // Default matches Qualcomm export convention, e.g. "ar128_cl4096_1_of_2".
-    std::string graph_name_pattern = "ar{ar}_cl{cl}_{shard}_of_{total}";
-
-    // Name of the attention mask input tensor; written by runShard() on every shard.
     std::string attention_mask_name = "attention_mask";
 
     std::vector<int32_t> eos_token_ids;

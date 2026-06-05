@@ -71,7 +71,7 @@ Example (3-shard model with embedding shard + 2 KV shards):
 ## Common pitfalls
 
 - **Tensor names**: metadata.yaml uses ONNX-style slashes (`/model/model/...`) but QNN graphs may use underscores (`_model_model_...`). Verify at runtime via `graph.inputSpecs()`/`graph.outputSpecs()`.
-- **Graph name patterns**: All Genie exports use `prompt_`/`token_` prefixes. Always set `graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}"`.
+- **Graph name patterns**: `LLMModel::onInitialized` auto-detects both prefixed (`prompt_arN_clM_S_of_T`, `token_arN_clM_S_of_T`) and unprefixed (`arN_clM_S_of_T`) graph names via regex; nothing to set on `LLMSpec`.
 - **Tensor dtypes**: Some exports use float16, others float32 or quantized. `Graph::write(float*)` / `Graph::read(float*)` handle conversion.
 - **Linker**: Example executables must link `geniex-proc` explicitly (PRIVATE linkage in geniex_core doesn't propagate).
 - **HTP version**: Bundled runtime is QAIRT v2.45.0.260326. Verify model compile version from shard `.json` `buildId` field.
