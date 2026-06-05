@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <limits>
 #include <map>
 #include <regex>
 #include <set>
@@ -197,20 +196,17 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
     size_t      total_shards = 0;
     std::string vision_encoder_key;
 
-    struct LlmShardCandidate {
-        size_t      cl;
-        size_t      ar;
-        const json* entry;
-    };
-    std::map<size_t, std::vector<LlmShardCandidate>> per_shard_candidates;
-    std::map<size_t, const json*>                    per_shard_entry;  // VLM path writes this directly.
+    // Per-shard representative graph entry. Any AR/CL variant of a given
+    // shard exposes the same num_kv_heads / head_dim / hidden_size /
+    // kv_layer_indices, so the first match wins.
+    std::map<size_t, const json*> per_shard_entry;
 
     for (auto it = model_files.begin(); it != model_files.end(); ++it) {
         const std::string& key = it.key();
         GraphNameParts     parts;
         if (parseGraphName(key, parts)) {
             total_shards = std::max(total_shards, parts.total);
-            per_shard_candidates[parts.shard].push_back({parts.cl, parts.ar, &it.value()});
+            per_shard_entry.try_emplace(parts.shard, &it.value());
             continue;
         }
         size_t shard = 0, total = 0;
@@ -224,23 +220,6 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
             continue;
         }
         GENIEX_LOG_WARN("llm_spec_loader: ignoring unrecognised graph entry '{}'", key);
-    }
-
-    // Smallest CL + largest AR at that CL = prefill graph; its descriptor
-    // carries full attention_mask / past_key_* shapes for hyperparam reads.
-    for (auto& [shard, candidates] : per_shard_candidates) {
-        size_t smallest_cl = std::numeric_limits<size_t>::max();
-        for (const auto& c : candidates) smallest_cl = std::min(smallest_cl, c.cl);
-        const json* best    = nullptr;
-        size_t      best_ar = 0;
-        for (const auto& c : candidates) {
-            if (c.cl != smallest_cl) continue;
-            if (best == nullptr || c.ar > best_ar) {
-                best    = c.entry;
-                best_ar = c.ar;
-            }
-        }
-        if (best) per_shard_entry[shard] = best;
     }
 
     if (total_shards == 0) {
