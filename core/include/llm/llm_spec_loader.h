@@ -72,45 +72,27 @@ struct ParsedVisionPreprocessing {
     std::vector<float> normalize_std;
 };
 
-// ── Parsed metadata.json ─────────────────────────────────────────────────────
-// Carries everything inferable from the compiled graphs' tensor shapes:
-// shard wiring, per-shard KV ranges, AR/CL set, hidden_size, num_kv_heads,
-// head_dim, vocab_size, num_hidden_layers.
+// Everything inferable from metadata.json's tensor-shape entries. CL / AR /
+// phase-prefix are discovered later by LLMModel::onInitialized from the
+// loaded QNN graph names, so they live on LLMSpec, not here.
 struct ParsedQAIRTMetadata {
-    // Top-level metadata.json fields.
     std::string model_id;  // e.g. "qwen3_4b", "llama_v3_2_3b_instruct_ssd"
 
-    // Shard wiring.
     std::vector<ShardSpec>                 shards;
     std::vector<std::optional<LayerRange>> shard_layer_ranges;
 
-    // Inferred from each graph's `attention_mask` last dim (or, for VLM, the
-    // top-level `genie.context_lengths` array). Sorted ascending.
-    std::vector<size_t> context_lengths;
-
-    // Inferred from `attention_mask.shape[2]` (or AR-suffix in graph name).
-    size_t seq_len_prefill = 0;
-    size_t seq_len_decode  = 0;
-
-    // Empty for VLM bundles (bare `partN_of_M.bin` keys).
-    std::string graph_name_pattern;
-
-    // Tensor-shape-inferred LLM hyperparameters.
     size_t hidden_size       = 0;  // inputs_embeds.shape[2] / hidden-state.shape[2]
     size_t num_kv_heads      = 0;  // past_key_*.shape[0]
     size_t head_dim          = 0;  // past_key_*.shape[2]
     size_t vocab_size        = 0;  // logits last dim
     size_t num_hidden_layers = 0;  // max past_key_<N>_in across all shards + 1
 
-    // Optional VLM-only fields.
     std::optional<ParsedVisionPreprocessing> vision_preprocessing;
     std::string                              vision_encoder_graph;  // empty if absent
 
-    // First non-special input tensor name on shard 0, as recorded in
-    // metadata.json (typically "input_ids" or "inputs_embeds"). Used only by
-    // the embedding-provider factory to decide between TokenIdInputProvider
-    // and EmbeddingInputProvider. Hidden-state wiring tensor names are not
-    // populated by the loader — see LLMModel::discoverShardTensorNames.
+    // Raw JSON key of shard 0's first non-special input ("input_ids" or
+    // "inputs_embeds"). Drives the embedding-provider factory choice between
+    // TokenIdInputProvider and EmbeddingInputProvider.
     std::string first_shard_input_hint;
 };
 

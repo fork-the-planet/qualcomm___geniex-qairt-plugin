@@ -312,9 +312,6 @@ inline LLMSpec makeSpec() {
         // Supported context lengths (sorted ascending)
         .context_lengths = {4096},
 
-        // Graph naming pattern (for auto-discovery)
-        .graph_name_pattern = "ar{ar}_cl{cl}_{shard}_of_{total}",
-
         .eos_token_ids = {2},  // EOS token ID(s)
     };
 }

@@ -11,6 +11,7 @@
 #include <functional>
 #include <map>
 #include <regex>
+#include <set>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -117,10 +118,7 @@ LLMModel::LLMModel(LLMSpec spec) : spec_(std::move(spec)) {}
 
 bool LLMModel::onInitialized() {
     shard_count_ = spec_.shards.size();
-    num_cl_      = spec_.context_lengths.size();
-
     if (shard_count_ == 0) return false;
-    if (num_cl_ == 0) return false;
 
     kv_state_block_idx_ = std::numeric_limits<size_t>::max();
     for (size_t block_idx = 0; block_idx < spec_.state_blocks.size(); ++block_idx) {
@@ -135,11 +133,9 @@ bool LLMModel::onInitialized() {
         throw std::runtime_error("KV state block shard_layer_ranges size must match shard count");
     }
 
-    // QNN loads graphs in arbitrary order; reorder so graphIndex()
-    // assumptions hold. Graph names appear in two forms across QAIRT
-    // exports: `<phase>_arN_clM_S_of_T` (Genie / multi-AR) and bare
-    // `arN_clM_S_of_T` (AI Hub IoT). We accept both and infer phase from
-    // `ar` against spec_.seq_len_prefill.
+    // Discover CL / AR / phase-prefix from the loaded QNN graph names. The
+    // regex tolerates an optional alphabetic prefix (Genie's `prompt_` /
+    // `token_`, absent on AI Hub IoT exports).
     static const std::regex graph_name_re(
         R"((?:[A-Za-z]+_)?ar(\d+)_cl(\d+)_(\d+)_of_(\d+))");
 
@@ -147,7 +143,7 @@ bool LLMModel::onInitialized() {
         bool   ok    = false;
         size_t ar    = 0;
         size_t cl    = 0;
-        size_t shard = 0;  // 1-based as encoded
+        size_t shard = 0;
     };
     auto parseGraphName = [&](const std::string& name) -> ParsedGraph {
         std::smatch m;
@@ -159,15 +155,28 @@ bool LLMModel::onInitialized() {
         }
     };
 
-    // Every loaded graph must parse. DO NOT fallback to arbitrary order.
-    // They will cause errors that are difficult to debug later.
+    // Every loaded graph must parse. An unmatched name would otherwise sort
+    // into an arbitrary slot and trip Graph::write much later.
+    std::set<size_t> cl_set;
+    std::set<size_t> ar_set;
     for (const auto& g : graphs_) {
-        if (!parseGraphName(g.name()).ok) {
+        const auto p = parseGraphName(g.name());
+        if (!p.ok) {
             GENIEX_LOG_ERROR(
                 "LLMModel: graph name '{}' does not match '(<phase>_)?arN_clM_S_of_T'", g.name());
             return false;
         }
+        cl_set.insert(p.cl);
+        ar_set.insert(p.ar);
     }
+    if (cl_set.empty() || ar_set.empty()) {
+        GENIEX_LOG_ERROR("LLMModel: no graphs loaded");
+        return false;
+    }
+    spec_.context_lengths.assign(cl_set.begin(), cl_set.end());
+    spec_.seq_len_prefill = *ar_set.rbegin();
+    spec_.seq_len_decode  = *ar_set.begin();
+    num_cl_               = spec_.context_lengths.size();
 
     auto sortKey = [&](const std::string& name) -> std::tuple<int, int, int> {
         const auto p = parseGraphName(name);

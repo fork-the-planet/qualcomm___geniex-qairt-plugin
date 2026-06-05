@@ -22,16 +22,17 @@ context_binary.bin
 
 ### Graph naming pattern
 
-```cpp
-graph_name_pattern = "{phase}_ar{ar}_cl{cl}_{shard}_of_{total}"
-```
+`LLMModel::onInitialized` parses graph names with regex
+`(?:[A-Za-z]+_)?ar(\d+)_cl(\d+)_(\d+)_of_(\d+)`, accepting both prefixed
+(`prompt_`/`token_`) and unprefixed forms. Phase is inferred from `ar`
+(largest AR ⇒ prefill, smallest ⇒ decode). The CL set, AR set, and
+`seq_len_prefill / seq_len_decode` on `LLMSpec` are all populated from
+the loaded QNN graph names — nothing to set on the spec.
 
-- `{phase}` — `prompt` (prefill) or `token` (decode)
-- `{ar}` — autoregressive length (128 or 1)
-- `{cl}` — context length
-- `{shard}` / `{total}` — shard index and count
-
-All Genie-exported models use the `prompt_`/`token_` prefix pattern. Always set this even if metadata.yaml omits it.
+- `<phase>` — `prompt` (prefill) or `token` (decode), optional
+- `ar` — autoregressive length (e.g. 128 or 1)
+- `cl` — context length
+- `shard` / `total` — shard index and count
 
 ## Tensor I/O
 

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <regex>
 #include <set>
@@ -178,11 +179,6 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
     ParsedQAIRTMetadata out;
     out.model_id = j.value("model_id", std::string{});
 
-    // `genie.context_lengths` is intentionally not consulted: some AI Hub
-    // exports under-report it (advertise `[2048]` for a bin that actually
-    // ships cl ∈ {512, 1024, 2048}). The graph-name `cl<N>` suffix is the
-    // only ground truth; we fail hard below if it is absent.
-
     {
         const json* vp_obj = nullptr;
         if (j.contains("vision_preprocessing") && j.at("vision_preprocessing").is_object()) {
@@ -198,15 +194,8 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         }
     }
 
-    // model_files keys come in three flavours: LLM-style
-    // `[<phase>_]ar<N>_cl<M>_<i>_of_<T>`, VLM-style `partN_of_M.bin`, and
-    // the optional `vision_encoder.bin`. We collect ar/cl/totals from the
-    // LLM-style keys in this pass; the per-shard representative is chosen
-    // in a second pass below, once cl_set is final.
-    std::set<size_t> ar_set;
-    std::set<size_t> cl_set;
-    size_t           total_shards = 0;
-    std::string      vision_encoder_key;
+    size_t      total_shards = 0;
+    std::string vision_encoder_key;
 
     struct LlmShardCandidate {
         size_t      cl;
@@ -220,8 +209,6 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         const std::string& key = it.key();
         GraphNameParts     parts;
         if (parseGraphName(key, parts)) {
-            ar_set.insert(parts.ar);
-            cl_set.insert(parts.cl);
             total_shards = std::max(total_shards, parts.total);
             per_shard_candidates[parts.shard].push_back({parts.cl, parts.ar, &it.value()});
             continue;
@@ -239,36 +226,21 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         GENIEX_LOG_WARN("llm_spec_loader: ignoring unrecognised graph entry '{}'", key);
     }
 
-    // VLM-style bundles whose keys are bare `partN_of_M.bin` carry no
-    // `cl<N>` token, so cl_set will be empty and we currently have no
-    // in-loader CL source. The post-load pass in `LLMModel::onInitialized`
-    // (which sees the real QNN graph names baked into the bin) is the
-    // right long-term home for such bundles.
-    if (cl_set.empty()) {
-        throw std::runtime_error(
-            "llm_spec_loader: cannot determine context_lengths — no model_files "
-            "key matched the 'arN_clM_..._of_T' pattern");
-    }
-    out.context_lengths.assign(cl_set.begin(), cl_set.end());
-
-    // Per-shard representative: smallest CL, largest AR at that CL
-    // (= prefill graph, exposes both `attention_mask` and `past_key_*` with
-    // full shapes). VLM-style keys were already routed into
-    // `per_shard_entry` during the walk above.
-    {
-        const size_t smallest_cl = out.context_lengths.front();
-        for (auto& [shard, candidates] : per_shard_candidates) {
-            const json* best    = nullptr;
-            size_t      best_ar = 0;
-            for (const auto& c : candidates) {
-                if (c.cl != smallest_cl) continue;
-                if (best == nullptr || c.ar > best_ar) {
-                    best    = c.entry;
-                    best_ar = c.ar;
-                }
+    // Smallest CL + largest AR at that CL = prefill graph; its descriptor
+    // carries full attention_mask / past_key_* shapes for hyperparam reads.
+    for (auto& [shard, candidates] : per_shard_candidates) {
+        size_t smallest_cl = std::numeric_limits<size_t>::max();
+        for (const auto& c : candidates) smallest_cl = std::min(smallest_cl, c.cl);
+        const json* best    = nullptr;
+        size_t      best_ar = 0;
+        for (const auto& c : candidates) {
+            if (c.cl != smallest_cl) continue;
+            if (best == nullptr || c.ar > best_ar) {
+                best    = c.entry;
+                best_ar = c.ar;
             }
-            if (best) per_shard_entry[shard] = best;
         }
+        if (best) per_shard_entry[shard] = best;
     }
 
     if (total_shards == 0) {
@@ -276,23 +248,6 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
     }
     out.vision_encoder_graph = vision_encoder_key;
 
-    // ── AR / graph_name_pattern ─────────────────────────────────────────────
-    // ar_set is guaranteed non-empty here: cl_set was required non-empty
-    // above, and every key that contributes to cl_set also contributes to
-    // ar_set (both come from the same `parseGraphName` match).
-    out.seq_len_prefill = *std::max_element(ar_set.begin(), ar_set.end());
-    out.seq_len_decode  = *std::min_element(ar_set.begin(), ar_set.end());
-    // QAIRT bakes "prompt_"/"token_" phase prefixes into the compiled graph
-    // names whenever both prefill (large AR) and decode (AR=1) variants are
-    // present in a single .bin. The `metadata.json` keys are a bundle-tool
-    // convention (unprefixed for LLM, partN_of_M.bin for VLM) and don't
-    // necessarily reflect the in-bin graph names. The runtime parser
-    // (LLMModel::onInitialized) accepts both prefixed and unprefixed forms
-    // via a regex and infers phase from `ar`, so this string is informational
-    // only — kept for documentation / dump output.
-    out.graph_name_pattern = "[{phase}_]ar{ar}_cl{cl}_{shard}_of_{total}";
-
-    // ── Walk shards 1..total; pull wiring + hyperparameters ─────────────────
     out.shards.resize(total_shards);
     out.shard_layer_ranges.assign(total_shards, std::nullopt);
 
@@ -498,15 +453,13 @@ LLMSpec buildSpec(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc) 
     spec.shards       = meta.shards;
     spec.state_blocks = {makeKVOnlyStateBlock(meta.shard_layer_ranges)};
 
-    spec.seq_len_prefill    = meta.seq_len_prefill;
-    spec.seq_len_decode     = meta.seq_len_decode;
-    spec.hidden_size        = meta.hidden_size;
-    spec.num_kv_heads       = meta.num_kv_heads;
-    spec.head_dim           = meta.head_dim;
-    spec.vocab_size         = meta.vocab_size;
-    spec.context_lengths    = meta.context_lengths;
-    spec.graph_name_pattern = meta.graph_name_pattern;
-    spec.eos_token_ids      = gc.eos_token_ids;
+    spec.hidden_size   = meta.hidden_size;
+    spec.num_kv_heads  = meta.num_kv_heads;
+    spec.head_dim      = meta.head_dim;
+    spec.vocab_size    = meta.vocab_size;
+    spec.eos_token_ids = gc.eos_token_ids;
+    // seq_len_prefill / seq_len_decode / context_lengths are filled by
+    // LLMModel::onInitialized from the loaded QNN graph names.
     return spec;
 }
 
