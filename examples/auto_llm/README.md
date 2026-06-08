@@ -1,21 +1,62 @@
-# auto_llm
+ # auto_llm
 
-Demonstrates loading a basic LLM (anything representable by `LLMModel`)
-entirely at runtime, with no model name or model spec hardcoded into the
-caller's code. Everything the runtime needs comes from files in the bundle
-directory.
+A config-driven LLM loader that constructs and runs any standard
+transformer decoder model (Llama, Qwen, Phi, Falcon, etc.) without
+per-family code.
+
+## Motivation
+
+The QAIRT runtime already provides a general-purpose wrapper around the
+NPU execution engine (`Model` → `LLMModel`). Most transformer decoder
+architectures share the same runtime structure: chunked prefill, single-
+token decode, KV cache management, embedding lookup, and RoPE position
+encoding. The differences between model families reduce to numerical
+hyperparameters (head counts, hidden size, RoPE base/scaling) and chat
+template formatting — not runtime logic.
+
+This means we can build an **abstract layer** on top of `LLMModel` that
+constructs any supported decoder model purely from its bundle metadata,
+without hardcoding model-specific constants or linking against per-family
+headers. That abstraction is `auto_llm`.
+
+This also extends to customized architectures — for example, a Llama-based
+model with fewer layers, different head counts, or a non-standard context
+length. As long as the model follows standard transformer decoder execution
+(prefill/decode with embedding + RoPE), `auto_llm` will construct it
+correctly from whatever dimensions the bundle metadata declares. No source
+changes are needed to support a new architectural variant.
+
+## Why this works
+
+All transformer-based decoder LLMs in the codebase share:
+
+1. The same execution flow: prefill (128-token chunks) → decode (1 token).
+2. The same two CPU-side input providers: embedding lookup + RoPE.
+3. The same KV cache layout and multi-CL promotion logic.
+4. Chat templates expressible as HuggingFace Jinja templates.
+
+The only things that vary between families are configuration values
+(dimensions, layer counts, RoPE parameters, EOS tokens) — all of which
+are already present in the QAIRT export bundle's `metadata.json` and
+`genie_config.json`.
+
+`auto_llm` reads these files at runtime and calls the same `core/`
+loaders (`buildSpec`, `makeEmbeddingProvider`, `makeRoPEProvider`) that
+per-family headers call with hardcoded constants. The result is
+identical — a fully configured `LLMModel` — but driven entirely by
+config.
 
 ## What this example shows
 
-A "basic LLM" today still requires the caller to write a per-family file
-(`models/qwen3/qwen3.h`, `models/llama3/llama3.h`, …) that picks the right
-chat template formatter and the right input providers. This example shows
-that's no longer necessary for any LLM that:
+Previously, adding a new model family required writing a per-family file
+(`models/qwen3/qwen3.h`, `models/llama3/llama3.h`, …) that picks the
+right chat template formatter and the right input providers. This example
+shows that's no longer necessary for any LLM that:
 
 - Can be represented by `LLMModel` (no custom decode loop, prefill flow,
   or KV management).
-- Uses the same two CPU-side input providers — embedding + RoPE — that
-  every existing LLM family already uses.
+- Uses the standard embedding + RoPE input providers that every existing
+  LLM family already uses.
 
 The two blockers historically preventing a generic loader were:
 
@@ -25,10 +66,9 @@ The two blockers historically preventing a generic loader were:
    `tokenizer_config.json` at runtime, via
    `geniex-proc::Tokenizer::apply_chat_template`.
 2. **Input providers** had to be added by family-specific code. This
-   example assumes the embedding + RoPE pair, sourced from the bundle's
+   example reads the embedding + RoPE configuration from the bundle's
    metadata via `geniex::makeEmbeddingProvider` /
-   `geniex::makeRoPEProvider`. No other LLM provider exists in the
-   codebase today, so the assumption holds for every LLM family.
+   `geniex::makeRoPEProvider` and wires them automatically.
 
 The result is one entry point that runs any text-only QAIRT LLM bundle:
 
