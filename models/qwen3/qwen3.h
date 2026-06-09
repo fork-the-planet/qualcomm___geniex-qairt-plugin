@@ -30,8 +30,12 @@ inline LLMModel makeModel(const ModelConfig& model_cfg) {
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     try {
+        const auto bundle = bundleDirOf(model_cfg);
+        auto       gc     = parseGenieConfig(bundle);
+
         LLMPipeline pipe;
         if (!pipe.create(chatMLTemplate, makeModel(model_cfg), runtime_cfg, model_cfg)) return std::nullopt;
+        pipe.setBosTokenId(gc.bos_token_id);
         return pipe;
     } catch (const std::exception& e) {
         GENIEX_LOG_ERROR("qwen3::makePipeline failed: {}", e.what());

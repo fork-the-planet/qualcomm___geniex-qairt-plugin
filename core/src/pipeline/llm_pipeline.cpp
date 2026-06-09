@@ -42,6 +42,7 @@ struct LLMPipeline::Impl {
     std::unique_ptr<geniex::Tokenizer> tokenizer;
     ChatTemplateFunc                   chat_template = chatMLTemplate;
     bool                               ready         = false;
+    int32_t                            bos_token_id  = -1;
 };
 
 LLMPipeline::LLMPipeline() : impl_(std::make_unique<Impl>()) {}
@@ -85,6 +86,8 @@ void LLMPipeline::reset() {
     if (impl_->model) impl_->model->resetKVCache();
 }
 
+void LLMPipeline::setBosTokenId(int32_t token_id) { impl_->bos_token_id = token_id; }
+
 std::string LLMPipeline::applyChatTemplate(
     const std::vector<ChatMessage>& messages, const ChatTools& tools, bool enable_thinking) const {
     return impl_->chat_template(messages, tools, enable_thinking);
@@ -100,6 +103,13 @@ GenerateResult LLMPipeline::generate(
 
     auto                 encoded = impl_->tokenizer->encode(prompt_utf8);
     std::vector<int32_t> input_ids(encoded.begin(), encoded.end());
+
+    // Prepend BOS only on the first turn
+    if (impl_->bos_token_id >= 0 && impl_->model->nPast() == 0 &&
+        (input_ids.empty() || input_ids.front() != impl_->bos_token_id)) {
+        input_ids.insert(input_ids.begin(), impl_->bos_token_id);
+    }
+
     result.prompt_tokens = static_cast<int64_t>(input_ids.size());
 
     // Inject the tokenizer; LLMModel needs it for grammar/EOG resolution.

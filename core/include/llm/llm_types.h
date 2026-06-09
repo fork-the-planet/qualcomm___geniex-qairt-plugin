@@ -106,6 +106,10 @@ struct LLMSpec {
     std::string attention_mask_name = "attention_mask";
 
     std::vector<int32_t> eos_token_ids;
+
+    // BOS token id from genie_config.json's `dialog.context.bos-token`.
+    // -1 = not configured / no BOS for this model.
+    int32_t bos_token_id = -1;
 };
 
 }  // namespace geniex

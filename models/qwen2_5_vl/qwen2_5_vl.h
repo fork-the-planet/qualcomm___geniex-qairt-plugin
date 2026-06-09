@@ -97,6 +97,7 @@ inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
 
     const auto bundle = bundleDirOf(config.llm_config);
     auto       meta   = parseQAIRTMetadata(bundle);
+    auto       gc     = parseGenieConfig(bundle);
     if (!meta.vision_preprocessing) return std::nullopt;
 
     qwen2vl::Qwen2VLConfig proc_cfg;
@@ -110,6 +111,7 @@ inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
 
     VLMPipeline pipe;
     if (!pipe.create(std::move(model), std::move(processor), tok)) return std::nullopt;
+    pipe.setBosTokenId(gc.bos_token_id);
     return pipe;
 }
 
