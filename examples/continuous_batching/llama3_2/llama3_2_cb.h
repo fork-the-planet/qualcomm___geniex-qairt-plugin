@@ -20,7 +20,6 @@
 #include "llama3/llama3.h"
 #include "llm/llm_spec_loader.h"
 #include "llm/llm_utils.h"
-#include "pipeline/chat_template.h"
 
 namespace geniex {
 namespace llama3_2_cb {
@@ -79,8 +78,6 @@ class Llama32CBRoPEProvider : public cb::CBInputProvider {
     std::string     cos_name_;
     std::string     sin_name_;
 };
-
-inline ChatTemplateFunc chatTemplate = llama3ChatTemplate;
 
 // Per-size CB namespaces mirror the single-session namespaces in
 // models/llama3_2/llama3_2.h 1:1. Add a new size by adding an inner

@@ -6,23 +6,6 @@ include(CTest)
 # All tests run from the repo root so `./modelfiles/<name>/…` resolves.
 set(_TEST_WD "${CMAKE_SOURCE_DIR}")
 
-# ── chat_template_test ──────────────────────────────────────────────────────
-# Pure string-rendering unit test for the LLM chat-template formatters.
-# Does NOT require NPU hardware or a model bundle.
-add_executable(chat_template_test chat_template_test.cpp)
-target_link_libraries(chat_template_test PRIVATE geniex_core geniex-proc)
-set_target_properties(chat_template_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-)
-add_test(
-    NAME    "chat_template_unit"
-    COMMAND chat_template_test
-)
-set_tests_properties("chat_template_unit" PROPERTIES
-    TIMEOUT 30
-    LABELS  "unit;chat_template"
-)
-
 # ── llm_test ────────────────────────────────────────────────────────────────
 add_executable(llm_test llm.cpp)
 target_link_libraries(llm_test PRIVATE geniex_core geniex-proc)

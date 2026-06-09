@@ -11,10 +11,10 @@
 #include <type_traits>
 #include <vector>
 
-#include "geniex-proc/types.h"  // ChatMessage
+#include "geniex-proc/tokenizer.h"  // Tokenizer, ApplyChatTemplateOptions
+#include "geniex-proc/types.h"      // ChatMessage
 #include "geniex_export.h"
 #include "llm/llm_model.h"
-#include "pipeline/chat_template.h"
 #include "types.h"
 
 namespace geniex {
@@ -40,16 +40,13 @@ class GENIEX_API LLMPipeline {
     LLMPipeline(const LLMPipeline&)            = delete;
     LLMPipeline& operator=(const LLMPipeline&) = delete;
 
-    // Takes ownership of `model` and initializes it. Returns false on failure.
-    bool create(ChatTemplateFunc chat_template, LLMModel model, const QnnRuntimeConfig& runtime_cfg,
-        const ModelConfig& model_cfg);
+    // Takes ownership of `model`, initializes it,. Returns false on failure.
+    bool create(LLMModel model, const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg);
 
-    // Polymorphic overload: accepts any LLMModel subclass without slicing.
     template <typename ModelT,
         std::enable_if_t<std::is_base_of_v<LLMModel, ModelT> && !std::is_same_v<LLMModel, ModelT>, int> = 0>
-    bool create(ChatTemplateFunc chat_template, ModelT model, const QnnRuntimeConfig& runtime_cfg,
-        const ModelConfig& model_cfg) {
-        return createImpl(chat_template, std::make_unique<ModelT>(std::move(model)), runtime_cfg, model_cfg);
+    bool create(ModelT model, const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
+        return createImpl(std::make_unique<ModelT>(std::move(model)), runtime_cfg, model_cfg);
     }
 
     bool isReady() const;
@@ -61,14 +58,9 @@ class GENIEX_API LLMPipeline {
     // Pass -1 (default) to disable BOS prepending.
     void setBosTokenId(int32_t token_id);
 
-    // Stateless: renders `messages` through the configured chat-template
-    // formatter. See chat_template.h for the message-list contract; in
-    // particular, the caller (not this method) is responsible for
-    // first-turn default-system injection and for not re-emitting a
-    // system block on later turns — doing so would invalidate the cached
-    // KV prefix.
+    // Renders `messages` through the bundled Jinja chat template.
     std::string applyChatTemplate(
-        const std::vector<ChatMessage>& messages, const ChatTools& tools = {}, bool enable_thinking = true) const;
+        const std::vector<ChatMessage>& messages, const ApplyChatTemplateOptions& opts = {}) const;
 
     // on_token is called with each decoded text piece; return false to stop early.
     GenerateResult generate(const std::string& prompt_utf8, const GenerationConfig& gen_cfg = {},
@@ -79,8 +71,7 @@ class GENIEX_API LLMPipeline {
 
     size_t nPast() const;
 
-    bool createImpl(ChatTemplateFunc chat_template, std::unique_ptr<LLMModel> model,
-        const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg);
+    bool createImpl(std::unique_ptr<LLMModel> model, const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg);
 
    private:
     struct Impl;
