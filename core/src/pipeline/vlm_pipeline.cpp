@@ -57,8 +57,9 @@ void finalize_generate_result(GenerateResult& result, std::ostringstream& full_t
 struct VLMPipeline::Impl {
     std::unique_ptr<VLMModel>        model;
     std::unique_ptr<VisionProcessor> processor;
-    Tokenizer*                       tokenizer = nullptr;
-    bool                             ready     = false;
+    Tokenizer*                       tokenizer    = nullptr;
+    bool                             ready        = false;
+    int32_t                          bos_token_id = -1;
 };
 
 VLMPipeline::VLMPipeline() : impl_(std::make_unique<Impl>()) {}
@@ -82,6 +83,8 @@ bool VLMPipeline::isReady() const { return impl_ && impl_->ready; }
 void VLMPipeline::reset() {
     if (impl_->model) impl_->model->resetKVCache();
 }
+
+void VLMPipeline::setBosTokenId(int32_t token_id) { impl_->bos_token_id = token_id; }
 
 std::string VLMPipeline::applyChatTemplate(const std::vector<ChatMessage>& messages, bool add_generation_prompt) const {
     return impl_->processor->apply_chat_template(messages, add_generation_prompt);
@@ -110,6 +113,10 @@ GenerateResult VLMPipeline::generate(const std::string& formatted_prompt, const 
     } catch (...) {
         result.stop_reason = "error";
         return result;
+    }
+
+    if (impl_->bos_token_id >= 0 && (prompt_tokens.empty() || prompt_tokens.front() != impl_->bos_token_id)) {
+        prompt_tokens.insert(prompt_tokens.begin(), impl_->bos_token_id);
     }
 
     result.prompt_tokens = static_cast<int64_t>(prompt_tokens.size());

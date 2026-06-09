@@ -437,6 +437,7 @@ LLMSpec buildSpec(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc) 
     spec.head_dim      = meta.head_dim;
     spec.vocab_size    = meta.vocab_size;
     spec.eos_token_ids = gc.eos_token_ids;
+    spec.bos_token_id  = gc.bos_token_id;
     // seq_len_prefill / seq_len_decode / context_lengths are filled by
     // LLMModel::onInitialized from the loaded QNN graph names.
     return spec;

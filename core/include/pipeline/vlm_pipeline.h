@@ -50,6 +50,10 @@ class GENIEX_VLM_API VLMPipeline {
     // Clears KV state and resets to the start of a new conversation.
     void reset();
 
+    // Prepends `token_id` to prompt token IDs on each generate() call.
+    // Pass -1 (default) to disable BOS prepending.
+    void setBosTokenId(int32_t token_id);
+
     // Formats messages into a prompt string using the processor's chat template.
     // Pure text — no image I/O is performed. Each mm_content entry in each
     // message is replaced by the processor's image marker.

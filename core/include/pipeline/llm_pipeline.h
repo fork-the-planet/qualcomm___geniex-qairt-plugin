@@ -57,6 +57,10 @@ class GENIEX_API LLMPipeline {
     // Clears KV state and resets to the start of a new conversation.
     void reset();
 
+    // Prepends `token_id` to the encoded input_ids on each generate() call.
+    // Pass -1 (default) to disable BOS prepending.
+    void setBosTokenId(int32_t token_id);
+
     // Stateless: renders `messages` through the configured chat-template
     // formatter. See chat_template.h for the message-list contract; in
     // particular, the caller (not this method) is responsible for
