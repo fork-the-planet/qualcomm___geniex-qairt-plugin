@@ -9,6 +9,8 @@
 
 #include "geniex-proc/tokenizer.h"
 #include "llm/llm_model.h"
+#include "llm/llm_spec_loader.h"  // bundleDirOf
+#include "logging.h"
 #include "types.h"
 
 namespace geniex {
@@ -16,6 +18,14 @@ namespace geniex {
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
+
+// model_cfg.tokenizer_config_path when set, else tokenizer_config.json beside the bundle.
+std::string resolveTokenizerConfigPath(const ModelConfig& model_cfg) {
+    if (model_cfg.tokenizer_config_path && !model_cfg.tokenizer_config_path->empty()) {
+        return *model_cfg.tokenizer_config_path;
+    }
+    return (bundleDirOf(model_cfg) / "tokenizer_config.json").string();
+}
 
 // Populate `result` from in-flight generation state. Used on both the success
 // path and the context-length-exceeded catch path so partial output is surfaced
@@ -40,9 +50,8 @@ void finalize_generate_result(GenerateResult& result, std::ostringstream& full_t
 struct LLMPipeline::Impl {
     std::unique_ptr<LLMModel>          model;
     std::unique_ptr<geniex::Tokenizer> tokenizer;
-    ChatTemplateFunc                   chat_template = chatMLTemplate;
-    bool                               ready         = false;
-    int32_t                            bos_token_id  = -1;
+    bool                               ready        = false;
+    int32_t                            bos_token_id = -1;
 };
 
 LLMPipeline::LLMPipeline() : impl_(std::make_unique<Impl>()) {}
@@ -50,15 +59,13 @@ LLMPipeline::~LLMPipeline()                                 = default;
 LLMPipeline::LLMPipeline(LLMPipeline&&) noexcept            = default;
 LLMPipeline& LLMPipeline::operator=(LLMPipeline&&) noexcept = default;
 
-bool LLMPipeline::create(
-    ChatTemplateFunc chat_template, LLMModel model, const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
-    return createImpl(chat_template, std::make_unique<LLMModel>(std::move(model)), runtime_cfg, model_cfg);
+bool LLMPipeline::create(LLMModel model, const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
+    return createImpl(std::make_unique<LLMModel>(std::move(model)), runtime_cfg, model_cfg);
 }
 
-bool LLMPipeline::createImpl(ChatTemplateFunc chat_template, std::unique_ptr<LLMModel> model,
-    const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
-    impl_->chat_template = chat_template;
-    impl_->model         = std::move(model);
+bool LLMPipeline::createImpl(
+    std::unique_ptr<LLMModel> model, const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
+    impl_->model = std::move(model);
 
     try {
         if (!impl_->model->initialize(runtime_cfg, model_cfg)) {
@@ -70,8 +77,15 @@ bool LLMPipeline::createImpl(ChatTemplateFunc chat_template, std::unique_ptr<LLM
         return false;
     }
 
-    impl_->tokenizer = geniex::Tokenizer::from_file(model_cfg.tokenizer_path);
+    const std::string tcp = resolveTokenizerConfigPath(model_cfg);
+    impl_->tokenizer      = geniex::Tokenizer::from_file(model_cfg.tokenizer_path, tcp);
     if (!impl_->tokenizer) {
+        impl_->model.reset();
+        return false;
+    }
+    if (!impl_->tokenizer->has_chat_template()) {
+        GENIEX_LOG_ERROR("LLMPipeline: tokenizer_config.json at '{}' has no chat_template", tcp);
+        impl_->tokenizer.reset();
         impl_->model.reset();
         return false;
     }
@@ -89,8 +103,11 @@ void LLMPipeline::reset() {
 void LLMPipeline::setBosTokenId(int32_t token_id) { impl_->bos_token_id = token_id; }
 
 std::string LLMPipeline::applyChatTemplate(
-    const std::vector<ChatMessage>& messages, const ChatTools& tools, bool enable_thinking) const {
-    return impl_->chat_template(messages, tools, enable_thinking);
+    const std::vector<ChatMessage>& messages, const ApplyChatTemplateOptions& opts) const {
+    if (!impl_->tokenizer) {
+        throw std::runtime_error("LLMPipeline::applyChatTemplate: pipeline is not initialized");
+    }
+    return impl_->tokenizer->apply_chat_template(messages, opts);
 }
 
 GenerateResult LLMPipeline::generate(

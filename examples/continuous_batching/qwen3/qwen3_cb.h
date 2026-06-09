@@ -16,7 +16,6 @@
 #include "cb/cb.h"
 #include "llm/llm_spec_loader.h"
 #include "llm/llm_utils.h"
-#include "pipeline/chat_template.h"
 #include "qwen3/qwen3.h"
 
 namespace geniex {
@@ -78,8 +77,6 @@ class Qwen3CBRoPEProvider : public cb::CBInputProvider {
     std::string     cos_name_;
     std::string     sin_name_;
 };
-
-inline ChatTemplateFunc chatTemplate = chatMLTemplate;
 
 // Per-variant CB namespaces mirror the single-session namespaces in
 // models/qwen3/qwen3.h 1:1. To add a new variant, add an inner namespace

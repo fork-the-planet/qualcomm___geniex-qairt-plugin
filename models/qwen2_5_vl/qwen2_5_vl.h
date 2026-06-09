@@ -13,7 +13,6 @@
 #include "llm/llm_model.h"
 #include "llm/llm_spec_loader.h"
 #include "llm/llm_types.h"
-#include "pipeline/chat_template.h"
 #include "pipeline/vlm_pipeline.h"
 #include "types.h"
 #include "vlm/vision_encoder.h"

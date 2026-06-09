@@ -85,7 +85,6 @@ set(CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/llm/llm_spec_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/llm/llm_utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/llm/input_provider.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/core/src/pipeline/chat_template.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/pipeline/llm_pipeline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/models/llama3_2_ssd/ssd_model.cpp
 )

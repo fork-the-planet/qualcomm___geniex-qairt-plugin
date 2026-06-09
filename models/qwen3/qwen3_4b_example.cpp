@@ -1,15 +1,12 @@
 // Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <chrono>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <vector>
 
-#include "geniex-proc/tokenizer.h"
-#include "llm/llm_model.h"
 #include "qwen3/qwen3.h"
 #include "types.h"
 
@@ -24,14 +21,20 @@ static void enable_utf8_io() {
 }
 #endif
 
+namespace fs = std::filesystem;
+
 struct Args {
-    int32_t max_tokens      = 512;
-    bool    verbose         = false;
-    bool    enable_thinking = false;
+    fs::path    model_dir;
+    std::string prompt;  // non-empty → single-shot, non-interactive
+    int32_t     max_tokens      = 512;
+    bool        verbose         = false;
+    bool        enable_thinking = false;
 };
 
 static void printUsage(const char* prog) {
     std::cout << "Usage: " << prog << " [OPTIONS]\n"
+              << "  --model-dir <path> QAIRT bundle directory (default: ./modelfiles/qwen3_4b)\n"
+              << "  --prompt <text>    Run once on this prompt and exit (non-interactive)\n"
               << "  --max-tokens <n>   Max tokens to generate (default 512)\n"
               << "  --thinking         Enable thinking mode\n"
               << "  --verbose          Print performance metrics\n"
@@ -42,7 +45,11 @@ static bool parseArgs(int argc, char** argv, Args& args) {
     for (int i = 1; i < argc; ++i) {
         std::string a    = argv[i];
         auto        next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : std::string{}; };
-        if (a == "--max-tokens")
+        if (a == "--model-dir")
+            args.model_dir = next();
+        else if (a == "--prompt")
+            args.prompt = next();
+        else if (a == "--max-tokens")
             args.max_tokens = std::stoi(next());
         else if (a == "--thinking")
             args.enable_thinking = true;
@@ -56,11 +63,47 @@ static bool parseArgs(int argc, char** argv, Args& args) {
             return false;
         }
     }
+    if (args.model_dir.empty()) args.model_dir = fs::current_path() / "modelfiles" / "qwen3_4b";
     return true;
 }
 
-static std::string applyTemplate(const std::string& user_text) {
-    return "<|im_start|>user\n" + user_text + "<|im_end|>\n<|im_start|>assistant\n";
+// Runs one turn: render via the bundled Jinja template, stream the reply.
+static void runTurn(geniex::LLMPipeline& pipe, const std::string& user_text, const Args& args) {
+    geniex::ApplyChatTemplateOptions opts;
+    opts.enable_thinking = args.enable_thinking;
+
+    std::string prompt;
+    try {
+        prompt = pipe.applyChatTemplate({{geniex::Role::User, user_text}}, opts);
+    } catch (const std::exception& e) {
+        std::cerr << "Chat-template error: " << e.what() << "\n";
+        return;
+    }
+
+    geniex::GenerationConfig gen_cfg;
+    gen_cfg.max_tokens    = args.max_tokens;
+    gen_cfg.thinking_mode = args.enable_thinking;
+
+    std::cout << "\033[33m";
+    const auto result = pipe.generate(prompt, gen_cfg, [](const char* piece) {
+        std::cout << piece << std::flush;
+        return true;
+    });
+    std::cout << "\033[0m\n";
+
+    if (args.verbose) {
+        std::cout << "\033[1;36m=== Performance ===\033[0m\n"
+                  << "Generated tokens : " << result.generated_tokens << "\n"
+                  << "TTFT             : " << std::fixed << std::setprecision(1) << result.ttft_ms << " ms\n"
+                  << "Decode time      : " << std::fixed << std::setprecision(1) << result.decode_ms << " ms\n"
+                  << "Decode speed     : " << std::fixed << std::setprecision(2) << result.tokens_per_second
+                  << " tokens/s\n"
+                  << "Stop reason      : " << result.stop_reason << "\n"
+                  << "===================\n\n";
+    } else {
+        std::cout << "TTFT: " << std::fixed << std::setprecision(1) << result.ttft_ms << " ms"
+                  << "  |  " << std::setprecision(2) << result.tokens_per_second << " tokens/s\n\n";
+    }
 }
 
 int main(int argc, char** argv) {
@@ -71,105 +114,39 @@ int main(int argc, char** argv) {
     Args args;
     if (!parseArgs(argc, argv, args)) return 1;
 
-    const auto model_dir = std::filesystem::current_path() / "modelfiles" / "qwen3_4b";
-
-    // All QNN runtime paths are left as std::nullopt → auto-detected from
-    // htp-files/ installed alongside geniex_core.
     geniex::QnnRuntimeConfig runtime_cfg;
 
     geniex::ModelConfig model_cfg;
     model_cfg.model_paths = {
-        (model_dir / "qwen3_4b_w4a16_part_1_of_4.bin").string(),
-        (model_dir / "qwen3_4b_w4a16_part_2_of_4.bin").string(),
-        (model_dir / "qwen3_4b_w4a16_part_3_of_4.bin").string(),
-        (model_dir / "qwen3_4b_w4a16_part_4_of_4.bin").string(),
+        (args.model_dir / "qwen3_4b_w4a16_part_1_of_4.bin").string(),
+        (args.model_dir / "qwen3_4b_w4a16_part_2_of_4.bin").string(),
+        (args.model_dir / "qwen3_4b_w4a16_part_3_of_4.bin").string(),
+        (args.model_dir / "qwen3_4b_w4a16_part_4_of_4.bin").string(),
     };
-    model_cfg.tokenizer_path = (model_dir / "tokenizer.json").string();
-    // No embedding_path needed – embedding runs on-device in shard 0.
-    model_cfg.htp_config_path = (model_dir / "htp_backend_ext_config.json").string();
+    model_cfg.tokenizer_path  = (args.model_dir / "tokenizer.json").string();
+    model_cfg.htp_config_path = (args.model_dir / "htp_backend_ext_config.json").string();
+    // tokenizer_config_path left unset → discovered next to the bundle.
 
-    geniex::GenerationConfig gen_cfg;
-    gen_cfg.max_tokens    = args.max_tokens;
-    gen_cfg.thinking_mode = args.enable_thinking;
-
-    std::cout << "\033[1;32m"
-              << "   ______           _     _  __\n"
-              << "  / ____/__  ____  (_)__ | |/ /\n"
-              << " / / __/ _ \\/ __ \\/ / _ \\|   / \n"
-              << "/ /_/ /  __/ / / / /  __/   |  \n"
-              << "\\____/\\___/_/ /_/_/\\___/_/|_| \n"
-              << "\033[0m\n";
-
-    std::cout << "\033[1;36mLoading model...\033[0m\n";
-    geniex::LLMModel model = geniex::qwen3::makeModel(model_cfg);
-    try {
-        if (!model.initialize(runtime_cfg, model_cfg)) {
-            std::cerr << "Failed to initialize model.\n";
-            return 1;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Model initialization error: " << e.what() << "\n";
+    std::cout << "\033[1;36mLoading model from " << args.model_dir.string() << "...\033[0m\n";
+    auto pipe_opt = geniex::qwen3::makePipeline(runtime_cfg, model_cfg);
+    if (!pipe_opt) {
+        std::cerr << "Failed to create pipeline. See logs for details.\n";
         return 1;
     }
+    auto& pipe = *pipe_opt;
     std::cout << "\033[1;32mModel loaded.\033[0m\n\n";
 
-    auto tokenizer = geniex::Tokenizer::from_file(model_cfg.tokenizer_path);
+    if (!args.prompt.empty()) {
+        runTurn(pipe, args.prompt, args);
+        return 0;
+    }
 
     while (true) {
         std::cout << "Enter your prompt (type 'exit' to quit): ";
         std::string input;
         if (!std::getline(std::cin, input) || input == "exit" || input == "quit") break;
-
-        const std::string prompt_text = applyTemplate(input);
-
-        auto                       encoded = tokenizer->encode(prompt_text);
-        const std::vector<int32_t> prompt_tokens(encoded.begin(), encoded.end());
-
-        const auto                                     t_start = std::chrono::high_resolution_clock::now();
-        std::chrono::high_resolution_clock::time_point t_first_token;
-        bool                                           got_first_token = false;
-
-        std::cout << "\033[33m";
-        std::vector<int32_t> output_tokens;
-        try {
-            output_tokens = model.generate(prompt_tokens, gen_cfg, [&](int32_t tok) {
-                if (!got_first_token) {
-                    t_first_token   = std::chrono::high_resolution_clock::now();
-                    got_first_token = true;
-                }
-                std::cout << tokenizer->decode_token(tok) << std::flush;
-                return true;
-            });
-        } catch (const std::exception& e) {
-            std::cout << "\033[0m\n";
-            std::cerr << "Generation error: " << e.what() << "\n";
-            std::cerr.flush();
-            model.resetKVCache();
-            continue;
-        }
-        std::cout << "\033[0m\n";
-
-        const auto t_end = std::chrono::high_resolution_clock::now();
-
-        if (got_first_token) {
-            const double ttft_ms    = std::chrono::duration<double, std::milli>(t_first_token - t_start).count();
-            const double decode_ms  = std::chrono::duration<double, std::milli>(t_end - t_first_token).count();
-            const size_t decode_tok = output_tokens.size() > 1 ? output_tokens.size() - 1 : 0;
-            const double tps        = decode_ms > 0.0 ? decode_tok / (decode_ms / 1000.0) : 0.0;
-
-            if (args.verbose) {
-                std::cout << "\033[1;36m=== Performance ===\033[0m\n"
-                          << "Generated tokens : " << output_tokens.size() << "\n"
-                          << "TTFT             : " << std::fixed << std::setprecision(1) << ttft_ms << " ms\n"
-                          << "Decode time      : " << std::fixed << std::setprecision(1) << decode_ms << " ms\n"
-                          << "Decode speed     : " << std::fixed << std::setprecision(2) << tps << " tokens/s\n"
-                          << "===================\n\n";
-            } else {
-                std::cout << "TTFT: " << std::fixed << std::setprecision(1) << ttft_ms << " ms"
-                          << "  |  " << std::setprecision(2) << tps << " tokens/s\n\n";
-            }
-        }
+        runTurn(pipe, input, args);
+        pipe.reset();
     }
-
     return 0;
 }

@@ -8,7 +8,6 @@
 #include "llm/llm_spec_loader.h"
 #include "llm/llm_types.h"
 #include "logging.h"
-#include "pipeline/chat_template.h"
 #include "pipeline/llm_pipeline.h"
 #include "ssd_model.h"
 #include "ssd_types.h"
@@ -43,7 +42,7 @@ inline SSDModel makeModel(const ModelConfig& model_cfg) {
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     try {
         LLMPipeline pipe;
-        if (!pipe.create(llama3ChatTemplate, makeModel(model_cfg), runtime_cfg, model_cfg)) return std::nullopt;
+        if (!pipe.create(makeModel(model_cfg), runtime_cfg, model_cfg)) return std::nullopt;
         return pipe;
     } catch (const std::exception& e) {
         GENIEX_LOG_ERROR("llama3_2_3b_ssd::makePipeline failed: {}", e.what());

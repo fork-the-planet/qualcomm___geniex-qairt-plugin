@@ -8,7 +8,6 @@
 #include "llm/llm_spec_loader.h"
 #include "llm/llm_types.h"
 #include "logging.h"
-#include "pipeline/chat_template.h"
 #include "pipeline/llm_pipeline.h"
 
 namespace geniex {
@@ -34,7 +33,7 @@ inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
         auto       gc     = parseGenieConfig(bundle);
 
         LLMPipeline pipe;
-        if (!pipe.create(chatMLTemplate, makeModel(model_cfg), runtime_cfg, model_cfg)) return std::nullopt;
+        if (!pipe.create(makeModel(model_cfg), runtime_cfg, model_cfg)) return std::nullopt;
         pipe.setBosTokenId(gc.bos_token_id);
         return pipe;
     } catch (const std::exception& e) {

@@ -46,6 +46,8 @@ struct ModelConfig {
     std::string                tokenizer_path;   // tokenizer.json on disk (required)
     std::string                htp_config_path;  // HTP JSON config (empty = QNN defaults)
     std::optional<std::string> embedding_path;   // CPU-side embedding table; nullopt if embeddings live in the graph
+    // tokenizer_config.json (chat template). nullopt = discover next to model_paths[0].
+    std::optional<std::string> tokenizer_config_path;
     // Forecast-prefix KV-cache file used by SSD variants. nullopt for non-SSD models.
     std::optional<std::string>      forecast_prefix_path;
     qnn::tools::netrun::PerfProfile perf_profile = qnn::tools::netrun::PerfProfile::BURST;
