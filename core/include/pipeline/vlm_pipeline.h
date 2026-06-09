@@ -50,7 +50,7 @@ class GENIEX_VLM_API VLMPipeline {
     // Clears KV state and resets to the start of a new conversation.
     void reset();
 
-    // Prepends `token_id` to prompt token IDs on each generate() call.
+    // Prepends `token_id` once on the first turn.
     // Pass -1 (default) to disable BOS prepending.
     void setBosTokenId(int32_t token_id);
 

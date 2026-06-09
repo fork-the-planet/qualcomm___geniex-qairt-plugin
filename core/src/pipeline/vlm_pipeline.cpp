@@ -115,7 +115,9 @@ GenerateResult VLMPipeline::generate(const std::string& formatted_prompt, const 
         return result;
     }
 
-    if (impl_->bos_token_id >= 0 && (prompt_tokens.empty() || prompt_tokens.front() != impl_->bos_token_id)) {
+    // Prepend BOS only on the first turn
+    if (impl_->bos_token_id >= 0 && impl_->model->nPast() == 0 &&
+        (prompt_tokens.empty() || prompt_tokens.front() != impl_->bos_token_id)) {
         prompt_tokens.insert(prompt_tokens.begin(), impl_->bos_token_id);
     }
 

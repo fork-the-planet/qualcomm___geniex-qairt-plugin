@@ -104,7 +104,9 @@ GenerateResult LLMPipeline::generate(
     auto                 encoded = impl_->tokenizer->encode(prompt_utf8);
     std::vector<int32_t> input_ids(encoded.begin(), encoded.end());
 
-    if (impl_->bos_token_id >= 0 && (input_ids.empty() || input_ids.front() != impl_->bos_token_id)) {
+    // Prepend BOS only on the first turn
+    if (impl_->bos_token_id >= 0 && impl_->model->nPast() == 0 &&
+        (input_ids.empty() || input_ids.front() != impl_->bos_token_id)) {
         input_ids.insert(input_ids.begin(), impl_->bos_token_id);
     }
 
