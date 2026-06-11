@@ -4,6 +4,7 @@
 #include "pipeline/llm_pipeline.h"
 
 #include <chrono>
+#include <cstring>
 #include <optional>
 #include <sstream>
 
@@ -33,14 +34,23 @@ std::string resolveTokenizerConfigPath(const ModelConfig& model_cfg) {
 void finalize_generate_result(GenerateResult& result, std::ostringstream& full_text, int64_t generated_tokens,
     Clock::time_point t_start, Clock::time_point t_first_token, Clock::time_point t_end, bool got_first,
     const char* stop_reason) {
-    result.full_text        = full_text.str();
-    result.generated_tokens = generated_tokens;
+    result.full_text = full_text.str();
+
+    // Token-count convention: align with Genie's `num-generated-tokens`, which
+    // counts the terminating EOS sample as a generated token. geniex's decode
+    // loop stops before emitting EOS into the text, so `generated_tokens` here
+    // excludes it; add it back to the reported count (but not to full_text) when
+    // generation actually ended on EOS. Length/user stops have no EOS to count.
+    const bool ended_on_eos = stop_reason != nullptr && std::strcmp(stop_reason, "eos") == 0;
+    result.generated_tokens = generated_tokens + (ended_on_eos ? 1 : 0);
+
     if (got_first) {
         result.ttft_ms   = std::chrono::duration<double, std::milli>(t_first_token - t_start).count();
         result.decode_ms = std::chrono::duration<double, std::milli>(t_end - t_first_token).count();
 
-        const int64_t decode_tok = generated_tokens > 1 ? generated_tokens - 1 : 0;
-        result.tokens_per_second = result.decode_ms > 0.0 ? decode_tok / (result.decode_ms / 1000.0) : 0.0;
+        // Genie's token-generation-rate divides the EOS-inclusive token count by
+        // the decode window, so use the same numerator for a comparable tok/s.
+        result.tokens_per_second = result.decode_ms > 0.0 ? result.generated_tokens / (result.decode_ms / 1000.0) : 0.0;
     }
     result.stop_reason = stop_reason;
 }
