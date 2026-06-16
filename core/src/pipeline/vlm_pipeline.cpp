@@ -4,6 +4,7 @@
 #include "pipeline/vlm_pipeline.h"
 
 #include <chrono>
+#include <cstring>
 #include <sstream>
 #include <utility>
 
@@ -40,14 +41,20 @@ PixelData toPixelData(const BatchFeatures& bf) {
 void finalize_generate_result(GenerateResult& result, std::ostringstream& full_text, int64_t generated_tokens,
     Clock::time_point t_start, Clock::time_point t_first_token, Clock::time_point t_end, bool got_first,
     const char* stop_reason) {
-    result.full_text        = full_text.str();
-    result.generated_tokens = generated_tokens;
+    result.full_text = full_text.str();
+
+    // Align with Genie's `num-generated-tokens`, which counts the terminating EOS
+    // sample. The decode loop stops before emitting EOS into the text, so add it
+    // back to the reported count (not to full_text) when generation ended on EOS.
+    const bool ended_on_eos = stop_reason != nullptr && std::strcmp(stop_reason, "eos") == 0;
+    result.generated_tokens = generated_tokens + (ended_on_eos ? 1 : 0);
+
     if (got_first) {
         result.ttft_ms   = std::chrono::duration<double, std::milli>(t_first_token - t_start).count();
         result.decode_ms = std::chrono::duration<double, std::milli>(t_end - t_first_token).count();
 
-        const int64_t decode_tok = generated_tokens > 1 ? generated_tokens - 1 : 0;
-        result.tokens_per_second = result.decode_ms > 0.0 ? decode_tok / (result.decode_ms / 1000.0) : 0.0;
+        // Genie divides the EOS-inclusive token count by the decode window.
+        result.tokens_per_second = result.decode_ms > 0.0 ? result.generated_tokens / (result.decode_ms / 1000.0) : 0.0;
     }
     result.stop_reason = stop_reason;
 }
