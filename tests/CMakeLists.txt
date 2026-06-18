@@ -36,6 +36,11 @@ function(geniex_add_unit_test NAME)
         ${CMAKE_SOURCE_DIR}/third-party/geniex-proc/third-party/xtl/include
     )
     target_compile_definitions(${NAME} PRIVATE ${GENIEX_COMPILE_DEFS})
+    # We compile geniex_core TUs directly into the test exe, so GENIEX_API must
+    # resolve to dllexport (definition), not dllimport (consume-from-DLL).
+    if(WIN32)
+        target_compile_definitions(${NAME} PRIVATE geniex_core_EXPORTS)
+    endif()
     set_target_properties(${NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     )
@@ -65,6 +70,22 @@ geniex_add_unit_test(graph_test
         ${CMAKE_SOURCE_DIR}/core/src/graph.cpp
         ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
         ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/RpcMem.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/dlwrap.cpp
+)
+
+# ── LLM CPU-side input providers (real Graph + link-time QnnApi stub) ─────────
+geniex_add_unit_test(input_provider_test
+    SOURCES
+        core/llm/input_provider_test.cpp
+        testing/stub_qnnapi.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/graph.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/input_provider.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_utils.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/RpcMem.cpp
