@@ -6,16 +6,17 @@
 // Graph against a real ClientBuffer-backed IOTensor and a link-time QnnApi
 // stub; no QNN runtime.
 
+#include "graph.h"
+
+#include <gtest/gtest.h>
+
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "IOTensor.hpp"
-#include "graph.h"
 #include "testing/graph_info_builder.hpp"
 #include "utils.h"
 
@@ -32,8 +33,7 @@ struct GraphFixture {
     IOTensor      io{BufferAlloc::DEFAULT};
     geniex::Graph graph;
 
-    GraphFixture(GraphInfoBuilder& b)
-        : graph(&b.graphInfo(), &api, &io) {
+    GraphFixture(GraphInfoBuilder& b) : graph(&b.graphInfo(), &api, &io) {
         EXPECT_TRUE(graph.setup(/*context=*/nullptr));
     }
 };
@@ -41,10 +41,11 @@ struct GraphFixture {
 }  // namespace
 
 TEST(GraphSetup, BuildsSpecsFromGraphInfo) {
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2, 3}}},
-                       {{"out", QNN_DATATYPE_UFIXED_POINT_16, {4}, /*scale=*/0.5f, /*offset=*/-2}});
-    GraphFixture f(b);
-    geniex::Graph& g = f.graph;
+    GraphInfoBuilder b("g",
+        {{"in", QNN_DATATYPE_FLOAT_32, {2, 3}}},
+        {{"out", QNN_DATATYPE_UFIXED_POINT_16, {4}, /*scale=*/0.5f, /*offset=*/-2}});
+    GraphFixture     f(b);
+    geniex::Graph&   g = f.graph;
 
     EXPECT_EQ(g.name(), "g");
     ASSERT_TRUE(g.hasInput("in"));
@@ -62,9 +63,8 @@ TEST(GraphSetup, BuildsSpecsFromGraphInfo) {
 }
 
 TEST(GraphIO, Float32RoundTrip) {
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {4}}},
-                       {{"out", QNN_DATATYPE_FLOAT_32, {4}}});
-    GraphFixture f(b);
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {4}}}, {{"out", QNN_DATATYPE_FLOAT_32, {4}}});
+    GraphFixture     f(b);
 
     const std::vector<float> src = {-1.5f, 0.0f, 3.25f, 100.0f};
     f.graph.write("in", src.data(), src.size());
@@ -78,9 +78,8 @@ TEST(GraphIO, Float32RoundTrip) {
 
 // Lossy; check within fp16 precision.
 TEST(GraphIO, Float16RoundTrip) {
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_16, {5}}},
-                       {{"out", QNN_DATATYPE_FLOAT_16, {5}}});
-    GraphFixture f(b);
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_16, {5}}}, {{"out", QNN_DATATYPE_FLOAT_16, {5}}});
+    GraphFixture     f(b);
 
     const std::vector<float> src = {0.5f, -2.0f, 1.0f, 0.125f, -8.0f};
     f.graph.write("in", src.data(), src.size());
@@ -96,9 +95,10 @@ TEST(GraphIO, Float16RoundTrip) {
 TEST(GraphIO, UFixed8RoundTrip) {
     const float      scale  = 0.1f;
     const int32_t    offset = -10;
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_UFIXED_POINT_8, {4}, scale, offset}},
-                       {{"out", QNN_DATATYPE_UFIXED_POINT_8, {4}, scale, offset}});
-    GraphFixture f(b);
+    GraphInfoBuilder b("g",
+        {{"in", QNN_DATATYPE_UFIXED_POINT_8, {4}, scale, offset}},
+        {{"out", QNN_DATATYPE_UFIXED_POINT_8, {4}, scale, offset}});
+    GraphFixture     f(b);
 
     const std::vector<float> src = {0.0f, 1.0f, 2.5f, 5.0f};
     f.graph.write("in", src.data(), src.size());
@@ -114,9 +114,10 @@ TEST(GraphIO, UFixed8RoundTrip) {
 TEST(GraphIO, UFixed16RoundTrip) {
     const float      scale  = 0.001f;
     const int32_t    offset = 0;
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_UFIXED_POINT_16, {3}, scale, offset}},
-                       {{"out", QNN_DATATYPE_UFIXED_POINT_16, {3}, scale, offset}});
-    GraphFixture f(b);
+    GraphInfoBuilder b("g",
+        {{"in", QNN_DATATYPE_UFIXED_POINT_16, {3}, scale, offset}},
+        {{"out", QNN_DATATYPE_UFIXED_POINT_16, {3}, scale, offset}});
+    GraphFixture     f(b);
 
     const std::vector<float> src = {0.5f, 1.25f, 10.0f};
     f.graph.write("in", src.data(), src.size());
@@ -125,14 +126,12 @@ TEST(GraphIO, UFixed16RoundTrip) {
 
     std::vector<float> got(3);
     f.graph.read("out", got.data(), got.size());
-    for (size_t i = 0; i < src.size(); ++i)
-        EXPECT_NEAR(got[i], src[i], scale) << "index " << i;
+    for (size_t i = 0; i < src.size(); ++i) EXPECT_NEAR(got[i], src[i], scale) << "index " << i;
 }
 
 TEST(GraphIO, Int32RoundTrip) {
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_INT_32, {4}}},
-                       {{"out", QNN_DATATYPE_INT_32, {4}}});
-    GraphFixture f(b);
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_INT_32, {4}}}, {{"out", QNN_DATATYPE_INT_32, {4}}});
+    GraphFixture     f(b);
 
     const std::vector<int32_t> src = {-5, 0, 42, 1000};
     f.graph.write("in", src.data(), src.size());
@@ -145,18 +144,16 @@ TEST(GraphIO, Int32RoundTrip) {
 }
 
 TEST(GraphIO, WriteOverflowThrows) {
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}},
-                       {{"out", QNN_DATATYPE_FLOAT_32, {2}}});
-    GraphFixture f(b);
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}}, {{"out", QNN_DATATYPE_FLOAT_32, {2}}});
+    GraphFixture     f(b);
 
     const std::vector<float> too_many = {1.f, 2.f, 3.f, 4.f};
     EXPECT_THROW(f.graph.write("in", too_many.data(), too_many.size()), std::runtime_error);
 }
 
 TEST(GraphExecute, StubReportsSuccess) {
-    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}},
-                       {{"out", QNN_DATATYPE_FLOAT_32, {2}}});
-    GraphFixture f(b);
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}}, {{"out", QNN_DATATYPE_FLOAT_32, {2}}});
+    GraphFixture     f(b);
 
     geniex::TimeLog log;
     EXPECT_TRUE(f.graph.execute(log));

@@ -4,26 +4,26 @@
 // Unit tests for core/src/utils.cpp — fp16 conversion and TimeLog helpers.
 // Pure CPU; no QNN runtime or NPU involved.
 
+#include "utils.h"
+
+#include <gtest/gtest.h>
+
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include "utils.h"
-
 namespace {
 
 // IEEE-754 half bit patterns for a few exact, representable values.
-constexpr uint16_t kHalfZero = 0x0000;
+constexpr uint16_t kHalfZero    = 0x0000;
 constexpr uint16_t kHalfNegZero = 0x8000;
-constexpr uint16_t kHalfOne = 0x3C00;
-constexpr uint16_t kHalfTwo = 0x4000;
-constexpr uint16_t kHalfHalf = 0x3800;  // 0.5
-constexpr uint16_t kHalfNegOne = 0xBC00;
-constexpr uint16_t kHalfPosInf = 0x7C00;
-constexpr uint16_t kHalfNegInf = 0xFC00;
+constexpr uint16_t kHalfOne     = 0x3C00;
+constexpr uint16_t kHalfTwo     = 0x4000;
+constexpr uint16_t kHalfHalf    = 0x3800;  // 0.5
+constexpr uint16_t kHalfNegOne  = 0xBC00;
+constexpr uint16_t kHalfPosInf  = 0x7C00;
+constexpr uint16_t kHalfNegInf  = 0xFC00;
 
 uint16_t toHalf(float f) {
     uint16_t h = 0;
@@ -135,8 +135,8 @@ TEST(MergeTimeLogs, AccumulatesDurationAndCount) {
     dst["graph0"] = {100.0, 2};
 
     geniex::TimeLog src;
-    src["graph0"] = {50.0, 1};   // existing key → accumulate
-    src["graph1"] = {30.0, 4};   // new key → inserted
+    src["graph0"] = {50.0, 1};  // existing key → accumulate
+    src["graph1"] = {30.0, 4};  // new key → inserted
 
     geniex::mergeTimeLogs(dst, src);
 

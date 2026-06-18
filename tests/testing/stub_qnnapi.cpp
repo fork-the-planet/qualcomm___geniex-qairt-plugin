@@ -17,17 +17,15 @@ BackendExtensions::~BackendExtensions() = default;
 
 QnnApi::~QnnApi() = default;
 
-bool QnnApi::graphExecute(qnn_wrapper_api::GraphInfo_t* graph_info,
-                          const Qnn_Tensor_t* input,
-                          Qnn_Tensor_t* output,
-                          std::map<std::string, std::pair<double, uint16_t>>& /*timeLogs*/) {
+bool QnnApi::graphExecute(qnn_wrapper_api::GraphInfo_t* graph_info, const Qnn_Tensor_t* input, Qnn_Tensor_t* output,
+    std::map<std::string, std::pair<double, uint16_t>>& /*timeLogs*/) {
     // Identity: copy each input client buffer into the output at the same index
     // (byte-for-byte), so write→execute→read round-trips are deterministic.
     const uint32_t n = std::min(graph_info->numInputTensors, graph_info->numOutputTensors);
     for (uint32_t i = 0; i < n; ++i) {
-        const Qnn_ClientBuffer_t& src = QNN_TENSOR_GET_CLIENT_BUF(input[i]);
-        const Qnn_ClientBuffer_t& dst = QNN_TENSOR_GET_CLIENT_BUF(output[i]);
-        const uint32_t bytes = std::min(src.dataSize, dst.dataSize);
+        const Qnn_ClientBuffer_t& src   = QNN_TENSOR_GET_CLIENT_BUF(input[i]);
+        const Qnn_ClientBuffer_t& dst   = QNN_TENSOR_GET_CLIENT_BUF(output[i]);
+        const uint32_t            bytes = std::min(src.dataSize, dst.dataSize);
         if (src.data && dst.data) std::memcpy(dst.data, src.data, bytes);
     }
     return true;

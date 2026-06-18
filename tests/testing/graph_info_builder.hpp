@@ -28,18 +28,22 @@ inline size_t dtypeByteSize(Qnn_DataType_t dtype) {
         case QNN_DATATYPE_UINT_8:
         case QNN_DATATYPE_SFIXED_POINT_8:
         case QNN_DATATYPE_UFIXED_POINT_8:
-        case QNN_DATATYPE_BOOL_8: return 1;
+        case QNN_DATATYPE_BOOL_8:
+            return 1;
         case QNN_DATATYPE_INT_16:
         case QNN_DATATYPE_UINT_16:
         case QNN_DATATYPE_FLOAT_16:
         case QNN_DATATYPE_SFIXED_POINT_16:
-        case QNN_DATATYPE_UFIXED_POINT_16: return 2;
+        case QNN_DATATYPE_UFIXED_POINT_16:
+            return 2;
         case QNN_DATATYPE_INT_32:
         case QNN_DATATYPE_UINT_32:
         case QNN_DATATYPE_FLOAT_32:
         case QNN_DATATYPE_SFIXED_POINT_32:
-        case QNN_DATATYPE_UFIXED_POINT_32: return 4;
-        default: return 8;
+        case QNN_DATATYPE_UFIXED_POINT_32:
+            return 4;
+        default:
+            return 8;
     }
 }
 
@@ -54,8 +58,8 @@ struct TensorDesc {
 // Owns the GraphInfo_t and every buffer it points at.
 class GraphInfoBuilder {
    public:
-    GraphInfoBuilder(std::string graph_name, const std::vector<TensorDesc>& inputs,
-                     const std::vector<TensorDesc>& outputs)
+    GraphInfoBuilder(
+        std::string graph_name, const std::vector<TensorDesc>& inputs, const std::vector<TensorDesc>& outputs)
         : name_(std::move(graph_name)) {
         buildTensors(inputs, input_tensors_, input_dims_);
         buildTensors(outputs, output_tensors_, output_dims_);
@@ -80,7 +84,7 @@ class GraphInfoBuilder {
 
    private:
     void buildTensors(const std::vector<TensorDesc>& descs, std::vector<Qnn_Tensor_t>& out,
-                      std::deque<std::vector<uint32_t>>& dim_store) {
+        std::deque<std::vector<uint32_t>>& dim_store) {
         out.resize(descs.size());
 
         for (size_t i = 0; i < descs.size(); ++i) {
@@ -109,9 +113,9 @@ class GraphInfoBuilder {
             Qnn_ClientBuffer_t cb{buf, static_cast<uint32_t>(bytes)};
             QNN_TENSOR_SET_CLIENT_BUF(t, cb);
 
-            Qnn_QuantizeParams_t qp = QNN_QUANTIZE_PARAMS_INIT;
-            qp.encodingDefinition   = QNN_DEFINITION_DEFINED;
-            qp.quantizationEncoding = QNN_QUANTIZATION_ENCODING_SCALE_OFFSET;
+            Qnn_QuantizeParams_t qp       = QNN_QUANTIZE_PARAMS_INIT;
+            qp.encodingDefinition         = QNN_DEFINITION_DEFINED;
+            qp.quantizationEncoding       = QNN_QUANTIZATION_ENCODING_SCALE_OFFSET;
             qp.scaleOffsetEncoding.scale  = d.scale;
             qp.scaleOffsetEncoding.offset = d.offset;
             QNN_TENSOR_SET_QUANT_PARAMS(t, qp);
@@ -120,14 +124,14 @@ class GraphInfoBuilder {
         }
     }
 
-    std::string                        name_;
-    std::deque<std::string>            names_;  // deque: stable c_str() across pushes
-    std::deque<std::vector<uint32_t>>  input_dims_;
-    std::deque<std::vector<uint32_t>>  output_dims_;
-    std::vector<Qnn_Tensor_t>          input_tensors_;
-    std::vector<Qnn_Tensor_t>          output_tensors_;
-    std::vector<void*>                 client_bufs_;
-    qnn_wrapper_api::GraphInfo_t       info_{};
+    std::string                       name_;
+    std::deque<std::string>           names_;  // deque: stable c_str() across pushes
+    std::deque<std::vector<uint32_t>> input_dims_;
+    std::deque<std::vector<uint32_t>> output_dims_;
+    std::vector<Qnn_Tensor_t>         input_tensors_;
+    std::vector<Qnn_Tensor_t>         output_tensors_;
+    std::vector<void*>                client_bufs_;
+    qnn_wrapper_api::GraphInfo_t      info_{};
 };
 
 }  // namespace geniex::testing
