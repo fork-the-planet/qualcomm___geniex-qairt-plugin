@@ -91,3 +91,26 @@ geniex_add_unit_test(input_provider_test
         ${CMAKE_SOURCE_DIR}/qnn-api/src/RpcMem.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/dlwrap.cpp
 )
+
+# ── LLM prefill/decode orchestration (real LLMModel + link-time QnnApi stub) ──
+geniex_add_unit_test(llm_model_test
+    SOURCES
+        core/llm/llm_model_test.cpp
+        testing/stub_qnnapi.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/graph.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/runtime.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/threadpool.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/input_provider.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/RpcMem.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/dlwrap.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/qnn-utils.cpp
+    LIBS
+        geniex-proc
+)
