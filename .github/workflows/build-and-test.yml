@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 
-name: Build Check
+name: Build and Test
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: build-check-${{ github.ref }}
+  group: build-and-test-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   windows-arm64:
-    name: Windows ARM64 build check
+    name: Windows ARM64 build and test
     runs-on: windows-arm64
     timeout-minutes: 60
 
@@ -59,12 +59,29 @@ jobs:
           cmake -B build -A ARM64 `
             -DCMAKE_BUILD_TYPE=Release `
             -DGENIEX_BUILD_EXAMPLES=ON `
-            -DGENIEX_BUILD_VLM=ON
+            -DGENIEX_BUILD_VLM=ON `
+            -DGENIEX_BUILD_TESTS=ON
 
       - name: Build
         shell: pwsh
         run: |
           cmake --build build --config Release -j
+
+      - name: Test
+        # CPU-only unit tests (label "unit"); no NPU required.
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release -L unit --output-on-failure `
+            --output-junit build/test-results/unit.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-windows-arm64
+          path: build/test-results/unit.xml
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload build logs on failure
         if: failure()
