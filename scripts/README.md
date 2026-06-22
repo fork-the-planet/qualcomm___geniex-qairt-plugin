@@ -5,6 +5,14 @@ LLVM toolchain bundled with Visual Studio (clang-cl + llvm-cov). MSVC `cl.exe`
 has no source-coverage support and OpenCppCoverage does not run on ARM64, so the
 coverage build switches the compiler to clang-cl via the CMake option below.
 
+## Requirements
+
+The **"C++ Clang tools for Windows"** Visual Studio component (provides
+`clang-cl`, `llvm-cov`, `llvm-profdata` under `VC\Tools\Llvm\ARM64\bin`). It is
+a checkbox in the VS Installer -- no separate download or PATH setup. Your
+normal MSVC build of geniex-qairt is unaffected: coverage uses a separate
+`build-coverage/` dir and only switches the compiler there.
+
 ## How it works
 
 The unit-test targets compile the `core/src` translation units directly into

@@ -19,17 +19,16 @@ FetchContent_MakeAvailable(googletest)
 include(GoogleTest)  # provides gtest_discover_tests()
 
 # ── Coverage instrumentation (opt-in: -DGENIEX_COVERAGE=ON) ──────────────────
-# Source-based llvm-cov coverage, applied only to unit-test targets so the
-# instrumented region is exactly the core/src TUs compiled into each exe.
-# Requires a Clang/clang-cl toolchain; cl.exe rejects these flags.
+# Applied only to the test targets, which compile core/src directly, so the
+# instrumented region is exactly the code under test. clang-cl only.
 if(GENIEX_COVERAGE)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         message(FATAL_ERROR
             "GENIEX_COVERAGE requires a Clang toolchain. Re-run cmake with "
             "-T ClangCL (Visual Studio generator) or a clang/clang-cl compiler.")
     endif()
-    # clang-cl needs the GCC-style flags forwarded via /clang:; plain clang
-    # accepts them directly. The linker also needs them to emit the runtime.
+    # clang-cl needs the flags forwarded via /clang:; plain clang takes them
+    # directly. The linker needs them too, to emit the profile runtime.
     if(MSVC)  # clang-cl presents an MSVC-style driver
         set(GENIEX_COVERAGE_COMPILE_FLAGS
             /clang:-fprofile-instr-generate /clang:-fcoverage-mapping)

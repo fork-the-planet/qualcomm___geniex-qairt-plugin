@@ -40,9 +40,8 @@ if (-not $llvmBin) {
 $llvmCov     = Join-Path $llvmBin.FullName "llvm-cov.exe"
 $llvmProfdata = Join-Path $llvmBin.FullName "llvm-profdata.exe"
 
-# ── Coverage surface: keep in sync with scripts/coverage_common.py ───────────
+# ── Coverage surface: mirror of scripts/coverage_common.py (keep in sync) ────
 $Targets       = @("utils_test", "graph_test", "input_provider_test")
-$IncludeRegex  = "[\\/]core[\\/](src|include)[\\/]"
 $IgnoreRegex   = @(
     "[\\/]tests[\\/]",
     "[\\/]third-party[\\/]",
@@ -74,7 +73,7 @@ foreach ($t in $Targets) {
     $exe = Join-Path $BuildDir "bin\Debug\$t.exe"
     if (-not (Test-Path $exe)) { throw "Missing test exe: $exe" }
     $exes += $exe
-    # %p expands to the PID so parallel/multiple runs never clobber each other.
+    # %p -> PID, so repeated runs never clobber each other's profraw.
     $env:LLVM_PROFILE_FILE = (Join-Path $profDir "$t-%p.profraw")
     Write-Host "==> Running $t" -ForegroundColor Cyan
     & $exe
@@ -104,8 +103,7 @@ Write-Host "==> Rendering HTML report" -ForegroundColor Cyan
     -format=html -output-dir=$htmlDir -show-branches=count -show-line-counts-or-regions
 if ($LASTEXITCODE -ne 0) { throw "llvm-cov show failed" }
 
-# Machine-readable export for the diff-coverage gate (scripts/diff_coverage.py).
-# -skip-functions keeps the JSON small; the gate only needs file segments.
+# JSON for the diff-coverage gate; -skip-functions keeps it small.
 $exportJson = Join-Path $profDir "export.json"
 $json = & $llvmCov export @objectArgs @commonArgs -skip-functions | Out-String
 [System.IO.File]::WriteAllText($exportJson, $json)

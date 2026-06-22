@@ -1,22 +1,12 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
-"""Enforce a coverage threshold on the lines a PR adds or modifies.
+"""Gate patch coverage: fail if the lines a PR adds/modifies under core/ fall
+below a threshold. Full-file coverage is the wrong PR signal -- it punishes
+small edits to legacy files and hides untested new code in well-covered ones.
 
-Full-file coverage is the wrong gate for a PR: a small change to a poorly
-covered legacy file would fail, and a large change to a well-covered file could
-hide untested new code. Instead we measure only the *added/modified* executable
-lines in the diff -- "patch coverage" -- which is the line-level analogue of the
-Go side's coverage skill.
-
-Pipeline:
-  1. Parse `git diff <base>...HEAD` to collect added/modified line numbers per
-     first-party source file.
-  2. Parse `llvm-cov export` JSON to learn which of those lines are executable
-     and whether each was hit.
-  3. Fail if (covered changed lines) / (executable changed lines) < threshold.
-
-stdlib only; no third-party packages on the runner.
+Intersects `git diff` new-side line ranges with `llvm-cov export` per-line
+data. stdlib only.
 """
 from __future__ import annotations
 
@@ -33,8 +23,7 @@ from coverage_common import is_covered_source  # noqa: E402
 
 
 def changed_lines(base_ref: str) -> dict[str, set[int]]:
-    """Map each changed first-party file -> set of added/modified line numbers
-    (line numbers in the NEW file), parsed from unified diff hunk headers."""
+    """Map each changed first-party file -> new-file line numbers it adds."""
     diff = subprocess.run(
         ["git", "diff", "--unified=0", "--no-color", f"{base_ref}...HEAD"],
         check=True, capture_output=True, text=True,
@@ -43,13 +32,12 @@ def changed_lines(base_ref: str) -> dict[str, set[int]]:
     result: dict[str, set[int]] = defaultdict(set)
     current: str | None = None
     new_lineno = 0
-    # +++ b/path  marks the new file; @@ -a,b +c,d @@ gives the new-side range.
     hunk_re = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
     for line in diff.splitlines():
         if line.startswith("+++ "):
             path = line[4:].strip()
-            path = path[2:] if path.startswith("b/") else path  # strip b/
+            path = path[2:] if path.startswith("b/") else path
             current = path if (path != "/dev/null" and is_covered_source(path)) else None
         elif line.startswith("@@"):
             m = hunk_re.match(line)
@@ -58,9 +46,7 @@ def changed_lines(base_ref: str) -> dict[str, set[int]]:
             if line.startswith("+"):
                 result[current].add(new_lineno)
                 new_lineno += 1
-            elif line.startswith("-"):
-                pass  # deletions don't advance the new-file counter
-            else:
+            elif not line.startswith("-"):  # deletions don't advance new-file count
                 new_lineno += 1
     return result
 
@@ -68,9 +54,9 @@ def changed_lines(base_ref: str) -> dict[str, set[int]]:
 def covered_lines(export_json: dict) -> dict[str, dict[int, bool]]:
     """Map each first-party file -> {line: was_executed} for executable lines.
 
-    Walks llvm-cov segments: each segment [line, col, count, hasCount, ...]
-    opens a region with an execution count; a line is executable if any region
-    covers it, and executed if any covering region's count > 0."""
+    llvm-cov segment = [line, col, count, hasCount, isRegionEntry, isGapRegion].
+    A line is executable if a counted, non-gap region starts on it; executed if
+    any such region has count > 0."""
     files: dict[str, dict[int, bool]] = {}
     for data in export_json.get("data", []):
         for f in data.get("files", []):
@@ -82,10 +68,7 @@ def covered_lines(export_json: dict) -> dict[str, dict[int, bool]]:
                 line, _col, count, has_count, _entry, is_gap = seg[:6]
                 if not has_count or is_gap:
                     continue
-                # A region starting on this line makes it executable; OR the
-                # hit state so any covering region with count>0 marks it run.
                 line_hit[line] = line_hit.get(line, False) or count > 0
-            # Keep only the basename-relative key for matching against the diff.
             files[norm] = line_hit
     return files
 
@@ -123,10 +106,7 @@ def main() -> int:
     for path, lines in sorted(diff.items()):
         cov_lines = match_file(path, cov)
         if cov_lines is None:
-            # Changed source not present in coverage data: either it isn't
-            # compiled into the instrumented tests, or it has no executable
-            # lines in the diff. Skip rather than punish.
-            continue
+            continue  # not compiled into the instrumented tests; don't punish
         exec_changed = sorted(ln for ln in lines if ln in cov_lines)
         if not exec_changed:
             continue
