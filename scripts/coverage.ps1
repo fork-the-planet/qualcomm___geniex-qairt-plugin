@@ -47,14 +47,20 @@ $env:CC  = $clangCl
 $env:CXX = $clangCl
 
 # ── Coverage surface: mirror of scripts/coverage_common.py (keep in sync) ────
-$Targets       = @("utils_test", "graph_test", "input_provider_test", "llm_model_test")
+$Targets       = @(
+    "utils_test", "graph_test", "input_provider_test", "llm_utils_test", "llm_model_test", "model_test",
+    "vit_utils_test", "vlm_utils_test", "vlm_input_provider_test", "vlm_model_test"
+)
 $IgnoreRegex   = @(
     "[\\/]tests[\\/]",
     "[\\/]third-party[\\/]",
     "[\\/]qnn-api[\\/]",
     "[\\/]_deps[\\/]",
     "[\\/]googletest",
-    "[\\/]logging\.(h|cpp)$"
+    "[\\/]logging\.(h|cpp)$",
+    "[\\/]runtime\.(h|cpp)$",
+    "[\\/]threadpool\.(h|cpp)$",
+    "[\\/]vlm[\\/]vision_encoder\.(h|cpp)$"
 ) -join "|"
 
 # ── Configure + build the instrumented tests ────────────────────────────────

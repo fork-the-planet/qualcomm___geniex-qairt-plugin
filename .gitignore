@@ -14,6 +14,7 @@ PC_w4a16_ar128_cl4096/*
 build/
 build-android/
 build-*/
+*.profraw
 *.egg-info/
 dist/
 sdist/

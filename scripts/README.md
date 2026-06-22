@@ -24,9 +24,17 @@ exactly the first-party `core/` code under test.
 Coverage is scoped to first-party `core/src` and `core/include` sources. The
 include/exclude rules live in one place -- [`coverage_common.py`](coverage_common.py)
 -- and are shared by the local report and the CI gate so the measured surface
-never drifts. All four unit-test exes are instrumented; the whole tree builds
-under clang-cl once `CC`/`CXX` point at it (which `coverage.ps1` and the CI
-jobs set), so the `build-and-test` gate and coverage use the same compiler.
+never drifts. All unit-test exes are instrumented; the whole tree builds under
+clang-cl once `CC`/`CXX` point at it (which `coverage.ps1` and the CI jobs set),
+so the `build-and-test` gate and coverage use the same compiler.
+
+Device-only files are excluded from the measured surface because they cannot run
+without an NPU and are covered by on-device integration tests instead:
+`runtime.cpp` (QNN/FastRPC HTP bring-up), `threadpool.cpp` (worker threads + CPU
+affinity), `vlm/vision_encoder.cpp` (QNN graph encode), and the `logging` shim.
+`model.cpp` stays measured -- its accessors and `applyConnections` are unit-
+tested, while `Model::initialize()` (QNN backend load) is unreachable on CPU and
+shows as uncovered.
 
 ## Local: full-codebase HTML report
 

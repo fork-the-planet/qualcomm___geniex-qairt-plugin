@@ -125,3 +125,86 @@ TEST(RoPEInputProvider, WritesCosSinTables) {
         EXPECT_NEAR(sin[c], 0.0f, 1e-5f);
     }
 }
+
+namespace {
+// Shared cos/sin graph builder for the RoPE-variant providers.
+GraphInfoBuilder makeRopeGraph(size_t rows, size_t half) {
+    const uint32_t r = static_cast<uint32_t>(rows), h = static_cast<uint32_t>(half);
+    return GraphInfoBuilder("g",
+        {{"position_ids_cos", QNN_DATATYPE_FLOAT_32, {r, h}}, {"position_ids_sin", QNN_DATATYPE_FLOAT_32, {r, h}}},
+        {{"out", QNN_DATATYPE_FLOAT_32, {1}}});
+}
+}  // namespace
+
+// LongRoPEInputProvider writes scaled cos/sin; at position 0 sin == 0.
+TEST(LongRoPEInputProvider, WritesAtPositionZero) {
+    const size_t     head_dim = 4, rows = 2, half = head_dim / 2;
+    GraphInfoBuilder b = makeRopeGraph(rows, half);
+    IOTensor         io(BufferAlloc::DEFAULT);
+    geniex::Graph    g = makeGraph(b, io);
+
+    geniex::LongRoPEInputProvider provider(head_dim,
+        /*theta=*/10000.0f,
+        /*ext_factors=*/{1.0f, 1.0f},
+        /*max=*/2048,
+        /*original=*/2048,
+        "position_ids_cos",
+        "position_ids_sin");
+    const geniex::LLMRunContext   ctx{{0, 0}, /*n_past=*/0, /*curr_len=*/rows, /*phase=*/0};
+    provider.write(g, ctx);
+
+    const auto* sin = static_cast<const float*>(g.inputPtr("position_ids_sin"));
+    for (size_t c = 0; c < half; ++c) EXPECT_NEAR(sin[c], 0.0f, 1e-5f);
+}
+
+// Llama3RoPEInputProvider writes cos/sin; position 0 -> cos 1, sin 0.
+TEST(Llama3RoPEInputProvider, WritesAtPositionZero) {
+    const size_t     head_dim = 8, rows = 2, half = head_dim / 2;
+    GraphInfoBuilder b = makeRopeGraph(rows, half);
+    IOTensor         io(BufferAlloc::DEFAULT);
+    geniex::Graph    g = makeGraph(b, io);
+
+    geniex::Llama3RoPEInputProvider provider(head_dim,
+        /*theta=*/500000.0f,
+        /*factor=*/8.0f,
+        /*low_freq_factor=*/1.0f,
+        /*high_freq_factor=*/4.0f,
+        /*original=*/8192,
+        "position_ids_cos",
+        "position_ids_sin");
+    const geniex::LLMRunContext     ctx{{0, 0}, 0, rows, 0};
+    provider.write(g, ctx);
+
+    const auto* cos = static_cast<const float*>(g.inputPtr("position_ids_cos"));
+    const auto* sin = static_cast<const float*>(g.inputPtr("position_ids_sin"));
+    for (size_t c = 0; c < half; ++c) {
+        EXPECT_NEAR(cos[c], 1.0f, 1e-5f);
+        EXPECT_NEAR(sin[c], 0.0f, 1e-5f);
+    }
+}
+
+// PartialRoPEInputProvider applies the scale; position 0 -> cos == scale.
+TEST(PartialRoPEInputProvider, AppliesScaleAtPositionZero) {
+    const size_t     head_dim = 8, rows = 1, rope_half = 2;  // fraction 0.5 -> rope_dim 4 -> half 2
+    GraphInfoBuilder b = makeRopeGraph(rows, rope_half);
+    IOTensor         io(BufferAlloc::DEFAULT);
+    geniex::Graph    g = makeGraph(b, io);
+
+    geniex::PartialRoPEInputProvider provider(
+        head_dim, /*theta=*/10000.0f, /*rope_fraction=*/0.5f, /*scale=*/2.0f, "position_ids_cos", "position_ids_sin");
+    const geniex::LLMRunContext ctx{{0}, 0, rows, 0};
+    provider.write(g, ctx);
+
+    const auto* cos = static_cast<const float*>(g.inputPtr("position_ids_cos"));
+    for (size_t c = 0; c < rope_half; ++c) EXPECT_NEAR(cos[c], 2.0f, 1e-5f);
+}
+
+// RoPE providers no-op when neither cos nor sin tensor is present.
+TEST(RoPEInputProvider, MissingTensorsIsNoOp) {
+    GraphInfoBuilder b("g", {{"other", QNN_DATATYPE_FLOAT_32, {2}}}, {{"out", QNN_DATATYPE_FLOAT_32, {1}}});
+    IOTensor         io(BufferAlloc::DEFAULT);
+    geniex::Graph    g = makeGraph(b, io);
+
+    geniex::RoPEInputProvider provider(4, 10000.0f, "position_ids_cos", "position_ids_sin");
+    EXPECT_NO_THROW(provider.write(g, geniex::LLMRunContext{{1}, 0, 1, 1}));
+}
