@@ -17,9 +17,6 @@ option(GENIEX_BUILD_VLM   "Build geniex_vlm  (VLM/CV models, requires OpenCV)"  
 option(GENIEX_BUILD_EXAMPLES "Build example executables"                                   OFF)
 option(GENIEX_BUILD_TESTS "Build and register CTest smoke tests for examples"             OFF)
 option(GENIEX_DEBUG       "Enable debug logging (includes file/line/func in log output)"  OFF)
-# Source-based coverage for the unit tests. Requires a Clang/clang-cl toolchain
-# (configure with `-T ClangCL`); MSVC cl.exe has no equivalent. Flags are
-# applied only to the test targets in tests/CMakeLists.txt.
 option(GENIEX_COVERAGE    "Instrument unit tests for llvm-cov source coverage"            OFF)
 
 # ── Third-party dependencies ──────────────────────────────────────────────────
