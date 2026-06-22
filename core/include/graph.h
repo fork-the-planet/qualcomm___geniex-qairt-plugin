@@ -72,6 +72,7 @@ class GENIEX_API Graph {
     void read(const std::string& name, float* dst, size_t element_count, size_t elem_offset = 0) const;
 
     void*       inputPtr(const std::string& name);
+    const void* inputPtr(const std::string& name) const;
     const void* outputPtr(const std::string& name) const;
 
     bool execute(std::map<std::string, std::pair<double, uint16_t>>& time_log);

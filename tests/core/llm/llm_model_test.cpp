@@ -10,7 +10,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -41,6 +43,9 @@ class TestableLLMModel : public geniex::LLMModel {
         initialized_  = ok;
         return ok;
     }
+
+    // Expose protected helpers for direct testing.
+    using geniex::LLMModel::fmtPattern;
 };
 
 // Decode runs serially when no worker pool is created; the pool is only built
@@ -143,4 +148,104 @@ TEST(LLMModel, ThrowsWhenPromptExceedsContext) {
     EXPECT_THROW(mf.model.generate(prompt, greedyConfig(/*max_tokens=*/1)), geniex::ContextLengthExceededError);
 
     geniex::testing::stubSetNextToken(-1);
+}
+
+// fmtPattern substitutes the layer index for the "{}" placeholder.
+TEST(LLMModel, FmtPattern) {
+    EXPECT_EQ(TestableLLMModel::fmtPattern("past_key_{}_in", 3), "past_key_3_in");
+    EXPECT_EQ(TestableLLMModel::fmtPattern("no_placeholder", 5), "no_placeholder");
+}
+
+// Multiple decode steps emit one token per step until max_tokens.
+TEST(LLMModel, MultiStepDecode) {
+    ModelFixture mf;
+    geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+    geniex::testing::stubSetNextToken(4);
+
+    auto out = mf.model.generate({1, 2}, greedyConfig(/*max_tokens=*/3));
+    EXPECT_EQ(out.size(), 3u);
+    for (int32_t t : out) EXPECT_EQ(t, 4);
+
+    geniex::testing::stubSetNextToken(-1);
+}
+
+// enable_sampling drives the geniex-proc sampler chain (prepareSampler path)
+// instead of the greedy argmax fast path.
+TEST(LLMModel, SamplingPathRuns) {
+    ModelFixture mf;
+    geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+    geniex::testing::stubSetNextToken(2);  // one-hot peak -> sampler picks it
+
+    geniex::GenerationConfig cfg;
+    cfg.enable_sampling = true;
+    cfg.temperature     = 0.0f;  // degenerates to greedy inside the chain
+    cfg.max_tokens      = 2;
+    auto out            = mf.model.generate({1}, cfg);
+
+    EXPECT_EQ(out.size(), 2u);
+    geniex::testing::stubSetNextToken(-1);
+}
+
+// resetKVCache returns the model to a pristine n_past, allowing re-generation.
+TEST(LLMModel, ResetKVCache) {
+    ModelFixture mf;
+    geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+    geniex::testing::stubSetNextToken(3);
+
+    mf.model.generate({1, 2}, greedyConfig(/*max_tokens=*/1));
+    EXPECT_GT(mf.model.nPast(), 0u);
+
+    mf.model.resetKVCache();
+    EXPECT_EQ(mf.model.nPast(), 0u);
+
+    geniex::testing::stubSetNextToken(-1);
+}
+
+// KV cache round-trips through a file: save after generation, load into a
+// fresh model, n_past is restored.
+TEST(LLMModel, SaveLoadKVCacheRoundTrip) {
+    const auto path = (std::filesystem::temp_directory_path() / "geniex_kvcache.bin").string();
+
+    {
+        ModelFixture mf;
+        geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+        geniex::testing::stubSetNextToken(3);
+        mf.model.generate({1, 2}, greedyConfig(/*max_tokens=*/1));
+        EXPECT_NO_THROW(mf.model.saveKVCacheToFile(path));
+        geniex::testing::stubSetNextToken(-1);
+    }
+
+    NoDecodePoolEnv  no_pool;
+    LLMFixture       fx;
+    TestableLLMModel fresh{LLMFixture::makeSpec()};
+    ASSERT_TRUE(fresh.initFromFixture(fx));
+    EXPECT_EQ(fresh.nPast(), 0u);
+    fresh.loadKVCacheFromFile(path);
+    EXPECT_GT(fresh.nPast(), 0u);
+
+    std::remove(path.c_str());
+}
+
+// save/load report errors on bad paths.
+TEST(LLMModel, KVCacheFileErrors) {
+    ModelFixture mf;
+    EXPECT_THROW(mf.model.loadKVCacheFromFile("no_such_kvcache.bin"), std::runtime_error);
+    EXPECT_THROW(mf.model.saveKVCacheToFile("Z:/nonexistent_dir/x/kvcache.bin"), std::runtime_error);
+}
+
+// With the decode pool enabled, the KV write-back runs through the threadpool
+// path (decode_pool_ non-null) rather than inline.
+TEST(LLMModel, DecodePoolPath) {
+    _putenv_s("GENIEX_DECODE_WORKERS", "1");
+    LLMFixture       fx;
+    TestableLLMModel model{LLMFixture::makeSpec()};
+    ASSERT_TRUE(model.initFromFixture(fx));
+
+    geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+    geniex::testing::stubSetNextToken(3);
+    auto out = model.generate({1, 2}, greedyConfig(/*max_tokens=*/3));
+    EXPECT_EQ(out.size(), 3u);
+
+    geniex::testing::stubSetNextToken(-1);
+    _putenv_s("GENIEX_DECODE_WORKERS", "");
 }

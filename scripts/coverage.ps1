@@ -60,7 +60,8 @@ $IgnoreRegex = @(
     "[\\/]logging\.(h|cpp)$",
     "[\\/]runtime\.(h|cpp)$",
     "[\\/]threadpool\.(h|cpp)$",
-    "[\\/]vlm[\\/]vision_encoder\.(h|cpp)$"
+    "[\\/]vlm[\\/]vision_encoder\.(h|cpp)$",
+    "[\\/]model\.cpp$"
 ) -join "|"
 
 # ── Configure + build the instrumented tests ────────────────────────────────

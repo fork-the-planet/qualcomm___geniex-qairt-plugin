@@ -771,9 +771,11 @@ void LLMModel::saveKVCacheToFile(const std::string& path) const {
         const Graph& g = graph(gi);
         for (const auto& spec : g.inputSpecs()) {
             if (kv_names.count(spec.name)) {
-                std::vector<uint8_t> buf(spec.byteCount());
-                g.read(spec.name, buf.data(), buf.size());
-                f.write(reinterpret_cast<const char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
+                // KV state lives in the graph's INPUT buffer; read it raw.
+                // (Graph::read targets output tensors, not inputs.)
+                const void* buf = g.inputPtr(spec.name);
+                if (!buf) continue;
+                f.write(reinterpret_cast<const char*>(buf), static_cast<std::streamsize>(spec.byteCount()));
             }
         }
     }
