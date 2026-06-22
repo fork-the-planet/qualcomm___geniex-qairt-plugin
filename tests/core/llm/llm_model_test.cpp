@@ -291,3 +291,26 @@ TEST(LLMModel, PromotesContextLengthOnLongPrompt) {
 
     geniex::testing::stubSetNextToken(-1);
 }
+
+// A 2-shard model exercises discoverShardTensorNames (lm_head_only on shard 1),
+// inter-shard hidden-state connections, and the LM-head skip on non-final
+// prefill chunks (a multi-chunk prompt). The final logits come from shard 1.
+TEST(LLMModel, MultiShardPrefillAndConnections) {
+    using geniex::testing::MultiShardFixture;
+    NoDecodePoolEnv   no_pool;
+    MultiShardFixture fx;
+    TestableLLMModel  model{MultiShardFixture::makeSpec()};
+    ASSERT_TRUE(model.initFromFixture(fx));
+
+    geniex::testing::stubSetVocabSize(MultiShardFixture::kVocab);
+    geniex::testing::stubSetNextToken(6);
+
+    // 6-token prompt (> ar_prefill=4) -> chunks [4,2]; chunk 0 skips the
+    // LM-head-only shard, chunk 1 runs it.
+    std::vector<int32_t> prompt(6, 1);
+    auto                 out = model.generate(prompt, greedyConfig(/*max_tokens=*/2));
+    ASSERT_EQ(out.size(), 2u);
+    EXPECT_EQ(out[0], 6);
+
+    geniex::testing::stubSetNextToken(-1);
+}
