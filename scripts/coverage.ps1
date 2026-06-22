@@ -37,21 +37,21 @@ $llvmBin = Get-ChildItem `
 if (-not $llvmBin) {
     throw "Could not find VC\Tools\Llvm\ARM64\bin. Install the 'C++ Clang tools for Windows' VS component."
 }
-$llvmCov     = Join-Path $llvmBin.FullName "llvm-cov.exe"
+$llvmCov = Join-Path $llvmBin.FullName "llvm-cov.exe"
 $llvmProfdata = Join-Path $llvmBin.FullName "llvm-profdata.exe"
-$clangCl     = Join-Path $llvmBin.FullName "clang-cl.exe"
+$clangCl = Join-Path $llvmBin.FullName "clang-cl.exe"
 
 # cc-rs (tokenizers Rust crate) reads CC/CXX; point it at clang-cl too, or it
 # falls back to cl.exe under -T ClangCL and dies with a header C1012.
-$env:CC  = $clangCl
+$env:CC = $clangCl
 $env:CXX = $clangCl
 
 # ── Coverage surface: mirror of scripts/coverage_common.py (keep in sync) ────
-$Targets       = @(
+$Targets = @(
     "utils_test", "graph_test", "input_provider_test", "llm_utils_test", "llm_model_test", "model_test",
     "vit_utils_test", "vlm_utils_test", "vlm_input_provider_test", "vlm_model_test"
 )
-$IgnoreRegex   = @(
+$IgnoreRegex = @(
     "[\\/]tests[\\/]",
     "[\\/]third-party[\\/]",
     "[\\/]qnn-api[\\/]",

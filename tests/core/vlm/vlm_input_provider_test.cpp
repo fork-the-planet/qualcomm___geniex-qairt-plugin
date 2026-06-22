@@ -22,6 +22,8 @@
 #include "graph.h"
 #include "llm/llm_types.h"
 #include "testing/graph_info_builder.hpp"
+#include "xtensor/containers/xarray.hpp"
+#include "xtensor/io/xnpy.hpp"
 
 namespace {
 
@@ -46,6 +48,16 @@ std::vector<float> makeTable(size_t vocab, size_t hidden) {
     for (size_t r = 0; r < vocab; ++r)
         for (size_t c = 0; c < hidden; ++c) t[r * hidden + c] = static_cast<float>(r) + 0.5f * static_cast<float>(c);
     return t;
+}
+
+// Dumps makeTable() as a .npy so the xtensor load path is exercised.
+std::string writeNpyTable(size_t vocab, size_t hidden) {
+    xt::xarray<float> arr = xt::zeros<float>({vocab, hidden});
+    for (size_t r = 0; r < vocab; ++r)
+        for (size_t c = 0; c < hidden; ++c) arr(r, c) = static_cast<float>(r) + 0.5f * static_cast<float>(c);
+    auto path = (std::filesystem::temp_directory_path() / "geniex_vlm_embed_table.npy").string();
+    xt::dump_npy(path, arr);
+    return path;
 }
 
 }  // namespace
@@ -80,6 +92,54 @@ TEST(PrecomputedEmbedding, LoadTableSizeMismatchThrows) {
     geniex::PrecomputedEmbeddingProvider provider("input_embeds");
     const std::string                    path = writeRawTable(makeTable(4, 3), "mismatch");
     EXPECT_THROW(provider.loadTable(path, /*vocab=*/4, /*hidden=*/4), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+// .npy path: shape read from the header, rows looked up correctly.
+TEST(PrecomputedEmbedding, LoadsNpyTable) {
+    const std::string                    path = writeNpyTable(4, 3);
+    geniex::PrecomputedEmbeddingProvider provider("input_embeds");
+    provider.loadTable(path, /*vocab=*/0, /*hidden=*/0);  // dims from header
+    EXPECT_EQ(provider.lookupBatch({2, 0}), (std::vector<float>{2.0f, 2.5f, 3.0f, 0.0f, 0.5f, 1.0f}));
+    std::remove(path.c_str());
+}
+
+// .npy hint dims disagreeing with the header throw.
+TEST(PrecomputedEmbedding, NpyShapeHintMismatchThrows) {
+    const std::string                    path = writeNpyTable(4, 3);
+    geniex::PrecomputedEmbeddingProvider provider("input_embeds");
+    EXPECT_THROW(provider.loadTable(path, /*vocab=*/4, /*hidden=*/9), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+// Raw binary with zero dims has no shape info -> throws.
+TEST(PrecomputedEmbedding, RawRequiresNonZeroDims) {
+    const std::string                    path = writeRawTable({1.0f, 2.0f}, "zerodim");
+    geniex::PrecomputedEmbeddingProvider provider("input_embeds");
+    EXPECT_THROW(provider.loadTable(path, 0, 0), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+// Missing raw file -> throws.
+TEST(PrecomputedEmbedding, RawMissingFileThrows) {
+    geniex::PrecomputedEmbeddingProvider provider("input_embeds");
+    EXPECT_THROW(provider.loadTable("no_such_vlm_embedding.bin", 2, 2), std::runtime_error);
+}
+
+// onInitialized auto-loads from model_cfg.embedding_path.
+TEST(PrecomputedEmbedding, OnInitializedAutoLoads) {
+    const size_t        vocab = 4, hidden = 2;
+    const std::string   path = writeRawTable(makeTable(vocab, hidden), "oninit");
+    geniex::ModelConfig cfg;
+    cfg.embedding_path = path;
+    geniex::LLMSpec spec;
+    spec.vocab_size    = vocab;
+    spec.hidden_size   = hidden;
+    spec.eos_token_ids = {1};
+
+    geniex::PrecomputedEmbeddingProvider provider("input_embeds");
+    provider.onInitialized(cfg, spec);
+    EXPECT_EQ(provider.lookupBatch({3}), (std::vector<float>{3.0f, 3.5f}));
     std::remove(path.c_str());
 }
 
@@ -165,6 +225,34 @@ TEST(MRoPEProvider, PrefillPositionZeroIsIdentity) {
     for (size_t k = 0; k < rows * half; ++k) {
         EXPECT_NEAR(cos[k], 1.0f, 1e-5f);
         EXPECT_NEAR(sin[k], 0.0f, 1e-5f);
+    }
+}
+
+// A prefill chunk shorter than the tensor pads trailing rows with the identity
+// rotation (cos=1, sin=0) via write_padded.
+TEST(MRoPEProvider, ShortChunkPadsWithIdentity) {
+    const size_t     rows = 3, half = 4;  // tensor holds 3 rows
+    GraphInfoBuilder b("g",
+        {{"position_ids_cos", QNN_DATATYPE_FLOAT_32, {rows, half}},
+            {"position_ids_sin", QNN_DATATYPE_FLOAT_32, {rows, half}}},
+        {{"out", QNN_DATATYPE_FLOAT_32, {1}}});
+    IOTensor         io(BufferAlloc::DEFAULT);
+    geniex::Graph    g = makeGraph(b, io);
+
+    geniex::MRoPEInputProvider provider({2, 1, 1}, 10000.0f, geniex::MRoPEInterleaving::BLOCK);
+    // Provide positions for only 2 rows but the tensor has 3 -> last row padded.
+    const std::vector<int32_t> pos(3 * 2, 0);  // 2 positions, all zero
+    provider.setPositionIds(pos, /*seq_len=*/2, /*n_past_offset=*/0);
+
+    const geniex::LLMRunContext ctx{{0, 0}, /*n_past=*/0, /*curr_len=*/2, /*phase=*/0};
+    provider.write(g, ctx);
+
+    const auto* cos = static_cast<const float*>(g.inputPtr("position_ids_cos"));
+    const auto* sin = static_cast<const float*>(g.inputPtr("position_ids_sin"));
+    // Padded trailing row (index 2) is identity rotation.
+    for (size_t c = 0; c < half; ++c) {
+        EXPECT_NEAR(cos[2 * half + c], 1.0f, 1e-5f);
+        EXPECT_NEAR(sin[2 * half + c], 0.0f, 1e-5f);
     }
 }
 

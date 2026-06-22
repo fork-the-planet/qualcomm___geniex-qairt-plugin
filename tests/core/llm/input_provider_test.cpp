@@ -21,6 +21,8 @@
 #include "graph.h"
 #include "llm/llm_types.h"
 #include "testing/graph_info_builder.hpp"
+#include "xtensor/containers/xarray.hpp"
+#include "xtensor/io/xnpy.hpp"
 
 namespace {
 
@@ -39,6 +41,16 @@ std::string writeRawTable(const std::vector<float>& table) {
                     .string();
     std::ofstream f(path, std::ios::binary);
     f.write(reinterpret_cast<const char*>(table.data()), static_cast<std::streamsize>(table.size() * sizeof(float)));
+    return path;
+}
+
+// Dumps a [vocab, hidden] table as a .npy so the xtensor load path is exercised.
+std::string writeNpyTable(size_t vocab, size_t hidden) {
+    xt::xarray<float> arr = xt::zeros<float>({vocab, hidden});
+    for (size_t r = 0; r < vocab; ++r)
+        for (size_t c = 0; c < hidden; ++c) arr(r, c) = static_cast<float>(r) + 0.5f * static_cast<float>(c);
+    auto path = (std::filesystem::temp_directory_path() / "geniex_embed_table.npy").string();
+    xt::dump_npy(path, arr);
     return path;
 }
 
@@ -207,4 +219,119 @@ TEST(RoPEInputProvider, MissingTensorsIsNoOp) {
 
     geniex::RoPEInputProvider provider(4, 10000.0f, "position_ids_cos", "position_ids_sin");
     EXPECT_NO_THROW(provider.write(g, geniex::LLMRunContext{{1}, 0, 1, 1}));
+}
+
+// ─── EmbeddingInputProvider: loadTable / onInitialized / padding ─────────────
+
+// .npy load path: shape read from the header, rows written correctly.
+TEST(EmbeddingInputProvider, LoadsNpyTable) {
+    const size_t      vocab = 4, hidden = 3, rows = 2;
+    const std::string path = writeNpyTable(vocab, hidden);
+
+    geniex::EmbeddingInputProvider provider("input_embeds");
+    provider.loadTable(path, /*vocab=*/0, /*hidden=*/0);  // dims read from header
+
+    GraphInfoBuilder b(
+        "g", {{"input_embeds", QNN_DATATYPE_FLOAT_32, {rows, hidden}}}, {{"out", QNN_DATATYPE_FLOAT_32, {1}}});
+    IOTensor      io(BufferAlloc::DEFAULT);
+    geniex::Graph g = makeGraph(b, io);
+    provider.write(g, geniex::LLMRunContext{{2, 0}, 0, 2, 1});  // decode lookup
+
+    const auto* got = static_cast<const float*>(g.inputPtr("input_embeds"));
+    EXPECT_EQ(std::vector<float>(got, got + rows * hidden), (std::vector<float>{2.0f, 2.5f, 3.0f, 0.0f, 0.5f, 1.0f}));
+    std::remove(path.c_str());
+}
+
+// .npy with hint dims that disagree with the header throws.
+TEST(EmbeddingInputProvider, NpyShapeHintMismatchThrows) {
+    const std::string              path = writeNpyTable(4, 3);
+    geniex::EmbeddingInputProvider provider("input_embeds");
+    EXPECT_THROW(provider.loadTable(path, /*vocab=*/4, /*hidden=*/8), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+// Raw binary with zero dims has no shape info -> throws.
+TEST(EmbeddingInputProvider, RawRequiresNonZeroDims) {
+    const std::string              path = writeRawTable({1.0f, 2.0f});
+    geniex::EmbeddingInputProvider provider("input_embeds");
+    EXPECT_THROW(provider.loadTable(path, /*vocab=*/0, /*hidden=*/0), std::runtime_error);
+    std::remove(path.c_str());
+}
+
+// Missing raw file -> throws.
+TEST(EmbeddingInputProvider, RawMissingFileThrows) {
+    geniex::EmbeddingInputProvider provider("input_embeds");
+    EXPECT_THROW(provider.loadTable("no_such_embedding_file.bin", 2, 2), std::runtime_error);
+}
+
+// Raw file whose byte size disagrees with vocab*hidden -> throws.
+TEST(EmbeddingInputProvider, RawSizeMismatchThrows) {
+    const std::string              path = writeRawTable({1.0f, 2.0f, 3.0f});  // 3 floats
+    geniex::EmbeddingInputProvider provider("input_embeds");
+    EXPECT_THROW(provider.loadTable(path, /*vocab=*/2, /*hidden=*/2), std::runtime_error);  // expects 4
+    std::remove(path.c_str());
+}
+
+// onInitialized auto-loads from model_cfg.embedding_path and caches the EOS
+// embedding as the prefill pad row.
+TEST(EmbeddingInputProvider, OnInitializedLoadsAndCachesPad) {
+    const size_t vocab = 4, hidden = 2;
+    // Row r = {r, r}; eos=1 -> pad embedding {1, 1}.
+    std::vector<float> table(vocab * hidden);
+    for (size_t r = 0; r < vocab; ++r)
+        for (size_t c = 0; c < hidden; ++c) table[r * hidden + c] = static_cast<float>(r);
+    const std::string path = writeRawTable(table);
+
+    geniex::ModelConfig cfg;
+    cfg.embedding_path = path;
+    geniex::LLMSpec spec;
+    spec.vocab_size    = vocab;
+    spec.hidden_size   = hidden;
+    spec.eos_token_ids = {1};
+
+    geniex::EmbeddingInputProvider provider("input_embeds");
+    provider.onInitialized(cfg, spec);
+
+    // Verify the table loaded by writing a decode lookup into a graph.
+    GraphInfoBuilder b(
+        "g", {{"input_embeds", QNN_DATATYPE_FLOAT_32, {1, hidden}}}, {{"out", QNN_DATATYPE_FLOAT_32, {1}}});
+    IOTensor      io(BufferAlloc::DEFAULT);
+    geniex::Graph g = makeGraph(b, io);
+    provider.write(g, geniex::LLMRunContext{{3}, 0, 1, 1});
+    const auto* got = static_cast<const float*>(g.inputPtr("input_embeds"));
+    EXPECT_EQ(std::vector<float>(got, got + hidden), (std::vector<float>{3.0f, 3.0f}));  // table loaded
+    std::remove(path.c_str());
+}
+
+// A prefill chunk shorter than the tensor pads trailing rows with the EOS
+// embedding cached by onInitialized.
+TEST(EmbeddingInputProvider, ShortChunkPadsWithEos) {
+    const size_t       vocab = 4, hidden = 2, rows = 3;
+    std::vector<float> table(vocab * hidden);
+    for (size_t r = 0; r < vocab; ++r)
+        for (size_t c = 0; c < hidden; ++c) table[r * hidden + c] = static_cast<float>(r);
+    const std::string path = writeRawTable(table);
+
+    geniex::ModelConfig cfg;
+    cfg.embedding_path = path;
+    geniex::LLMSpec spec;
+    spec.vocab_size    = vocab;
+    spec.hidden_size   = hidden;
+    spec.eos_token_ids = {1};  // pad row = {1, 1}
+
+    geniex::EmbeddingInputProvider provider("input_embeds");
+    provider.onInitialized(cfg, spec);
+
+    GraphInfoBuilder b(
+        "g", {{"input_embeds", QNN_DATATYPE_FLOAT_32, {rows, hidden}}}, {{"out", QNN_DATATYPE_FLOAT_32, {1}}});
+    IOTensor      io(BufferAlloc::DEFAULT);
+    geniex::Graph g = makeGraph(b, io);
+
+    // Only 2 tokens for a 3-row tensor -> row 2 is EOS-padded.
+    const geniex::LLMRunContext ctx{{2, 0}, /*n_past=*/0, /*curr_len=*/2, /*phase=*/0};
+    provider.write(g, ctx);
+
+    const auto* got = static_cast<const float*>(g.inputPtr("input_embeds"));
+    EXPECT_EQ(std::vector<float>(got, got + rows * hidden), (std::vector<float>{2, 2, 0, 0, 1, 1}));
+    std::remove(path.c_str());
 }
