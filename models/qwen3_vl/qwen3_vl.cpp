@@ -61,16 +61,15 @@ std::vector<float> Qwen3VLVisionEncoder::encode(const PixelData& pixel_data) {
     // Qwen3-VL's ViT uses full (non-windowed) attention, so there is no window
     // reordering of patches: RoPE cos/sin and the output features stay in
     // natural patch order. computePatchRoPE() already yields natural order.
-    const auto inv_freq = qwen_vit::makeInvFreq(kVitRopeDim, kVitRopeTheta);
-    auto [rope_cos, rope_sin] =
-        qwen_vit::computePatchRoPE(grid_t, grid_h, grid_w, spatial_merge_size_, inv_freq);
+    const auto inv_freq       = qwen_vit::makeInvFreq(kVitRopeDim, kVitRopeTheta);
+    auto [rope_cos, rope_sin] = qwen_vit::computePatchRoPE(grid_t, grid_h, grid_w, spatial_merge_size_, inv_freq);
 
     // Single image ⇒ one attention block spanning all patches. Both the full
     // and window attention masks are therefore "all allowed" (0.0).
-    constexpr float kAllowed   = 0.0f;
-    constexpr float kBlocked   = -1e9f;
-    const auto      full_mask  = qwen_vit::buildBlockAttentionMask(
-        num_patches, {0, static_cast<int64_t>(num_patches)}, kAllowed, kBlocked);
+    constexpr float kAllowed = 0.0f;
+    constexpr float kBlocked = -1e9f;
+    const auto      full_mask =
+        qwen_vit::buildBlockAttentionMask(num_patches, {0, static_cast<int64_t>(num_patches)}, kAllowed, kBlocked);
 
     if (pixel_data.pixel_values.size() != n_images * per_image_pixels) {
         throw std::runtime_error("Qwen3VLVisionEncoder: pixel_values has " +
@@ -138,8 +137,8 @@ void Qwen3VLModel::setVisionTokenIds(int32_t vision_start, int32_t image_pad) {
 }
 
 std::vector<float> Qwen3VLModel::encodeVision(const PixelData& pixel_data) {
-    // Runs the ViT then hands the per-level deepstack embeddings to the provider 
-    // that feeds the first decoder shard. The returned image features are scattered 
+    // Runs the ViT then hands the per-level deepstack embeddings to the provider
+    // that feeds the first decoder shard. The returned image features are scattered
     // onto the image token positions by VLMModel::generate().
     auto image_features = vision_encoder_raw_->encode(pixel_data);
 

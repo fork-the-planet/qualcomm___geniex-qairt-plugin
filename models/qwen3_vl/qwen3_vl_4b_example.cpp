@@ -167,8 +167,8 @@ int main(int argc, char** argv) {
         std::cerr << "Bundle has no vision_preprocessing block.\n";
         return 1;
     }
-    proc_cfg.fixed_height = meta.vision_preprocessing->image_height;
-    proc_cfg.fixed_width  = meta.vision_preprocessing->image_width;
+    proc_cfg.fixed_height        = meta.vision_preprocessing->image_height;
+    proc_cfg.fixed_width         = meta.vision_preprocessing->image_width;
     proc_cfg.patch_size          = meta.vision_preprocessing->patch_size;
     proc_cfg.temporal_patch_size = meta.vision_preprocessing->temporal_patch_size;
     proc_cfg.merge_size          = meta.vision_preprocessing->spatial_merge_size;

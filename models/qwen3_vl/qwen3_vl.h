@@ -115,8 +115,8 @@ inline std::optional<VLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_c
     if (!meta.vision_preprocessing) return std::nullopt;
 
     qwen2vl::Qwen2VLConfig proc_cfg;
-    proc_cfg.fixed_height = meta.vision_preprocessing->image_height;
-    proc_cfg.fixed_width  = meta.vision_preprocessing->image_width;
+    proc_cfg.fixed_height        = meta.vision_preprocessing->image_height;
+    proc_cfg.fixed_width         = meta.vision_preprocessing->image_width;
     proc_cfg.patch_size          = meta.vision_preprocessing->patch_size;
     proc_cfg.temporal_patch_size = meta.vision_preprocessing->temporal_patch_size;
     proc_cfg.merge_size          = meta.vision_preprocessing->spatial_merge_size;

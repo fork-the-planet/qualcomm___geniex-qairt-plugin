@@ -123,7 +123,7 @@ class GENIEX_VLM_API MRoPEInputProvider : public InputProvider {
 
 // Injects DeepStack visual features into the first decoder shard.
 //
-// DeepStack sums features from several intermediate vision-encoder layers 
+// DeepStack sums features from several intermediate vision-encoder layers
 // onto the decoder's early hidden states at the visual token positions.
 // Writes (only when present on the graph):
 //   * deepstack_visual_embeds_{k} — flat [num_visual_tokens * hidden_size] per level.
@@ -155,7 +155,7 @@ class GENIEX_VLM_API DeepstackInputProvider : public InputProvider {
     std::string                     mask_name_;
     std::vector<std::vector<float>> embeds_;  // [num_levels][num_visual_tokens * hidden_size]
     size_t                          hidden_size_ = 0;
-    std::vector<uint8_t>            mask_;       // full-sequence visual mask (1 = visual)
+    std::vector<uint8_t>            mask_;             // full-sequence visual mask (1 = visual)
     size_t                          mask_offset_ = 0;  // absolute KV position where mask_[0] starts
 };
 
