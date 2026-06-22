@@ -249,3 +249,21 @@ TEST(LLMModel, DecodePoolPath) {
     geniex::testing::stubSetNextToken(-1);
     _putenv_s("GENIEX_DECODE_WORKERS", "");
 }
+
+// grammar_str set without a tokenizer takes the warn-and-skip path in
+// prepareSampler (grammar disabled, generation still runs).
+TEST(LLMModel, GrammarWithoutTokenizerWarns) {
+    ModelFixture mf;
+    geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+    geniex::testing::stubSetNextToken(2);
+
+    geniex::GenerationConfig cfg;
+    cfg.enable_sampling = true;
+    cfg.grammar_str     = "root ::= \"a\"";
+    cfg.tokenizer       = nullptr;  // no tokenizer -> grammar disabled
+    cfg.max_tokens      = 1;
+    auto out            = mf.model.generate({1}, cfg);
+    EXPECT_EQ(out.size(), 1u);
+
+    geniex::testing::stubSetNextToken(-1);
+}
