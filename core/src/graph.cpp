@@ -277,6 +277,8 @@ void Graph::read(const std::string& name, float* dst, size_t n, size_t elem_offs
 
 void* Graph::inputPtr(const std::string& name) { return input_buffer_ptrs_.at(name); }
 
+const void* Graph::inputPtr(const std::string& name) const { return input_buffer_ptrs_.at(name); }
+
 const void* Graph::outputPtr(const std::string& name) const { return output_buffer_ptrs_.at(name); }
 
 bool Graph::execute(std::map<std::string, std::pair<double, uint16_t>>& time_log) {

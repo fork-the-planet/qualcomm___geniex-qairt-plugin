@@ -18,6 +18,28 @@ set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)  # provides gtest_discover_tests()
 
+# ── Coverage instrumentation (opt-in: -DGENIEX_COVERAGE=ON) ──────────────────
+# Applied only to the test targets, which compile core/src directly, so the
+# instrumented region is exactly the code under test. clang-cl only.
+if(GENIEX_COVERAGE)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR
+            "GENIEX_COVERAGE requires a Clang toolchain. Re-run cmake with "
+            "-T ClangCL (Visual Studio generator) or a clang/clang-cl compiler.")
+    endif()
+    # clang-cl needs the flags forwarded via /clang:; plain clang takes them
+    # directly. The linker needs them too, to emit the profile runtime.
+    if(MSVC)  # clang-cl presents an MSVC-style driver
+        set(GENIEX_COVERAGE_COMPILE_FLAGS
+            /clang:-fprofile-instr-generate /clang:-fcoverage-mapping)
+        set(GENIEX_COVERAGE_LINK_FLAGS -fprofile-instr-generate)
+    else()
+        set(GENIEX_COVERAGE_COMPILE_FLAGS
+            -fprofile-instr-generate -fcoverage-mapping)
+        set(GENIEX_COVERAGE_LINK_FLAGS -fprofile-instr-generate)
+    endif()
+endif()
+
 # ── Helper: register one unit-test executable ────────────────────────────────
 # geniex_add_unit_test(<name> SOURCES <a.cpp>... [LIBS <lib>...])
 function(geniex_add_unit_test NAME)
@@ -36,10 +58,14 @@ function(geniex_add_unit_test NAME)
         ${CMAKE_SOURCE_DIR}/third-party/geniex-proc/third-party/xtl/include
     )
     target_compile_definitions(${NAME} PRIVATE ${GENIEX_COMPILE_DEFS})
-    # We compile geniex_core TUs directly into the test exe, so GENIEX_API must
-    # resolve to dllexport (definition), not dllimport (consume-from-DLL).
+    # We compile geniex_core/geniex_vlm TUs directly into the test exe, so the
+    # export macros must resolve to dllexport (definition), not dllimport.
     if(WIN32)
-        target_compile_definitions(${NAME} PRIVATE geniex_core_EXPORTS)
+        target_compile_definitions(${NAME} PRIVATE geniex_core_EXPORTS geniex_vlm_EXPORTS)
+    endif()
+    if(GENIEX_COVERAGE)
+        target_compile_options(${NAME} PRIVATE ${GENIEX_COVERAGE_COMPILE_FLAGS})
+        target_link_options(${NAME} PRIVATE ${GENIEX_COVERAGE_LINK_FLAGS})
     endif()
     set_target_properties(${NAME} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
@@ -92,6 +118,34 @@ geniex_add_unit_test(input_provider_test
         ${CMAKE_SOURCE_DIR}/qnn-api/src/dlwrap.cpp
 )
 
+# ── LLM pure-math utilities (RoPE variants, masking, tensor helpers) ─────────
+geniex_add_unit_test(llm_utils_test
+    SOURCES
+        core/llm/llm_utils_test.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
+)
+
+# ── Model accessors + applyConnections (real Graph + link-time QnnApi stub) ──
+geniex_add_unit_test(model_test
+    SOURCES
+        core/model_test.cpp
+        testing/stub_qnnapi.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/runtime.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/graph.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/RpcMem.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/dlwrap.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/qnn-utils.cpp
+    LIBS
+        geniex-proc
+)
+
 # ── LLM prefill/decode orchestration (real LLMModel + link-time QnnApi stub) ──
 geniex_add_unit_test(llm_model_test
     SOURCES
@@ -114,3 +168,62 @@ geniex_add_unit_test(llm_model_test
     LIBS
         geniex-proc
 )
+
+# ── VLM pure-math utilities (no test doubles) ────────────────────────────────
+geniex_add_unit_test(vit_utils_test
+    SOURCES
+        core/vlm/vit_utils_test.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/vlm/vit_utils.cpp
+)
+
+geniex_add_unit_test(vlm_utils_test
+    SOURCES
+        core/vlm/vlm_utils_test.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/vlm/vlm_utils.cpp
+)
+
+# ── VLM input providers (real Graph + link-time QnnApi stub) ─────────────────
+geniex_add_unit_test(vlm_input_provider_test
+    SOURCES
+        core/vlm/vlm_input_provider_test.cpp
+        testing/stub_qnnapi.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/vlm/vlm_input_provider.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/input_provider.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/graph.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/RpcMem.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/dlwrap.cpp
+    LIBS
+        geniex-proc
+)
+
+# ── VLM prefill/decode orchestration (real VLMModel + link-time QnnApi stub) ──
+geniex_add_unit_test(vlm_model_test
+    SOURCES
+        core/vlm/vlm_model_test.cpp
+        testing/stub_qnnapi.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/vlm/vlm_model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/vlm/vlm_input_provider.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/vlm/vision_encoder.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/graph.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/runtime.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/threadpool.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/input_provider.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/RpcMem.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/dlwrap.cpp
+        ${CMAKE_SOURCE_DIR}/qnn-api/src/qnn-utils.cpp
+    LIBS
+        geniex-proc
+)
+

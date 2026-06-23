@@ -151,6 +151,53 @@ TEST(GraphIO, WriteOverflowThrows) {
     EXPECT_THROW(f.graph.write("in", too_many.data(), too_many.size()), std::runtime_error);
 }
 
+// write(double*) narrows to the fp32 / fp16 buffer at the boundary.
+TEST(GraphIO, WriteFromDouble) {
+    GraphInfoBuilder b("g",
+        {{"f32", QNN_DATATYPE_FLOAT_32, {3}}, {"f16", QNN_DATATYPE_FLOAT_16, {3}}},
+        {{"out", QNN_DATATYPE_FLOAT_32, {3}}});
+    GraphFixture     f(b);
+
+    const std::vector<double> src = {1.5, -2.25, 4.0};
+    f.graph.write("f32", src.data(), src.size());
+    f.graph.write("f16", src.data(), src.size());
+
+    const auto* f32 = static_cast<const float*>(f.graph.inputPtr("f32"));
+    EXPECT_EQ(std::vector<float>(f32, f32 + 3), (std::vector<float>{1.5f, -2.25f, 4.0f}));
+
+    // fp16 reads back lossily but close.
+    std::vector<float> f16(3);
+    geniex::float16ToFloat(f16.data(), static_cast<const uint16_t*>(f.graph.inputPtr("f16")), 3);
+    for (size_t i = 0; i < 3; ++i) EXPECT_NEAR(f16[i], static_cast<float>(src[i]), 1e-2);
+}
+
+// read(void*, byte_count) copies the raw output bytes.
+TEST(GraphIO, RawByteRead) {
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}}, {{"out", QNN_DATATYPE_FLOAT_32, {2}}});
+    GraphFixture     f(b);
+
+    const std::vector<float> src = {7.0f, -3.0f};
+    f.graph.write("in", src.data(), src.size());
+    geniex::TimeLog log;
+    ASSERT_TRUE(f.graph.execute(log));
+
+    std::vector<float> got(2);
+    f.graph.read("out", static_cast<void*>(got.data()), got.size() * sizeof(float));
+    EXPECT_EQ(got, src);
+}
+
+// Unsupported dtypes hit the default throw in write(float*) and read(float*).
+TEST(GraphIO, UnsupportedDtypeThrows) {
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_INT_64, {2}}}, {{"out", QNN_DATATYPE_INT_64, {2}}});
+    GraphFixture     f(b);
+
+    const std::vector<float> src = {1.0f, 2.0f};
+    EXPECT_THROW(f.graph.write("in", src.data(), src.size()), std::runtime_error);
+
+    std::vector<float> got(2);
+    EXPECT_THROW(f.graph.read("out", got.data(), got.size()), std::runtime_error);
+}
+
 TEST(GraphExecute, StubReportsSuccess) {
     GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}}, {{"out", QNN_DATATYPE_FLOAT_32, {2}}});
     GraphFixture     f(b);

@@ -66,6 +66,15 @@ TEST(FloatToFloat16, UnderflowFlushesToZero) {
     EXPECT_EQ(toHalf(-1.0e-12f), kHalfNegZero);
 }
 
+// A value in the subnormal-half range (2^-24 .. 2^-14) exercises the subnormal
+// encode path; it must round-trip back to (approximately) itself.
+TEST(FloatToFloat16, SubnormalEncodeRoundTrips) {
+    const float v    = std::ldexp(1.0f, -20);  // 2^-20, a representable subnormal half
+    const float back = fromHalf(toHalf(v));
+    EXPECT_NEAR(back, v, std::ldexp(1.0f, -24));  // within one subnormal step
+    EXPECT_GT(back, 0.0f);                        // not flushed to zero
+}
+
 // RNE: 1 + 2^-11 is the exact midpoint between 1.0 and 1.0+2^-10; the even
 // neighbour (1.0, mantissa LSB 0) must win.
 TEST(FloatToFloat16, RoundsToNearestEven) {
@@ -156,6 +165,15 @@ TEST(MergeTimeLogs, EmptySrcLeavesDstUnchanged) {
     geniex::mergeTimeLogs(dst, geniex::TimeLog{});
     EXPECT_DOUBLE_EQ(dst["x"].first, 7.0);
     EXPECT_EQ(dst["x"].second, 1);
+}
+
+// printTimings formats and logs; it must not throw on populated or empty logs.
+TEST(PrintTimings, DoesNotThrow) {
+    geniex::TimeLog log;
+    log["graph0"] = {12.5, 3};
+    log["graph1"] = {0.0, 0};
+    EXPECT_NO_THROW(geniex::printTimings(log));
+    EXPECT_NO_THROW(geniex::printTimings(geniex::TimeLog{}));
 }
 
 // ─── Quantize / dequantize (scale-offset) ──────────────────────────────────

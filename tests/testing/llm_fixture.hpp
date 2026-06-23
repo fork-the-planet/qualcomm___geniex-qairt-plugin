@@ -96,4 +96,164 @@ struct LLMFixture {
     }
 };
 
+// Single-shard, TWO-context-length variant ([cl8, cl16]) used to exercise the
+// promoteCL / reshapeKV paths that a single-CL fixture never reaches. Same
+// dims as LLMFixture; the mask is sized to the MAX CL (per-chunk mask write is
+// ar * context_lengths[active]) and KV inputs to max_cl - ar_decode.
+struct MultiCLFixture {
+    static constexpr uint32_t kVocab     = 8;
+    static constexpr uint32_t kHidden    = 4;
+    static constexpr uint32_t kKVHeads   = 1;
+    static constexpr uint32_t kHeadDim   = 2;
+    static constexpr uint32_t kCL0       = 8;
+    static constexpr uint32_t kCL1       = 16;  // max CL
+    static constexpr uint32_t kArPrefill = 4;
+    static constexpr uint32_t kArDecode  = 1;
+    static constexpr uint32_t kKVLayers  = 1;
+
+    QnnApi   api;
+    IOTensor io{BufferAlloc::DEFAULT};
+
+    std::deque<GraphInfoBuilder> builders;
+    std::vector<Graph>           graphs;
+
+    MultiCLFixture() {
+        // Graph order must match graphIndex = phase*(1*num_cl) + cl_idx, i.e.
+        // prefill[cl0], prefill[cl1], decode[cl0], decode[cl1].
+        const uint32_t kv_capacity = kCL1 - kArDecode;
+        addGraph("prefill_ar4_cl8_1_of_1", kArPrefill, kv_capacity);
+        addGraph("prefill_ar4_cl16_1_of_1", kArPrefill, kv_capacity);
+        addGraph("token_ar1_cl8_1_of_1", kArDecode, kv_capacity);
+        addGraph("token_ar1_cl16_1_of_1", kArDecode, kv_capacity);
+    }
+
+    MultiCLFixture(const MultiCLFixture&)            = delete;
+    MultiCLFixture& operator=(const MultiCLFixture&) = delete;
+
+    static LLMSpec makeSpec() {
+        LLMSpec spec;
+        spec.shards.resize(1);
+        spec.state_blocks.push_back(
+            makeKVOnlyStateBlock(std::vector<std::vector<LayerRange>>{{LayerRange{0, kKVLayers - 1}}}));
+        spec.hidden_size  = kHidden;
+        spec.num_kv_heads = kKVHeads;
+        spec.head_dim     = kHeadDim;
+        spec.vocab_size   = kVocab;
+        return spec;
+    }
+
+   private:
+    void addGraph(const std::string& name, uint32_t ar, uint32_t kv_capacity) {
+        std::vector<TensorDesc> inputs{
+            {"input_embeds", QNN_DATATYPE_FLOAT_32, {ar, kHidden}},
+            {"attention_mask", QNN_DATATYPE_FLOAT_32, {ar, kCL1}},  // sized to max CL
+        };
+        std::vector<TensorDesc> outputs{
+            {"logits", QNN_DATATYPE_FLOAT_32, {ar, kVocab}},
+        };
+        for (uint32_t l = 0; l < kKVLayers; ++l) {
+            const std::string s = std::to_string(l);
+            inputs.push_back({"past_key_" + s + "_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, kv_capacity}});
+            inputs.push_back({"past_value_" + s + "_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kv_capacity, kHeadDim}});
+            outputs.push_back({"past_key_" + s + "_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, ar}});
+            outputs.push_back({"past_value_" + s + "_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, ar, kHeadDim}});
+        }
+        builders.emplace_back(name, inputs, outputs);
+        Graph g(&builders.back().graphInfo(), &api, &io);
+        g.setup(/*context=*/nullptr);
+        graphs.push_back(std::move(g));
+    }
+};
+
+// TWO-shard, single-CL variant exercising the multi-shard paths a 1-shard
+// fixture never reaches: discoverShardTensorNames (lm_head_only), the inter-
+// shard hidden-state connections (buildConnections / applyConnections), and the
+// LM-head-skip on non-final prefill chunks.
+//
+// Shard 0 owns the KV layer and outputs `hidden_states`; shard 1 is LM-head-
+// only (no KV, consumes `hidden_states`, outputs `logits`).
+struct MultiShardFixture {
+    static constexpr uint32_t kVocab      = 8;
+    static constexpr uint32_t kHidden     = 4;
+    static constexpr uint32_t kKVHeads    = 1;
+    static constexpr uint32_t kHeadDim    = 2;
+    static constexpr uint32_t kContextLen = 16;
+    static constexpr uint32_t kArPrefill  = 4;
+    static constexpr uint32_t kArDecode   = 1;
+    static constexpr uint32_t kKVLayers   = 1;
+    static constexpr uint32_t kShards     = 2;
+
+    QnnApi   api;
+    IOTensor io{BufferAlloc::DEFAULT};
+
+    std::deque<GraphInfoBuilder> builders;
+    std::vector<Graph>           graphs;
+
+    MultiShardFixture() {
+        // graphIndex = phase*(shard_count*num_cl) + shard*num_cl + cl_idx, with
+        // num_cl=1: prefill[s0], prefill[s1], decode[s0], decode[s1].
+        const uint32_t kv_capacity = kContextLen - kArDecode;
+        addShard0("prefill_ar4_cl16_1_of_2", kArPrefill, kv_capacity);
+        addShard1("prefill_ar4_cl16_2_of_2", kArPrefill);
+        addShard0("token_ar1_cl16_1_of_2", kArDecode, kv_capacity);
+        addShard1("token_ar1_cl16_2_of_2", kArDecode);
+    }
+
+    MultiShardFixture(const MultiShardFixture&)            = delete;
+    MultiShardFixture& operator=(const MultiShardFixture&) = delete;
+
+    static LLMSpec makeSpec() {
+        LLMSpec spec;
+        spec.shards.resize(kShards);
+        // Shard 0 owns layer 0; shard 1 owns no KV (lm_head_only).
+        spec.state_blocks.push_back(
+            makeKVOnlyStateBlock(std::vector<std::vector<LayerRange>>{{LayerRange{0, kKVLayers - 1}}, {}}));
+        spec.hidden_size  = kHidden;
+        spec.num_kv_heads = kKVHeads;
+        spec.head_dim     = kHeadDim;
+        spec.vocab_size   = kVocab;
+        return spec;
+    }
+
+   private:
+    // Shard 0: input_embeds -> hidden_states, owns KV. Output `hidden_states`
+    // is the first non-special output, so discoverShardTensorNames picks it.
+    void addShard0(const std::string& name, uint32_t ar, uint32_t kv_capacity) {
+        std::vector<TensorDesc> inputs{
+            {"input_embeds", QNN_DATATYPE_FLOAT_32, {ar, kHidden}},
+            {"attention_mask", QNN_DATATYPE_FLOAT_32, {ar, kContextLen}},
+        };
+        std::vector<TensorDesc> outputs{
+            {"hidden_states", QNN_DATATYPE_FLOAT_32, {ar, kHidden}},
+        };
+        for (uint32_t l = 0; l < kKVLayers; ++l) {
+            const std::string s = std::to_string(l);
+            inputs.push_back({"past_key_" + s + "_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, kv_capacity}});
+            inputs.push_back({"past_value_" + s + "_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kv_capacity, kHeadDim}});
+            outputs.push_back({"past_key_" + s + "_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, ar}});
+            outputs.push_back({"past_value_" + s + "_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, ar, kHeadDim}});
+        }
+        emplace(name, inputs, outputs);
+    }
+
+    // Shard 1: hidden_states -> logits, no KV (lm_head_only).
+    void addShard1(const std::string& name, uint32_t ar) {
+        std::vector<TensorDesc> inputs{
+            {"hidden_states", QNN_DATATYPE_FLOAT_32, {ar, kHidden}},
+        };
+        std::vector<TensorDesc> outputs{
+            {"logits", QNN_DATATYPE_FLOAT_32, {ar, kVocab}},
+        };
+        emplace(name, inputs, outputs);
+    }
+
+    void emplace(
+        const std::string& name, const std::vector<TensorDesc>& inputs, const std::vector<TensorDesc>& outputs) {
+        builders.emplace_back(name, inputs, outputs);
+        Graph g(&builders.back().graphInfo(), &api, &io);
+        g.setup(/*context=*/nullptr);
+        graphs.push_back(std::move(g));
+    }
+};
+
 }  // namespace geniex::testing
