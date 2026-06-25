@@ -41,10 +41,10 @@ SDK release mentioned above.
 **Origin:** Sibling project providing tokenizer and preprocessing
 utilities, vendored as a submodule.
 
-**License:** Apache License, Version 2.0. See
-`third-party/geniex-proc/LICENSE` for the full text.
+**License:** BSD 3-Clause License. See
+`third-party/geniex-proc/LICENSE.txt` for the full text.
 
 This submodule transitively vendors additional libraries under
-`third-party/geniex-proc/third_party/` (xtensor, xtensor-blas, xtensor-io,
+`third-party/geniex-proc/third-party/` (xtensor, xtensor-blas, xtensor-io,
 xtl, tokenizers-cpp, msgpack, etc.); each carries its own license file in
 its respective directory.
