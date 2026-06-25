@@ -45,6 +45,6 @@ utilities, vendored as a submodule.
 `third-party/geniex-proc/LICENSE.txt` for the full text.
 
 This submodule transitively vendors additional libraries under
-`third-party/geniex-proc/third_party/` (xtensor, xtensor-blas, xtensor-io,
+`third-party/geniex-proc/third-party/` (xtensor, xtensor-blas, xtensor-io,
 xtl, tokenizers-cpp, msgpack, etc.); each carries its own license file in
 its respective directory.
