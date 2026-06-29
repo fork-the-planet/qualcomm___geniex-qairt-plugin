@@ -19,16 +19,10 @@ permissions:
 jobs:
   windows-arm64:
     name: Windows ARM64 build and test
-    runs-on: windows-arm64
+    runs-on: windows-11-arm
     timeout-minutes: 60
 
     steps:
-      - name: Rewrite SSH submodule URLs to HTTPS
-        # .gitmodules uses git@ URLs but Actions authenticates over HTTPS.
-        shell: pwsh
-        run: |
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-
       - name: Checkout (with submodules)
         # All submodules are public, so the default GITHUB_TOKEN suffices —
         # no PAT secret required.
