@@ -66,14 +66,27 @@ class GENIEX_API LLMPipeline {
     GenerateResult generate(const std::string& prompt_utf8, const GenerationConfig& gen_cfg = {},
         std::function<bool(const char*)> on_token = nullptr);
 
+    // Pre-tokenized variant. Bypasses encode(); the caller is responsible for any
+    // special tokens (BOS/EOS) — no BOS is prepended here.
+    GenerateResult generate(const std::vector<int32_t>& input_ids, const GenerationConfig& gen_cfg = {},
+        std::function<bool(const char*)> on_token = nullptr);
+
     void saveKVCache(const std::string& path) const;
     void loadKVCache(const std::string& path);
 
     size_t nPast() const;
 
+    // Static model metadata for callers that need vocab_size / BOS without a
+    // tokenizer (e.g. random-id benchmark prefill). 0 / -1 when unavailable.
+    size_t  vocabSize() const;
+    int32_t bosTokenId() const;
+
     bool createImpl(std::unique_ptr<LLMModel> model, const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg);
 
    private:
+    GenerateResult generateTokens(std::vector<int32_t> input_ids, const GenerationConfig& gen_cfg,
+        const std::function<bool(const char*)>& on_token);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
