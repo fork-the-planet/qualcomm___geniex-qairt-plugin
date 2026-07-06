@@ -34,10 +34,9 @@ COVERAGE_EXCLUDE_REGEX_PARTS = [
     r"[\\/]runtime\.(h|cpp)$",
     r"[\\/]threadpool\.(h|cpp)$",
     r"[\\/]vlm[\\/]vision_encoder\.(h|cpp)$",
-    # model.cpp is dominated by Model::initialize() (QNN backend load); its
-    # CPU-testable parts (accessors, applyConnections) are guarded by
-    # model_test but not counted, since the file is mostly device bring-up.
-    r"[\\/]model\.cpp$",
+    # model_init.cpp holds Model::initialize() (QNN backend load) and
+    # qnnLogCallback -- device-only, exercised only by on-device integration tests.
+    r"[\\/]model_init\.cpp$",
 ]
 COVERAGE_EXCLUDE_REGEX = "|".join(COVERAGE_EXCLUDE_REGEX_PARTS)
 

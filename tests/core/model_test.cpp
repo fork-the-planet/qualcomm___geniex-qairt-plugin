@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 // SPDX-License-Identifier: BSD-3-Clause
 //
-// Unit tests for the CPU-reachable parts of core/src/model.cpp: the graph/
-// sub-model accessors and applyConnections() (zero-copy inter-graph wiring).
-// Model::initialize() is device-only (QNN backend bring-up) and is not tested
-// here. A test-only subclass injects pre-built graphs to exercise the rest.
+// Unit tests for core/src/model.cpp: graph/sub-model accessors and
+// applyConnections(). Model::initialize() is device-only and not tested here.
+// TestableModel injects pre-built graphs to exercise the CPU-reachable paths.
 
 #include "model.h"
 
@@ -22,8 +21,7 @@ namespace {
 
 using geniex::testing::GraphInfoBuilder;
 
-// Exposes the protected graphs_/applyConnections so a test can wire graphs
-// without going through the device initialize() path.
+// Bypasses device initialize() by injecting graphs directly into the protected graphs_ vector.
 class TestableModel : public geniex::Model {
    public:
     void addGraph(geniex::Graph g) { graphs_.push_back(std::move(g)); }
@@ -52,13 +50,18 @@ TEST(Model, GraphAccessors) {
     EXPECT_THROW(model.graph(5), std::out_of_range);
 }
 
-// Sub-model registration + accessor.
+// Sub-model registration + accessor (mutable and const overloads).
 TEST(Model, SubModelAccessors) {
     auto          child = std::make_shared<TestableModel>();
     TestableModel parent;
     parent.addSubModel(child);
     EXPECT_EQ(&parent.subModel(0), child.get());
     EXPECT_THROW(parent.subModel(3), std::out_of_range);
+
+    // Exercise the const overload via a const reference, including bounds check.
+    const TestableModel& cparent = parent;
+    EXPECT_EQ(&cparent.subModel(0), child.get());
+    EXPECT_THROW(cparent.subModel(3), std::out_of_range);
 }
 
 // applyConnections copies graph0's output buffer into graph1's input buffer.

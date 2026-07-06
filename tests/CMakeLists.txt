@@ -128,11 +128,14 @@ geniex_add_unit_test(llm_utils_test
 )
 
 # ── Model accessors + applyConnections (real Graph + link-time QnnApi stub) ──
+# model_init.cpp is included so Model::initialize() links (it is never called
+# by model_test). stub_qnnapi.cpp satisfies all QNN SDK symbols it references.
 geniex_add_unit_test(model_test
     SOURCES
         core/model_test.cpp
         testing/stub_qnnapi.cpp
         ${CMAKE_SOURCE_DIR}/core/src/model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/model_init.cpp
         ${CMAKE_SOURCE_DIR}/core/src/runtime.cpp
         ${CMAKE_SOURCE_DIR}/core/src/graph.cpp
         ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
@@ -147,6 +150,7 @@ geniex_add_unit_test(model_test
 )
 
 # ── LLM prefill/decode orchestration (real LLMModel + link-time QnnApi stub) ──
+# model_init.cpp included for link completeness; never called. See model_test note above.
 geniex_add_unit_test(llm_model_test
     SOURCES
         core/llm/llm_model_test.cpp
@@ -155,6 +159,7 @@ geniex_add_unit_test(llm_model_test
         ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
         ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
         ${CMAKE_SOURCE_DIR}/core/src/model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/model_init.cpp
         ${CMAKE_SOURCE_DIR}/core/src/runtime.cpp
         ${CMAKE_SOURCE_DIR}/core/src/threadpool.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/llm_model.cpp
@@ -202,6 +207,7 @@ geniex_add_unit_test(vlm_input_provider_test
 )
 
 # ── VLM prefill/decode orchestration (real VLMModel + link-time QnnApi stub) ──
+# model_init.cpp included for link completeness; never called. See model_test note above.
 geniex_add_unit_test(vlm_model_test
     SOURCES
         core/vlm/vlm_model_test.cpp
@@ -213,6 +219,7 @@ geniex_add_unit_test(vlm_model_test
         ${CMAKE_SOURCE_DIR}/core/src/utils.cpp
         ${CMAKE_SOURCE_DIR}/core/src/logging.cpp
         ${CMAKE_SOURCE_DIR}/core/src/model.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/model_init.cpp
         ${CMAKE_SOURCE_DIR}/core/src/runtime.cpp
         ${CMAKE_SOURCE_DIR}/core/src/threadpool.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/llm_model.cpp
