@@ -16,19 +16,25 @@
 #include "llm/llm_types.h"
 #include "types.h"
 
-// Reads a QAIRT distributed model bundle and produces an LLMSpec + matching
-// CPU-side InputProviders. Every numerical hyperparameter is inferred from
-// the compiled-graph tensor shapes recorded in metadata.json. Anything the
-// tensors can't carry (RoPE base/scaling, EOS/BOS, dialog type) is read
-// from genie_config.json. We do NOT consult HuggingFace config.json.
+// Assembles an LLMSpec + matching CPU-side InputProviders in two phases,
+// because the numeric hyperparameters only become knowable after the graphs
+// load:
+//   1. Pre-init (JSON): buildSpecSkeleton fills the fields tensors can't carry
+//      — RoPE base/scaling, EOS/BOS, dialog type — from genie_config.json.
+//   2. Post-init (tensors): inferSpecFromGraphs derives every hardware shape
+//      (hidden size, KV heads, head dim, vocab, shard wiring, KV pairs) from
+//      the live compiled-graph TensorSpecs. This is the sole source of truth
+//      for hyperparameters. LLMModel::onInitialized drives this phase.
+// We do NOT consult HuggingFace config.json.
 //
 // Bundle layout we depend on:
-//   metadata.json     — QAIRT export metadata: model_id, graph names,
-//                       per-graph I/O tensor specs (dtype, shape, quant params).
 //   genie_config.json — runtime config: dialog.type, context tokens, RoPE
 //                       parameters, embedding LUT spec.
 //   tokenizer.json    — sentencepiece/BPE tokenizer (read by LLMPipeline).
 //   *.bin             — compiled context-binary shards.
+//   metadata.json     — QAIRT export metadata. LLM path no longer reads it;
+//                       retained only for VLM vision preprocessing and for
+//                       model_id-based dispatch (see parseQAIRTMetadata).
 
 namespace geniex {
 
