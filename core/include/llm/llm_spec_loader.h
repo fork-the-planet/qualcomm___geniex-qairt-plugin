@@ -72,14 +72,13 @@ struct ParsedVisionPreprocessing {
     std::vector<float> normalize_std;
 };
 
-// Everything inferable from metadata.json's tensor-shape entries. CL / AR /
-// phase-prefix are discovered later by LLMModel::onInitialized from the
-// loaded QNN graph names, so they live on LLMSpec, not here.
+// Fields read from metadata.json. Retained for the VLM path (vision
+// preprocessing + vision-encoder hidden size). The LLM path infers all of
+// these from graph tensors instead (see inferSpecFromGraphs).
 struct ParsedQAIRTMetadata {
     std::string model_id;  // e.g. "qwen3_4b", "llama_v3_2_3b_instruct_ssd"
 
-    std::vector<ShardSpec>                 shards;
-    std::vector<std::optional<LayerRange>> shard_layer_ranges;
+    std::vector<ShardSpec> shards;
 
     size_t hidden_size       = 0;  // inputs_embeds.shape[2] / hidden-state.shape[2]
     size_t num_kv_heads      = 0;  // past_key_*.shape[0]
@@ -142,9 +141,6 @@ struct ParsedSamplerConfig {
 
 // ── Loader entry points ──────────────────────────────────────────────────────
 
-// Reads metadata.json. Throws std::runtime_error on missing / malformed file.
-GENIEX_API ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir);
-
 // Reads genie_config.json. Returns an all-defaults struct if the file is
 // absent (most bundles ship one, but it's not strictly required).
 GENIEX_API ParsedGenieConfig parseGenieConfig(const std::filesystem::path& bundle_dir);
@@ -153,20 +149,26 @@ GENIEX_API ParsedGenieConfig parseGenieConfig(const std::filesystem::path& bundl
 // if the file or block is missing.
 GENIEX_API ParsedSamplerConfig parseGenieSamplerConfig(const std::filesystem::path& bundle_dir);
 
-// Composes the metadata-derived fields with the genie-config-derived fields
-// into a fully-populated LLMSpec.
-GENIEX_API LLMSpec buildSpec(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc);
+// Builds an LLMSpec with only the JSON-sourced fields (eos/bos tokens, a
+// default KV state block). inferSpecFromGraphs fills the rest after load.
+GENIEX_API LLMSpec buildSpecSkeleton(const ParsedGenieConfig& gc);
 
-// Picks the matching RoPE input provider implementation from gc.rope_scaling.
-// head_dim comes from meta; rope_theta from gc; falls back to standard RoPE.
-GENIEX_API std::unique_ptr<InputProvider> makeRoPEProvider(
-    const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc);
+// Fills `spec`'s tensor-derived fields from the loaded graphs, which must be
+// sorted by (phase, shard, cl). Throws if a required field cannot be resolved.
+GENIEX_API void inferSpecFromGraphs(
+    const std::vector<Graph>& graphs, size_t shard_count, size_t num_cl, size_t seq_len_prefill, LLMSpec& spec);
 
-// Picks the embedding-input provider for shard 0 based on its expected input
-// tensor name. Returns a TokenIdInputProvider for "input_ids" or an
-// EmbeddingInputProvider for "input_embeds" / "inputs_embeds".
+// Selects the RoPE provider variant from gc.rope_scaling. head_dim is resolved
+// by the caller from the position_ids_cos tensor.
+GENIEX_API std::unique_ptr<InputProvider> makeRoPEProvider(size_t head_dim, const ParsedGenieConfig& gc);
+
+// Selects the embedding provider from the first-shard input tensor name.
 GENIEX_API std::unique_ptr<InputProvider> makeEmbeddingProvider(
-    const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc);
+    const std::string& first_shard_input, const ParsedGenieConfig& gc);
+
+// Reads metadata.json. Retained for the VLM path, whose vision-encoder shapes
+// are not carried by the LLM graph tensors.
+GENIEX_API ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir);
 
 // Returns the directory that contains the modelfile bundle for `model_cfg`.
 // Inferred as the parent directory of model_cfg.model_paths[0].

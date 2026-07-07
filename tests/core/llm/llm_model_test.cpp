@@ -48,6 +48,7 @@ class TestableLLMModel : public geniex::LLMModel {
 
     // Expose protected helpers for direct testing.
     using geniex::LLMModel::fmtPattern;
+    using geniex::LLMModel::spec_;
 };
 
 // Decode runs serially when no worker pool is created; the pool is only built
@@ -93,6 +94,44 @@ TEST(LLMModel, InitializesFromGraphNames) {
 TEST(LLMModel, VocabSize) {
     ModelFixture mf;
     EXPECT_EQ(mf.model.vocabSize(), LLMFixture::kVocab);
+}
+
+// inferSpecFromGraphs derives every architecture shape and the KV tensor pairs
+// purely from the loaded graph tensors — no metadata.json.
+TEST(LLMModel, InfersShapesAndKVPairsFromGraphs) {
+    ModelFixture mf;
+    const auto&  spec = mf.model.spec_;
+    EXPECT_EQ(spec.hidden_size, LLMFixture::kHidden);
+    EXPECT_EQ(spec.num_kv_heads, LLMFixture::kKVHeads);
+    EXPECT_EQ(spec.head_dim, LLMFixture::kHeadDim);
+    EXPECT_EQ(spec.vocab_size, LLMFixture::kVocab);
+    EXPECT_EQ(spec.seq_len_prefill, LLMFixture::kArPrefill);
+    EXPECT_EQ(spec.seq_len_decode, LLMFixture::kArDecode);
+    ASSERT_EQ(spec.context_lengths.size(), 1u);
+    EXPECT_EQ(spec.context_lengths[0], LLMFixture::kContextLen);
+
+    // One KV-only shard with kKVLayers resolved pairs, named by the default pattern.
+    ASSERT_EQ(spec.state_blocks.size(), 1u);
+    ASSERT_EQ(spec.state_blocks[0].shard_pairs.size(), 1u);
+    ASSERT_EQ(spec.state_blocks[0].shard_pairs[0].size(), LLMFixture::kKVLayers);
+    EXPECT_EQ(spec.state_blocks[0].shard_pairs[0][0].key_in, "past_key_0_in");
+    EXPECT_EQ(spec.state_blocks[0].shard_pairs[0][0].value_out, "past_value_0_out");
+}
+
+// A multi-shard model resolves KV pairs only on the KV-owning shard; the
+// lm-head-only shard gets an empty pair list.
+TEST(LLMModel, InfersEmptyKVPairsForLMHeadShard) {
+    using geniex::testing::MultiShardFixture;
+    NoDecodePoolEnv   no_pool;
+    MultiShardFixture fx;
+    TestableLLMModel  model{MultiShardFixture::makeSpec()};
+    ASSERT_TRUE(model.initFromFixture(fx));
+
+    const auto& pairs = model.spec_.state_blocks[0].shard_pairs;
+    ASSERT_EQ(pairs.size(), 2u);
+    EXPECT_EQ(pairs[0].size(), MultiShardFixture::kKVLayers);  // shard 0 owns KV
+    EXPECT_TRUE(pairs[1].empty());                             // shard 1 is lm-head-only
+    EXPECT_TRUE(model.spec_.shards[1].lm_head_only);
 }
 
 // A short prefill + single decode step emits exactly the token the stub was

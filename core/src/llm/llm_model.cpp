@@ -102,20 +102,7 @@ const StateBlockSpec& LLMModel::requireKVStateBlock() const {
     return spec_.state_blocks[kv_state_block_idx_];
 }
 
-namespace {
-
-template <typename Fn>
-void forEachLayerInRanges(const std::vector<LayerRange>& ranges, Fn&& fn) {
-    for (const auto& [begin, end] : ranges) {
-        for (size_t layer = begin; layer <= end; ++layer) {
-            fn(layer);
-        }
-    }
-}
-
-}  // namespace
-
-LLMModel::LLMModel(LLMSpec spec) : spec_(std::move(spec)) {}
+LLMModel::LLMModel(LLMSpec spec, ParsedGenieConfig gc) : spec_(std::move(spec)), gc_(std::move(gc)) {}
 
 LLMModel::~LLMModel() {
     // Stop workers before the KV buffers they reference are destroyed.
@@ -123,22 +110,6 @@ LLMModel::~LLMModel() {
 }
 
 bool LLMModel::onInitialized() {
-    shard_count_ = spec_.shards.size();
-    if (shard_count_ == 0) return false;
-
-    kv_state_block_idx_ = std::numeric_limits<size_t>::max();
-    for (size_t block_idx = 0; block_idx < spec_.state_blocks.size(); ++block_idx) {
-        if (spec_.state_blocks[block_idx].kind == StateBlockKind::KV) {
-            kv_state_block_idx_ = block_idx;
-            break;
-        }
-    }
-
-    const auto& kv_block = requireKVStateBlock();
-    if (kv_block.shard_layer_ranges.size() != shard_count_) {
-        throw std::runtime_error("KV state block shard_layer_ranges size must match shard count");
-    }
-
     // Discover CL / AR / phase-prefix from the loaded QNN graph names. The
     // regex tolerates an optional alphabetic prefix (Genie's `prompt_` /
     // `token_`, absent on AI Hub IoT exports).
@@ -149,12 +120,14 @@ bool LLMModel::onInitialized() {
         size_t ar    = 0;
         size_t cl    = 0;
         size_t shard = 0;
+        size_t total = 0;
     };
     auto parseGraphName = [&](const std::string& name) -> ParsedGraph {
         std::smatch m;
         if (!std::regex_match(name, m, graph_name_re)) return {};
         try {
-            return {true, std::stoul(m[1].str()), std::stoul(m[2].str()), std::stoul(m[3].str())};
+            return {
+                true, std::stoul(m[1].str()), std::stoul(m[2].str()), std::stoul(m[3].str()), std::stoul(m[4].str())};
         } catch (...) {
             return {};
         }
@@ -164,6 +137,7 @@ bool LLMModel::onInitialized() {
     // into an arbitrary slot and trip Graph::write much later.
     std::set<size_t> cl_set;
     std::set<size_t> ar_set;
+    size_t           total_shards = 0;
     for (const auto& g : graphs_) {
         const auto p = parseGraphName(g.name());
         if (!p.ok) {
@@ -172,6 +146,7 @@ bool LLMModel::onInitialized() {
         }
         cl_set.insert(p.cl);
         ar_set.insert(p.ar);
+        total_shards = std::max(total_shards, p.total);
     }
     if (cl_set.empty() || ar_set.empty()) {
         GENIEX_LOG_ERROR("LLMModel: no graphs loaded");
@@ -181,6 +156,7 @@ bool LLMModel::onInitialized() {
     spec_.seq_len_prefill = *ar_set.rbegin();
     spec_.seq_len_decode  = *ar_set.begin();
     num_cl_               = spec_.context_lengths.size();
+    shard_count_          = total_shards;
 
     auto sortKey = [&](const std::string& name) -> std::tuple<int, int, int> {
         const auto p      = parseGraphName(name);
@@ -199,6 +175,19 @@ bool LLMModel::onInitialized() {
     std::stable_sort(graphs_.begin(), graphs_.end(), [&](const Graph& a, const Graph& b) {
         return sortKey(a.name()) < sortKey(b.name());
     });
+
+    // Infer every tensor-derived field (shapes, shard wiring, KV pairs) from
+    // the now-sorted graphs. This is the sole source of truth for hyperparameters.
+    inferSpecFromGraphs(graphs_, shard_count_, num_cl_, spec_.seq_len_prefill, spec_);
+
+    kv_state_block_idx_ = std::numeric_limits<size_t>::max();
+    for (size_t block_idx = 0; block_idx < spec_.state_blocks.size(); ++block_idx) {
+        if (spec_.state_blocks[block_idx].kind == StateBlockKind::KV) {
+            kv_state_block_idx_ = block_idx;
+            break;
+        }
+    }
+
     GENIEX_LOG_DEBUG(
         "LLMModel initialized: {} shards, {} CL variants [{}], vocab={}, hidden={}",
         shard_count_,
@@ -214,7 +203,7 @@ bool LLMModel::onInitialized() {
         spec_.vocab_size,
         spec_.hidden_size);
 
-    discoverShardTensorNames();
+    createInputProviders();
     buildConnections();
 
     for (auto& p : input_providers_) {
@@ -253,34 +242,24 @@ bool LLMModel::onInitialized() {
     return true;
 }
 
-void LLMModel::discoverShardTensorNames() {
-    // For each shard s:
-    //   in_state_name  = first non-special input  on its representative graph
-    //   out_state_name = first non-special output on its representative graph
-    //   lm_head_only   = no past_key_* inputs and the output is "logits"
-    // The representative graph is the prefill (phase=0) variant at the
-    // smallest CL — same choice the loader used to make against metadata.json.
-    if (spec_.shards.empty()) return;
-    for (size_t s = 0; s < spec_.shards.size(); ++s) {
-        const size_t gi = graphIndex(0, s, 0);
-        const Graph& g  = graph(gi);
+void LLMModel::createInputProviders() {
+    // Skip if the caller already registered providers (e.g. a subclass or a
+    // manual-tensor example).
+    if (!input_providers_.empty()) return;
 
-        std::string in_name, out_name;
-        bool        has_past_key = false;
-        for (const auto& t : g.inputSpecs()) {
-            if (isKVTensor(t.name)) has_past_key = true;
-            if (in_name.empty() && !isSpecialTensor(t.name)) in_name = t.name;
+    input_providers_.push_back(makeEmbeddingProvider(spec_.shards.front().in_state_name, gc_));
+
+    // RoPE dimension (Option C): last dim of position_ids_cos = head_dim/2.
+    // The tensor may live on any shard (shard 0 is often an embedding-only LUT
+    // with no position inputs), so scan all shards' prefill graphs. Its absence
+    // everywhere means the graph bakes RoPE internally — no provider needed.
+    for (size_t s = 0; s < shard_count_; ++s) {
+        const Graph& g = graph(graphIndex(0, s, 0));
+        if (g.hasInput("position_ids_cos")) {
+            const size_t half_dim = g.inputSpec("position_ids_cos").shape.back();
+            input_providers_.push_back(makeRoPEProvider(half_dim * 2, gc_));
+            break;
         }
-        for (const auto& t : g.outputSpecs()) {
-            if (out_name.empty() && !isSpecialTensor(t.name)) out_name = t.name;
-        }
-        if (in_name.empty() || out_name.empty()) {
-            throw std::runtime_error("LLMModel: shard " + std::to_string(s + 1) + " (graph '" + g.name() +
-                                     "') has no non-special input/output tensor");
-        }
-        spec_.shards[s].in_state_name  = in_name;
-        spec_.shards[s].out_state_name = out_name;
-        spec_.shards[s].lm_head_only   = !has_past_key && out_name == "logits" && s > 0;
     }
 }
 
@@ -364,30 +343,14 @@ void LLMModel::copyKV(Graph& src_g, const std::string& src_name, bool src_is_out
 // Propagates freshly-computed KV outputs back into the KV input buffers so each execution sees the full context
 // history.
 void LLMModel::updateKV(size_t s, size_t phase, size_t dst_off, size_t n_tok) {
-    const auto& kv_block     = requireKVStateBlock();
-    const auto& layer_ranges = kv_block.shard_layer_ranges[s];
-    if (layer_ranges.empty()) return;
+    const auto& kv_block = requireKVStateBlock();
+    const auto& pairs    = kv_block.shard_pairs[s];
+    if (pairs.empty()) return;
     Graph& g = graph(graphIndex(phase, s, active_cl_idx_));
-    forEachLayerInRanges(layer_ranges, [&](size_t l) {
-        copyKV(g,
-            fmtPattern(kv_block.key_out_pattern, l),
-            true,
-            g,
-            fmtPattern(kv_block.key_in_pattern, l),
-            0,
-            dst_off,
-            n_tok,
-            true);
-        copyKV(g,
-            fmtPattern(kv_block.value_out_pattern, l),
-            true,
-            g,
-            fmtPattern(kv_block.value_in_pattern, l),
-            0,
-            dst_off,
-            n_tok,
-            false);
-    });
+    for (const auto& p : pairs) {
+        copyKV(g, p.key_out, true, g, p.key_in, 0, dst_off, n_tok, true);
+        copyKV(g, p.value_out, true, g, p.value_in, 0, dst_off, n_tok, false);
+    }
 }
 
 // Adjusts KV cache stride in-place when switching context-length variants.
@@ -395,17 +358,17 @@ void LLMModel::updateKV(size_t s, size_t phase, size_t dst_off, size_t n_tok) {
 // Expanding iterates rows backward to avoid overwriting unread data; contracting goes forward.
 void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, size_t n_valid) {
     if (old_kv_len == new_kv_len) return;
-    const auto& kv_block     = requireKVStateBlock();
-    const auto& layer_ranges = kv_block.shard_layer_ranges[shard];
-    if (layer_ranges.empty()) return;
+    const auto& kv_block = requireKVStateBlock();
+    const auto& pairs    = kv_block.shard_pairs[shard];
+    if (pairs.empty()) return;
 
     // Cap copy length: never read past old_kv_len or write past new_kv_len.
     const size_t copy_len = std::min(n_valid, std::min(old_kv_len, new_kv_len));
 
     Graph& g = graph(graphIndex(0, shard, active_cl_idx_));
 
-    forEachLayerInRanges(layer_ranges, [&](size_t l) {
-        const auto key_in = fmtPattern(kv_block.key_in_pattern, l);
+    for (const auto& p : pairs) {
+        const auto& key_in = p.key_in;
 
         // Key: [num_kv_heads, 1, head_dim, kv_len]
         {
@@ -432,7 +395,7 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
 
         // Value: [num_kv_heads, 1, kv_len, head_dim]
         {
-            const auto        val_in     = fmtPattern(kv_block.value_in_pattern, l);
+            const auto&       val_in     = p.value_in;
             const TensorSpec& spec       = g.inputSpec(val_in);
             const size_t      elem_size  = spec.elementSize();
             const size_t      n_heads    = spec_.num_kv_heads;
@@ -454,7 +417,7 @@ void LLMModel::reshapeKV(size_t shard, size_t old_kv_len, size_t new_kv_len, siz
                         buf + h * new_kv_len * token_size, buf + h * old_kv_len * token_size, copy_len * token_size);
             }
         }
-    });
+    }
 }
 
 bool LLMModel::promoteCL(size_t required, size_t capacity_reserved_seq, size_t stride_reserved_seq) {
@@ -724,11 +687,10 @@ std::unordered_set<std::string> LLMModel::buildKVInputNameSet() const {
     std::unordered_set<std::string> names;
     const auto&                     kv_block = requireKVStateBlock();
     for (size_t s = 0; s < shard_count_; ++s) {
-        const auto& layer_ranges = kv_block.shard_layer_ranges[s];
-        forEachLayerInRanges(layer_ranges, [&](size_t l) {
-            names.insert(fmtPattern(kv_block.key_in_pattern, l));
-            names.insert(fmtPattern(kv_block.value_in_pattern, l));
-        });
+        for (const auto& p : kv_block.shard_pairs[s]) {
+            names.insert(p.key_in);
+            names.insert(p.value_in);
+        }
     }
     return names;
 }

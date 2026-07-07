@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,8 +69,10 @@ class GENIEX_API SSDModel : public LLMModel {
     // Root position = n_past - forecast_prefix; each child = parent + 1.
     std::vector<int32_t> computeTreePositionIds(size_t n_past, size_t num_tokens) const;
 
-    SSDConfig       ssd_cfg_;
-    RotaryEmbedding rope_;  // overrides standard RoPE with tree-based position IDs during SSD decode
+    SSDConfig ssd_cfg_;
+    // Constructed in onInitialized() once head_dim is inferred from the graphs.
+    // Overrides standard RoPE with tree-based position IDs during SSD decode.
+    std::optional<RotaryEmbedding> rope_;
 
     size_t               draft_levels_    = 0;      // = branches.size()
     size_t               num_draft_nodes_ = 0;      // total nodes in draft tree (including root)
@@ -80,7 +83,6 @@ class GENIEX_API SSDModel : public LLMModel {
     // Pre-cached KV tensor pointers, populated in onInitialized() to avoid per-iteration lookups.
     struct KVTensorInfo {
         size_t shard;
-        size_t layer;
         // Key: [H, 1, hd, kv_len] input / [H, 1, hd, seq_len] output
         void*       key_in_ptr      = nullptr;
         const void* key_out_ptr     = nullptr;
