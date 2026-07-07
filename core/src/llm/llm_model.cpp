@@ -17,6 +17,7 @@
 #include <unordered_set>
 
 #include "llm/input_provider.h"
+#include "llm/llm_utils.h"  // isKVTensor / isSpecialTensor
 #include "logging.h"
 #include "utils.h"
 
@@ -79,7 +80,70 @@ void fillEncodedZero(void* dst, size_t n_bytes, Qnn_DataType_t dt) {
         std::memset(dst, z.byte_val, n_bytes);
     }
 }
+
+// A raw token-id input (e.g. input_ids) is integer-typed; a hidden-state /
+// embedding tensor is float or fixed-point. Keeps hidden_size inference from
+// picking up a 2-D token-id tensor.
+bool isIntegerDtype(Qnn_DataType_t dt) {
+    switch (dt) {
+        case QNN_DATATYPE_INT_8:
+        case QNN_DATATYPE_INT_16:
+        case QNN_DATATYPE_INT_32:
+        case QNN_DATATYPE_INT_64:
+        case QNN_DATATYPE_UINT_8:
+        case QNN_DATATYPE_UINT_16:
+        case QNN_DATATYPE_UINT_32:
+        case QNN_DATATYPE_UINT_64:
+        case QNN_DATATYPE_BOOL_8:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Swaps the "key" token for "value" so a block declares only the key pattern.
+std::string keyPatternToValue(const std::string& key_pattern) {
+    const auto at = key_pattern.find("key");
+    if (at == std::string::npos) return {};
+    return key_pattern.substr(0, at) + "value" + key_pattern.substr(at + 3);
+}
+
+// Compiles `pattern` into a regex whose "{}" placeholder captures an integer.
+std::regex patternToRegex(const std::string& pattern) {
+    const std::string ph  = "{}";
+    auto              at  = pattern.find(ph);
+    auto              esc = [](const std::string& s) {
+        static const std::regex special(R"([.^$|()\[\]{}*+?\\])");
+        return std::regex_replace(s, special, R"(\$&)");
+    };
+    if (at == std::string::npos) return std::regex(esc(pattern));
+    return std::regex(esc(pattern.substr(0, at)) + R"((\d+))" + esc(pattern.substr(at + ph.size())));
+}
 }  // namespace
+
+std::vector<KVTensorPair> LLMModel::discoverKVPairs(const Graph& g, const StateBlockSpec& block) {
+    std::vector<KVTensorPair> pairs;
+    const std::string         value_out_pat = keyPatternToValue(block.key_out_pattern);
+    const std::string         value_in_pat  = keyPatternToValue(block.key_in_pattern);
+    const std::regex          key_out_re    = patternToRegex(block.key_out_pattern);
+
+    for (const auto& t : g.outputSpecs()) {
+        std::smatch m;
+        if (!std::regex_match(t.name, m, key_out_re)) continue;
+        const size_t layer = std::stoul(m[1].str());
+
+        KVTensorPair p{fmtPattern(block.key_in_pattern, layer),
+            fmtPattern(block.key_out_pattern, layer),
+            fmtPattern(value_in_pat, layer),
+            fmtPattern(value_out_pat, layer)};
+        if (!g.hasInput(p.key_in) || !g.hasInput(p.value_in) || !g.hasOutput(p.value_out)) {
+            throw std::runtime_error("inferSpecFromGraphs: graph '" + g.name() + "' has key_out '" + p.key_out +
+                                     "' but is missing a matching in/value KV tensor");
+        }
+        pairs.push_back(std::move(p));
+    }
+    return pairs;
+}
 
 /*static*/ std::string LLMModel::fmtPattern(const std::string& pattern, size_t layer_idx) {
     std::string       result      = pattern;
@@ -107,6 +171,61 @@ LLMModel::LLMModel(LLMSpec spec, ParsedGenieConfig gc) : spec_(std::move(spec)),
 LLMModel::~LLMModel() {
     // Stop workers before the KV buffers they reference are destroyed.
     if (decode_pool_) decode_pool_->stop();
+}
+
+void LLMModel::inferSpecFromGraphs() {
+    if (shard_count_ == 0 || num_cl_ == 0) {
+        throw std::runtime_error("inferSpecFromGraphs: shard_count and num_cl must be non-zero");
+    }
+    spec_.shards.assign(shard_count_, ShardSpec{});
+    if (spec_.state_blocks.empty()) spec_.state_blocks.push_back(makeKVStateBlock());
+    for (auto& block : spec_.state_blocks) block.shard_pairs.assign(shard_count_, {});
+
+    for (size_t s = 0; s < shard_count_; ++s) {
+        // Representative graph: prefill (phase 0), smallest CL, shard s.
+        const Graph& g = graph(graphIndex(0, s, 0));
+
+        std::string in_name, out_name;
+        for (const auto& t : g.inputSpecs()) {
+            if (in_name.empty() && !isSpecialTensor(t.name)) in_name = t.name;
+            // hidden_size = last dim of a hidden-state / embedding input. Skip
+            // integer token-id inputs (input_ids), whose last dim is seq length.
+            if (spec_.hidden_size == 0 && !isSpecialTensor(t.name) && !isIntegerDtype(t.dtype) && t.shape.size() >= 2) {
+                spec_.hidden_size = t.shape.back();
+            }
+            // KV shape: [num_kv_heads, 1, head_dim, kv_len].
+            if (t.name.rfind("past_key_", 0) == 0 && t.shape.size() >= 3) {
+                if (spec_.num_kv_heads == 0) spec_.num_kv_heads = t.shape[0];
+                if (spec_.head_dim == 0) spec_.head_dim = t.shape[2];
+            }
+        }
+        bool has_kv_out = false;
+        for (const auto& t : g.outputSpecs()) {
+            if (out_name.empty() && !isSpecialTensor(t.name)) out_name = t.name;
+            // Fallback: a hidden-state output also carries hidden_size.
+            if (spec_.hidden_size == 0 && !isSpecialTensor(t.name) && t.name != "logits" && !isIntegerDtype(t.dtype) &&
+                t.shape.size() >= 2) {
+                spec_.hidden_size = t.shape.back();
+            }
+            if (t.name == "logits" && spec_.vocab_size == 0) spec_.vocab_size = t.shape.back();
+            if (isKVTensor(t.name)) has_kv_out = true;
+        }
+        if (in_name.empty() || out_name.empty()) {
+            throw std::runtime_error("inferSpecFromGraphs: shard " + std::to_string(s + 1) + " (graph '" + g.name() +
+                                     "') has no non-special input/output tensor");
+        }
+        spec_.shards[s].in_state_name  = in_name;
+        spec_.shards[s].out_state_name = out_name;
+        spec_.shards[s].lm_head_only   = !has_kv_out && out_name == "logits" && s > 0;
+
+        for (auto& block : spec_.state_blocks) {
+            if (block.kind == StateBlockKind::KV) block.shard_pairs[s] = discoverKVPairs(g, block);
+        }
+    }
+
+    if (spec_.hidden_size == 0 || spec_.vocab_size == 0) {
+        throw std::runtime_error("inferSpecFromGraphs: could not determine hidden_size / vocab_size from graphs");
+    }
 }
 
 bool LLMModel::onInitialized() {
@@ -178,7 +297,7 @@ bool LLMModel::onInitialized() {
 
     // Infer every tensor-derived field (shapes, shard wiring, KV pairs) from
     // the now-sorted graphs. This is the sole source of truth for hyperparameters.
-    inferSpecFromGraphs(graphs_, shard_count_, num_cl_, spec_.seq_len_prefill, spec_);
+    inferSpecFromGraphs();
 
     kv_state_block_idx_ = std::numeric_limits<size_t>::max();
     for (size_t block_idx = 0; block_idx < spec_.state_blocks.size(); ++block_idx) {

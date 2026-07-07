@@ -16,16 +16,13 @@
 #include "llm/llm_types.h"
 #include "types.h"
 
-// Assembles an LLMSpec + matching CPU-side InputProviders in two phases,
-// because the numeric hyperparameters only become knowable after the graphs
-// load:
-//   1. Pre-init (JSON): buildSpecSkeleton fills the fields tensors can't carry
-//      — RoPE base/scaling, EOS/BOS, dialog type — from genie_config.json.
-//   2. Post-init (tensors): inferSpecFromGraphs derives every hardware shape
-//      (hidden size, KV heads, head dim, vocab, shard wiring, KV pairs) from
-//      the live compiled-graph TensorSpecs. This is the sole source of truth
-//      for hyperparameters. LLMModel::onInitialized drives this phase.
-// We do NOT consult HuggingFace config.json.
+// Reads a QAIRT model bundle's JSON sidecars and produces the pieces of an
+// LLMSpec that do NOT require the compiled graphs: the JSON-sourced fields
+// (RoPE base/scaling, EOS/BOS, dialog type) via buildSpecSkeleton, plus the
+// matching CPU-side InputProviders. Everything a tensor can carry (hidden
+// size, KV heads, head dim, vocab, shard wiring, KV pairs) is filled later
+// by LLMModel::inferSpecFromGraphs, once the HTP backend has loaded the
+// context binaries. We do NOT consult HuggingFace config.json.
 //
 // Bundle layout we depend on:
 //   genie_config.json — runtime config: dialog.type, context tokens, RoPE
@@ -80,7 +77,7 @@ struct ParsedVisionPreprocessing {
 
 // Fields read from metadata.json. Retained for the VLM path (vision
 // preprocessing + vision-encoder hidden size). The LLM path infers all of
-// these from graph tensors instead (see inferSpecFromGraphs).
+// these from graph tensors instead (see LLMModel::inferSpecFromGraphs).
 struct ParsedQAIRTMetadata {
     std::string model_id;  // e.g. "qwen3_4b", "llama_v3_2_3b_instruct_ssd"
 
@@ -156,13 +153,9 @@ GENIEX_API ParsedGenieConfig parseGenieConfig(const std::filesystem::path& bundl
 GENIEX_API ParsedSamplerConfig parseGenieSamplerConfig(const std::filesystem::path& bundle_dir);
 
 // Builds an LLMSpec with only the JSON-sourced fields (eos/bos tokens, a
-// default KV state block). inferSpecFromGraphs fills the rest after load.
+// default KV state block). LLMModel::inferSpecFromGraphs fills the rest once
+// the graphs load.
 GENIEX_API LLMSpec buildSpecSkeleton(const ParsedGenieConfig& gc);
-
-// Fills `spec`'s tensor-derived fields from the loaded graphs, which must be
-// sorted by (phase, shard, cl). Throws if a required field cannot be resolved.
-GENIEX_API void inferSpecFromGraphs(
-    const std::vector<Graph>& graphs, size_t shard_count, size_t num_cl, size_t seq_len_prefill, LLMSpec& spec);
 
 // Selects the RoPE provider variant from gc.rope_scaling. head_dim is resolved
 // by the caller from the position_ids_cos tensor.

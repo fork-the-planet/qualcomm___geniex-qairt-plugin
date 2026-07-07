@@ -50,7 +50,7 @@ class GENIEX_API LLMModel : public Model {
 
     size_t nPast() const;
 
-    // Vocabulary size derived from the bundle's metadata.json (logits last
+    // Vocabulary size inferred from the LM-head graph's logits tensor (last
     // dim). 0 if the model has not been initialized yet.
     size_t vocabSize() const;
 
@@ -59,6 +59,16 @@ class GENIEX_API LLMModel : public Model {
 
    protected:
     bool onInitialized() override;
+
+    // Fills spec_'s tensor-derived fields (shapes, shard wiring, KV pairs) from
+    // the loaded graphs_, which onInitialized has sorted by (phase, shard, cl).
+    // Sole source of truth for hyperparameters; throws if a field can't resolve.
+    void inferSpecFromGraphs();
+
+    // Resolves the KV tensor pairs a shard graph owns. Layer indices are global
+    // and may be non-zero-based and non-contiguous across shards, so they are
+    // read from the matched tensor names rather than assumed.
+    static std::vector<KVTensorPair> discoverKVPairs(const Graph& g, const StateBlockSpec& block);
 
     // Builds the CPU-side input providers after the spec is inferred.
     // Subclasses override to supply modality-specific providers.
