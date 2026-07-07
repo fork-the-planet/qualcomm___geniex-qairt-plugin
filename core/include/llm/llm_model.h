@@ -49,6 +49,10 @@ class GENIEX_API LLMModel : public Model {
 
     size_t nPast() const;
 
+    // Vocabulary size derived from the bundle's metadata.json (logits last
+    // dim). 0 if the model has not been initialized yet.
+    size_t vocabSize() const;
+
     // Must be called before initialize().
     void addInputProvider(std::unique_ptr<InputProvider> provider);
 

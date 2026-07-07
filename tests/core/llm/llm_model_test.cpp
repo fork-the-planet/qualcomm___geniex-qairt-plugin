@@ -88,6 +88,13 @@ TEST(LLMModel, InitializesFromGraphNames) {
     EXPECT_EQ(mf.model.nPast(), 0u);
 }
 
+// vocabSize() reports the value carried on LLMSpec (from the bundle's
+// metadata.json logits shape at spec-build time), independent of nPast/graphs.
+TEST(LLMModel, VocabSize) {
+    ModelFixture mf;
+    EXPECT_EQ(mf.model.vocabSize(), LLMFixture::kVocab);
+}
+
 // A short prefill + single decode step emits exactly the token the stub was
 // told to produce (greedy argmax, sampling disabled).
 TEST(LLMModel, GreedyDecodeEmitsStubToken) {

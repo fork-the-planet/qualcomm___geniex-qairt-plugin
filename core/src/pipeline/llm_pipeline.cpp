@@ -137,6 +137,25 @@ GenerateResult LLMPipeline::generate(
         input_ids.insert(input_ids.begin(), impl_->bos_token_id);
     }
 
+    return generateTokens(std::move(input_ids), gen_cfg, on_token);
+}
+
+GenerateResult LLMPipeline::generate(
+    const std::vector<int32_t>& input_ids, const GenerationConfig& gen_cfg, std::function<bool(const char*)> on_token) {
+    GenerateResult result;
+    if (!impl_->ready || !impl_->model) {
+        result.stop_reason = "error";
+        return result;
+    }
+
+    // Pre-tokenized path: no BOS prepending, no chat template —
+    // the caller owns the token ids verbatim.
+    return generateTokens(input_ids, gen_cfg, on_token);
+}
+
+GenerateResult LLMPipeline::generateTokens(
+    std::vector<int32_t> input_ids, const GenerationConfig& gen_cfg, const std::function<bool(const char*)>& on_token) {
+    GenerateResult result;
     result.prompt_tokens = static_cast<int64_t>(input_ids.size());
 
     // Inject the tokenizer; LLMModel needs it for grammar/EOG resolution.
@@ -197,5 +216,9 @@ void LLMPipeline::loadKVCache(const std::string& path) {
 }
 
 size_t LLMPipeline::nPast() const { return impl_->model ? impl_->model->nPast() : 0; }
+
+size_t LLMPipeline::vocabSize() const { return impl_->model ? impl_->model->vocabSize() : 0; }
+
+int32_t LLMPipeline::bosTokenId() const { return impl_->bos_token_id; }
 
 }  // namespace geniex

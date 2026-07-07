@@ -806,6 +806,8 @@ void LLMModel::loadKVCacheFromFile(const std::string& path) {
 
 size_t LLMModel::nPast() const { return n_past_; }
 
+size_t LLMModel::vocabSize() const { return spec_.vocab_size; }
+
 void LLMModel::addInputProvider(std::unique_ptr<InputProvider> provider) {
     input_providers_.push_back(std::move(provider));
 }
