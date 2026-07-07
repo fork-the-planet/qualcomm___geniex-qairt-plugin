@@ -74,6 +74,17 @@ struct GenerationConfig {
     int32_t max_tokens    = 512;
     bool    thinking_mode = false;
 
+    // Opt-in ring-buffer context eviction. When a prefill chunk or decode step
+    // would exceed the largest available context length, discard the oldest
+    // tokens above `sliding_window_n_keep` instead of throwing
+    // ContextLengthExceededError. Mirrors llama.cpp's context-shift heuristic
+    // (see LLMModel::computeSlideDiscard), but never re-rotates survivors'
+    // cached RoPE state -- QAIRT's compiled graphs cache post-RoPE K/V with no
+    // facility to re-rotate cached history, so evicted content is dropped and
+    // the surviving tail is relocated as-is (see LLMModel::slideWindowEvict).
+    bool    sliding_window        = false;
+    int32_t sliding_window_n_keep = 4;
+
     // Sampling (geniex-proc). Zero on top_k/top_p/min_p/penalties is
     // "disabled" inside the chain (matches geniex-proc semantics).
     bool     enable_sampling    = false;

@@ -47,6 +47,7 @@ class TestableLLMModel : public geniex::LLMModel {
     }
 
     // Expose protected helpers for direct testing.
+    using geniex::LLMModel::computeSlideDiscard;
     using geniex::LLMModel::fmtPattern;
 };
 
@@ -155,6 +156,74 @@ TEST(LLMModel, ThrowsWhenPromptExceedsContext) {
 
     std::vector<int32_t> prompt(LLMFixture::kContextLen + 1, 1);
     EXPECT_THROW(mf.model.generate(prompt, greedyConfig(/*max_tokens=*/1)), geniex::ContextLengthExceededError);
+
+    geniex::testing::stubSetNextToken(-1);
+}
+
+// computeSlideDiscard mirrors llama.cpp's context-shift heuristic: normally
+// discards ~half of (n_past - n_keep), but discards at least enough to fit
+// n_fit more when that alone demands more room.
+TEST(LLMModel, ComputeSlideDiscardHalfWindow) {
+    // n_past=4096, n_fit=1, max_cl=4096, n_keep=4:
+    // needed = 4096+1-4096+1 = 2; half = 4096/2-4 = 2044; max(2044,2) = 2044.
+    EXPECT_EQ(TestableLLMModel::computeSlideDiscard(4096, 1, 4096, 4), 2044u);
+}
+
+TEST(LLMModel, ComputeSlideDiscardNeededDominatesOnBigChunk) {
+    // n_past=4090, n_fit=2048, max_cl=4096, n_keep=4:
+    // needed = 4090+2048-4096+1 = 2043; half = 4090/2-4 = 2041; max(2041,2043) = 2043.
+    EXPECT_EQ(TestableLLMModel::computeSlideDiscard(4090, 2048, 4096, 4), 2043u);
+}
+
+TEST(LLMModel, ComputeSlideDiscardNoOpWhenAtOrBelowNKeep) {
+    EXPECT_EQ(TestableLLMModel::computeSlideDiscard(4, 1, 4096, 4), 0u);
+    EXPECT_EQ(TestableLLMModel::computeSlideDiscard(2, 1, 4096, 4), 0u);
+}
+
+// With sliding_window enabled, a prompt that would otherwise exceed the max
+// context length instead evicts the oldest tokens (above n_keep) and
+// continues, rather than throwing ContextLengthExceededError.
+TEST(LLMModel, SlidingWindowEvictsAndContinuesOnLongPrompt) {
+    ModelFixture mf;
+    geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+    geniex::testing::stubSetNextToken(5);
+
+    // LLMFixture::kContextLen == 16. Prime n_past close to the ceiling with a
+    // first turn, then send a second prompt that would overflow without eviction.
+    geniex::GenerationConfig cfg = greedyConfig(/*max_tokens=*/1);
+    cfg.sliding_window           = true;
+    cfg.sliding_window_n_keep    = 2;
+
+    auto out1 = mf.model.generate({1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, cfg);  // n_past -> 11
+    ASSERT_EQ(out1.size(), 1u);
+    EXPECT_EQ(mf.model.nPast(), 11u);
+
+    // A 6-token prompt would push n_past to 11+6+1(decode)=18 > 16; without
+    // sliding_window this throws (see ThrowsWhenPromptExceedsContext).
+    auto out2 = mf.model.generate({11, 12, 13, 14, 15, 16}, cfg);
+    ASSERT_EQ(out2.size(), 1u);
+    EXPECT_EQ(out2[0], 5);
+    // Some eviction must have happened: n_past after this call is strictly
+    // less than what it would be without eviction (11+6+1=18), and still
+    // fits within kContextLen.
+    EXPECT_LE(mf.model.nPast(), LLMFixture::kContextLen);
+    EXPECT_LT(mf.model.nPast(), 18u);
+
+    geniex::testing::stubSetNextToken(-1);
+}
+
+// Without sliding_window, the same scenario as above still throws -- sliding
+// eviction is strictly opt-in and doesn't change default behavior.
+TEST(LLMModel, SlidingWindowDisabledByDefaultStillThrows) {
+    ModelFixture mf;
+    geniex::testing::stubSetVocabSize(LLMFixture::kVocab);
+    geniex::testing::stubSetNextToken(5);
+
+    auto out1 = mf.model.generate({1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, greedyConfig(/*max_tokens=*/1));
+    ASSERT_EQ(out1.size(), 1u);
+
+    EXPECT_THROW(mf.model.generate({11, 12, 13, 14, 15, 16}, greedyConfig(/*max_tokens=*/1)),
+        geniex::ContextLengthExceededError);
 
     geniex::testing::stubSetNextToken(-1);
 }

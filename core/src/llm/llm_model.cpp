@@ -474,6 +474,107 @@ bool LLMModel::promoteCL(size_t required, size_t capacity_reserved_seq, size_t s
     return true;
 }
 
+// Mirrors llama.cpp's context-shift heuristic (sdk/plugins/llama_cpp's slide_window lambda):
+// normally discards ~half of the tokens above n_keep, but discards at least enough to fit
+// `n_fit` more when that alone demands more room than the "half" heuristic would free.
+// Returns 0 when n_past <= n_keep or when no positive discard is needed.
+/*static*/ size_t LLMModel::computeSlideDiscard(size_t n_past, size_t n_fit, size_t max_cl, size_t n_keep) {
+    if (n_past <= n_keep) return 0;
+
+    const auto past   = static_cast<std::ptrdiff_t>(n_past);
+    const auto fit     = static_cast<std::ptrdiff_t>(n_fit);
+    const auto cl      = static_cast<std::ptrdiff_t>(max_cl);
+    const auto keep    = static_cast<std::ptrdiff_t>(n_keep);
+    const auto needed  = past + fit - cl + 1;
+
+    auto discard = std::max(past / 2 - keep, needed);
+    discard      = std::min(discard, past - keep);
+    return discard > 0 ? static_cast<size_t>(discard) : 0;
+}
+
+// Evicts KV entries for tokens [n_keep, n_keep + n_discard) and relocates the surviving tail
+// [n_keep + n_discard, n_past_) down to start at n_keep, across every shard. `kv_len` is the
+// *current logical* KV stride (context_lengths[active_cl_idx_] minus whichever seq_len the caller
+// has currently reserved) -- the same value reshapeKV's old_kv_len/new_kv_len take, since the
+// physical buffer capacity (TensorSpec::shape) is sized to the largest stride ever needed and is
+// not itself the active stride. Survivors' cached RoPE rotation is left untouched -- QAIRT's
+// compiled graphs cache post-RoPE K/V with cos/sin graph inputs sized to only the current
+// forward-pass chunk (verified against a real Qwen3 bundle's metadata.json: position_ids_cos/sin
+// never carry a kv_len-sized dimension), so there is no in-graph facility to re-rotate history the
+// way llama.cpp's llama_memory_seq_add does. This leaves a small positional "seam" at the eviction
+// boundary rather than perfectly renumbering survivors, but is correct regardless of the graph's
+// RoPE-caching convention.
+void LLMModel::slideWindowEvict(size_t kv_len, size_t n_discard, size_t n_keep) {
+    if (n_discard == 0) return;
+
+    GENIEX_LOG_INFO("sliding window: discarding {} tokens (n_keep={}), n_past {} -> {}",
+        n_discard,
+        n_keep,
+        n_past_,
+        n_past_ - n_discard);
+
+    const size_t n_valid = n_past_;  // tokens resident before eviction
+    for (size_t s = 0; s < shard_count_; ++s) evictShardKV(s, kv_len, n_discard, n_keep, n_valid);
+    n_past_ -= n_discard;
+}
+
+void LLMModel::evictShardKV(size_t shard, size_t kv_len, size_t n_discard, size_t n_keep, size_t n_valid) {
+    const auto& kv_block     = requireKVStateBlock();
+    const auto& layer_ranges = kv_block.shard_layer_ranges[shard];
+    if (layer_ranges.empty()) return;
+
+    // All CL/phase variants share the same physical buffer (see reshapeKV), so read/write via the
+    // phase-0 (prefill) graph regardless of which phase is currently active.
+    Graph& g = graph(graphIndex(0, shard, active_cl_idx_));
+
+    const size_t tail_begin = n_keep + n_discard;
+    const size_t tail_len   = (n_valid > tail_begin) ? (n_valid - tail_begin) : 0;
+
+    forEachLayerInRanges(layer_ranges, [&](size_t l) {
+        const auto key_in = fmtPattern(kv_block.key_in_pattern, l);
+
+        // Key: [num_kv_heads, 1, head_dim, kv_len]. Each row's data lives entirely within that row
+        // (kv_len is unchanged), so per-row memmove is safe in any iteration order.
+        {
+            const TensorSpec& spec      = g.inputSpec(key_in);
+            const size_t      elem_size = spec.elementSize();
+            const size_t      n_rows    = spec_.num_kv_heads * spec_.head_dim;
+            auto*             buf       = static_cast<uint8_t*>(g.inputPtr(key_in));
+
+            for (size_t row = 0; row < n_rows; ++row) {
+                uint8_t* row_buf = buf + row * kv_len * elem_size;
+                std::memmove(row_buf + n_keep * elem_size, row_buf + tail_begin * elem_size, tail_len * elem_size);
+                if (n_keep + tail_len < kv_len) {
+                    fillEncodedZero(row_buf + (n_keep + tail_len) * elem_size,
+                        (kv_len - n_keep - tail_len) * elem_size,
+                        spec.dtype);
+                }
+            }
+        }
+
+        // Value: [num_kv_heads, 1, kv_len, head_dim]
+        {
+            const auto        val_in     = fmtPattern(kv_block.value_in_pattern, l);
+            const TensorSpec& spec       = g.inputSpec(val_in);
+            const size_t      elem_size  = spec.elementSize();
+            const size_t      n_heads    = spec_.num_kv_heads;
+            const size_t      token_size = spec_.head_dim * elem_size;
+            auto*             buf        = static_cast<uint8_t*>(g.inputPtr(val_in));
+
+            for (size_t h = 0; h < n_heads; ++h) {
+                uint8_t* head_buf = buf + h * kv_len * token_size;
+                std::memmove(
+                    head_buf + n_keep * token_size, head_buf + tail_begin * token_size, tail_len * token_size);
+                if (n_keep + tail_len < kv_len) {
+                    fillEncodedZero(head_buf + (n_keep + tail_len) * token_size,
+                        (kv_len - n_keep - tail_len) * token_size,
+                        spec.dtype);
+                }
+            }
+        }
+    });
+}
+
 std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens, const GenerationConfig& gen_cfg,
     std::function<bool(int32_t)> token_callback) {
     size_t       tokens_processed = 0;
@@ -487,11 +588,34 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
     // argmax fast path.
     prepareSampler(gen_cfg, prompt_tokens);
 
-    // Reject prompts that cannot fit in the largest available context length.
+    // Reject prompts that cannot fit in the largest available context length, unless sliding_window
+    // is opted in, in which case evict the oldest tokens above n_keep to make room first.
     // context_lengths is sorted ascending, so the last entry is the max CL.
     const size_t max_cl = spec_.context_lengths.back();
+    const size_t n_keep = gen_cfg.sliding_window
+                              ? std::min<size_t>(static_cast<size_t>(std::max<int32_t>(gen_cfg.sliding_window_n_keep, 0)), max_cl)
+                              : 0;
+
+    // Attempts to evict enough of the oldest tokens (above n_keep) to fit `n_fit` more within the
+    // KV buffer currently strided at `kv_len` (prefill or decode stride, whichever the caller has
+    // active). Returns false (no-op) when sliding_window is disabled or eviction alone cannot make
+    // the requested room.
+    auto try_slide = [&](size_t n_fit, size_t kv_len) -> bool {
+        if (!gen_cfg.sliding_window) return false;
+        const size_t n_discard = computeSlideDiscard(n_past_, n_fit, max_cl, n_keep);
+        if (n_discard == 0 || (n_past_ - n_discard) + n_fit > max_cl) return false;
+        slideWindowEvict(kv_len, n_discard, n_keep);
+        return true;
+    };
+
     if (n_past_ + total_tokens > max_cl) {
-        throw ContextLengthExceededError("geniex: prompt exceeds max context length (" + std::to_string(max_cl) + ")");
+        // Entering generate(), the KV buffer is left at the prefill stride by the previous call's
+        // cleanup reshape (or at initKVBuffers()'s default on the very first call).
+        try_slide(total_tokens, spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill);
+        if (n_past_ + total_tokens > max_cl) {
+            throw ContextLengthExceededError(
+                "geniex: prompt exceeds max context length (" + std::to_string(max_cl) + ")");
+        }
     }
 
     while (tokens_processed < total_tokens) {
@@ -569,15 +693,20 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             break;
         }
 
-        // Stop and report when the next decode step would exceed the largest available CL.
-        if (n_past_ + 1 > max_cl) {
-            throw ContextLengthExceededError(
-                "geniex: generation exceeds max context length (" + std::to_string(max_cl) + ")");
-        }
-
-        // KV write-back from the previous step must finish before restriding or
+        // KV write-back from the previous step must finish before restriding, evicting, or
         // re-reading the KV buffers below.
         if (decode_pool_) decode_pool_->wait();
+
+        // Stop and report when the next decode step would exceed the largest available CL.
+        // With sliding_window enabled, evict the oldest tokens above n_keep to make room first.
+        // The KV buffer is at the decode stride throughout this loop (switched right before it).
+        if (n_past_ + 1 > max_cl) {
+            try_slide(1, spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode);
+            if (n_past_ + 1 > max_cl) {
+                throw ContextLengthExceededError(
+                    "geniex: generation exceeds max context length (" + std::to_string(max_cl) + ")");
+            }
+        }
 
         // Ensure the decode KV buffer (CL - seq_len_decode) has room for the write at offset n_past_.
         promoteCL(/*required=*/n_past_ + 1,

@@ -96,6 +96,25 @@ class GENIEX_API LLMModel : public Model {
     // restriding all KV layers from the current CL to the new CL at stride
     bool promoteCL(size_t required, size_t capacity_reserved_seq, size_t stride_reserved_seq);
 
+    // Number of oldest tokens (above n_keep) to discard so that `n_fit` more tokens fit within
+    // max_cl. Mirrors llama.cpp's context-shift heuristic: normally discards ~half of
+    // (n_past - n_keep), but discards at least enough to fit `n_fit` when that alone demands more.
+    // Returns 0 when n_past <= n_keep (nothing to discard).
+    static size_t computeSlideDiscard(size_t n_past, size_t n_fit, size_t max_cl, size_t n_keep);
+
+    // Evicts KV entries for tokens [n_keep, n_keep + n_discard) and relocates the surviving tail
+    // [n_keep + n_discard, n_past_) down to start at n_keep, across every shard. kv_len is the
+    // *current logical* KV stride (context_lengths[active_cl_idx_] minus whichever seq_len the
+    // caller has reserved -- the same value reshapeKV's old/new_kv_len take). Unlike reshapeKV,
+    // this never changes the buffer stride -- it only relocates bytes within it. Survivors' cached
+    // RoPE rotation is left untouched (not renumbered / re-rotated); see GenerationConfig::
+    // sliding_window for why. Updates n_past_.
+    void slideWindowEvict(size_t kv_len, size_t n_discard, size_t n_keep);
+
+    // Per-shard half of slideWindowEvict: does the strided memmove for one shard's owned KV layers.
+    // n_valid is the count of resident tokens (== n_past_) before eviction.
+    void evictShardKV(size_t shard, size_t kv_len, size_t n_discard, size_t n_keep, size_t n_valid);
+
     LLMSpec                                     spec_;
     std::vector<std::unique_ptr<InputProvider>> input_providers_;
 
