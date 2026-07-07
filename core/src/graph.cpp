@@ -169,6 +169,7 @@ void Graph::buildSpecs() {
         TensorSpec spec;
         spec.name  = QNN_TENSOR_GET_NAME(t);
         spec.dtype = QNN_TENSOR_GET_DATA_TYPE(t);
+        spec.type  = QNN_TENSOR_GET_TYPE(t);
 
         const uint32_t  rank = QNN_TENSOR_GET_RANK(t);
         const uint32_t* dims = QNN_TENSOR_GET_DIMENSIONS(t);
@@ -178,6 +179,21 @@ void Graph::buildSpecs() {
         if (qp.quantizationEncoding == QNN_QUANTIZATION_ENCODING_SCALE_OFFSET) {
             spec.quant_scale  = qp.scaleOffsetEncoding.scale;
             spec.quant_offset = qp.scaleOffsetEncoding.offset;
+        } else if (qp.quantizationEncoding == QNN_QUANTIZATION_ENCODING_AXIS_SCALE_OFFSET) {
+            const auto& axis = qp.axisScaleOffsetEncoding;
+            spec.axis_quant.reserve(axis.numScaleOffsets);
+            for (uint32_t i = 0; i < axis.numScaleOffsets; ++i) {
+                spec.axis_quant.emplace_back(axis.scaleOffset[i].scale, axis.scaleOffset[i].offset);
+            }
+        }
+
+        if (const uint8_t* dyn = QNN_TENSOR_GET_IS_DYNAMIC_DIMENSIONS(t)) {
+            for (uint32_t i = 0; i < rank; ++i) {
+                if (dyn[i]) {
+                    spec.has_dynamic_dims = true;
+                    break;
+                }
+            }
         }
         return spec;
     };
