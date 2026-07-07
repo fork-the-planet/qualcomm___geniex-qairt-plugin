@@ -80,6 +80,7 @@ set(CORE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/logging.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/model.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/src/model_init.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/utils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/src/threadpool.cpp
