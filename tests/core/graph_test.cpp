@@ -62,6 +62,36 @@ TEST(GraphSetup, BuildsSpecsFromGraphInfo) {
     EXPECT_EQ(out.quant_offset, -2);
 }
 
+// Per-axis quantized tensors surface their (scale, offset) pairs on the spec.
+TEST(GraphSetup, BuildsAxisQuantSpec) {
+    TensorDesc weight{"w", QNN_DATATYPE_UFIXED_POINT_8, {3, 2}};
+    weight.axis_quant = {{0.1f, -1}, {0.2f, 0}, {0.3f, 5}};
+
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}}, {weight});
+    GraphFixture     f(b);
+
+    const auto& spec = f.graph.outputSpec("w");
+    ASSERT_EQ(spec.axis_quant.size(), 3u);
+    EXPECT_FLOAT_EQ(spec.axis_quant[0].first, 0.1f);
+    EXPECT_EQ(spec.axis_quant[0].second, -1);
+    EXPECT_FLOAT_EQ(spec.axis_quant[2].first, 0.3f);
+    EXPECT_EQ(spec.axis_quant[2].second, 5);
+}
+
+// A tensor flagged with any dynamic dimension reports has_dynamic_dims.
+TEST(GraphSetup, DetectsDynamicDimensions) {
+    TensorDesc dyn{"d", QNN_DATATYPE_FLOAT_32, {4, 8}};
+    dyn.dynamic_dims = {0, 1};  // second axis is dynamic
+
+    TensorDesc stat{"s", QNN_DATATYPE_FLOAT_32, {4}};  // no dynamic flags
+
+    GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {2}}}, {dyn, stat});
+    GraphFixture     f(b);
+
+    EXPECT_TRUE(f.graph.outputSpec("d").has_dynamic_dims);
+    EXPECT_FALSE(f.graph.outputSpec("s").has_dynamic_dims);
+}
+
 TEST(GraphIO, Float32RoundTrip) {
     GraphInfoBuilder b("g", {{"in", QNN_DATATYPE_FLOAT_32, {4}}}, {{"out", QNN_DATATYPE_FLOAT_32, {4}}});
     GraphFixture     f(b);

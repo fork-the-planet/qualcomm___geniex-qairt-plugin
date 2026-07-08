@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <utility>
@@ -80,6 +81,62 @@ geniex::GenerationConfig greedyConfig(int32_t max_tokens) {
     cfg.max_tokens      = max_tokens;
     return cfg;
 }
+
+// Single-shard fixture whose first input is an integer token-id tensor
+// (`input_ids`) alongside a float `input_embeds`. Exercises the isIntegerDtype
+// guard: hidden_size must be read from the float embedding, never from the
+// integer token-id input.
+struct IntInputFixture {
+    static constexpr uint32_t kVocab      = 8;
+    static constexpr uint32_t kHidden     = 4;
+    static constexpr uint32_t kKVHeads    = 1;
+    static constexpr uint32_t kHeadDim    = 2;
+    static constexpr uint32_t kContextLen = 16;
+    static constexpr uint32_t kArPrefill  = 4;
+    static constexpr uint32_t kArDecode   = 1;
+
+    QnnApi   api;
+    IOTensor io{BufferAlloc::DEFAULT};
+
+    std::deque<geniex::testing::GraphInfoBuilder> builders;
+    std::vector<geniex::Graph>                    graphs;
+
+    IntInputFixture() {
+        const uint32_t kv_capacity = kContextLen - kArDecode;
+        addGraph("prefill_ar4_cl16_1_of_1", kArPrefill, kv_capacity);
+        addGraph("token_ar1_cl16_1_of_1", kArDecode, kv_capacity);
+    }
+
+    IntInputFixture(const IntInputFixture&)            = delete;
+    IntInputFixture& operator=(const IntInputFixture&) = delete;
+
+    static geniex::LLMSpec makeSpec() {
+        geniex::LLMSpec spec;
+        spec.state_blocks.push_back(geniex::makeKVStateBlock());
+        return spec;
+    }
+
+   private:
+    void addGraph(const std::string& name, uint32_t ar, uint32_t kv_capacity) {
+        using geniex::testing::TensorDesc;
+        std::vector<TensorDesc> inputs{
+            {"input_ids", QNN_DATATYPE_INT_32, {ar}},
+            {"input_embeds", QNN_DATATYPE_FLOAT_32, {ar, kHidden}},
+            {"attention_mask", QNN_DATATYPE_FLOAT_32, {ar, kContextLen}},
+            {"past_key_0_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, kv_capacity}},
+            {"past_value_0_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kv_capacity, kHeadDim}},
+        };
+        std::vector<TensorDesc> outputs{
+            {"logits", QNN_DATATYPE_FLOAT_32, {ar, kVocab}},
+            {"past_key_0_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, ar}},
+            {"past_value_0_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, ar, kHeadDim}},
+        };
+        builders.emplace_back(name, inputs, outputs);
+        geniex::Graph g(&builders.back().graphInfo(), &api, &io);
+        g.setup(/*context=*/nullptr);
+        graphs.push_back(std::move(g));
+    }
+};
 
 }  // namespace
 
@@ -359,4 +416,214 @@ TEST(LLMModel, MultiShardPrefillAndConnections) {
     EXPECT_EQ(out[0], 6);
 
     geniex::testing::stubSetNextToken(-1);
+}
+
+// inferSpecFromGraphs must read hidden_size from the float embedding input and
+// skip the integer `input_ids` (the isIntegerDtype guard). in_state_name is the
+// first non-special input (input_ids), which drives the token-id embedding
+// provider.
+TEST(LLMModel, IntegerInputSkippedForHiddenSize) {
+    NoDecodePoolEnv  no_pool;
+    IntInputFixture  fx;
+    TestableLLMModel model{IntInputFixture::makeSpec()};
+    ASSERT_TRUE(model.initFromFixture(fx));
+
+    EXPECT_EQ(model.spec_.hidden_size, IntInputFixture::kHidden);  // from input_embeds, not input_ids
+    EXPECT_EQ(model.spec_.vocab_size, IntInputFixture::kVocab);
+    EXPECT_EQ(model.spec_.shards[0].in_state_name, "input_ids");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// llm_spec_loader public API (JSON-sourced spec + provider factories)
+// ─────────────────────────────────────────────────────────────────────────────
+namespace {
+
+// Writes a minimal metadata.json + genie_config.json into a unique temp dir and
+// removes the tree on destruction.
+struct TempBundle {
+    std::filesystem::path dir;
+
+    TempBundle() {
+        dir = std::filesystem::temp_directory_path() / ("geniex_loader_test_" + std::to_string(counter_++));
+        std::filesystem::create_directories(dir);
+        write("metadata.json", kMetadata);
+        write("genie_config.json", kGenieConfig);
+    }
+    ~TempBundle() {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    TempBundle(const TempBundle&)            = delete;
+    TempBundle& operator=(const TempBundle&) = delete;
+
+   private:
+    void write(const char* name, const char* body) const {
+        std::ofstream(dir / name) << body;
+    }
+    static inline int counter_ = 0;
+
+    static constexpr const char* kMetadata = R"({
+        "model_id": "test_llm",
+        "vision_preprocessing": {
+            "image_width": 336, "image_height": 336, "patch_size": 14,
+            "temporal_patch_size": 2, "spatial_merge_size": 2,
+            "normalize_mean": [0.5, 0.5, 0.5], "normalize_std": [0.5, 0.5, 0.5]
+        },
+        "model_files": {
+            "ar4_cl16_1_of_1": {
+                "inputs": {
+                    "inputs_embeds": { "shape": [1, 4, 4] },
+                    "attention_mask": { "shape": [1, 4, 16] },
+                    "past_key_0_in": { "shape": [1, 1, 2, 16] }
+                },
+                "outputs": {
+                    "logits": { "shape": [1, 4, 8] },
+                    "past_key_0_out": { "shape": [1, 1, 2, 4] }
+                }
+            },
+            "vision_encoder.bin": { "inputs": {}, "outputs": {} }
+        }
+    })";
+
+    static constexpr const char* kGenieConfig = R"({
+        "dialog": {
+            "type": "basic",
+            "context": { "bos-token": 1, "eos-token": [2, 3], "pad-token": 0 },
+            "engine": {
+                "model": {
+                    "positional-encoding": {
+                        "rope-theta": 1000000.0,
+                        "rope-scaling": { "rope-type": "llama3", "factor": 8.0 }
+                    }
+                }
+            },
+            "sampler": { "seed": 42, "temp": 0.7, "top-k": 40, "top-p": 0.9 }
+        }
+    })";
+};
+
+}  // namespace
+
+// parseQAIRTMetadata derives shapes and the vision block from metadata.json
+// (retained for the VLM path and model_id dispatch).
+TEST(LLMSpecLoader, ParsesMetadataShapesAndVision) {
+    TempBundle bundle;
+    const auto meta = geniex::parseQAIRTMetadata(bundle.dir);
+
+    EXPECT_EQ(meta.model_id, "test_llm");
+    EXPECT_EQ(meta.hidden_size, 4u);
+    EXPECT_EQ(meta.num_kv_heads, 1u);
+    EXPECT_EQ(meta.head_dim, 2u);
+    EXPECT_EQ(meta.vocab_size, 8u);
+    EXPECT_EQ(meta.num_hidden_layers, 1u);
+    EXPECT_EQ(meta.first_shard_input_hint, "inputs_embeds");
+    EXPECT_EQ(meta.vision_encoder_graph, "vision_encoder.bin");
+    ASSERT_TRUE(meta.vision_preprocessing.has_value());
+    EXPECT_EQ(meta.vision_preprocessing->image_width, 336);
+    EXPECT_EQ(meta.vision_preprocessing->patch_size, 14);
+}
+
+// parseQAIRTMetadata throws when the bundle has no recognizable shard entries.
+TEST(LLMSpecLoader, ParseMetadataThrowsWithoutShards) {
+    const auto dir = std::filesystem::temp_directory_path() / "geniex_loader_empty";
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "metadata.json") << R"({"model_files": {}})";
+    EXPECT_THROW(geniex::parseQAIRTMetadata(dir), std::runtime_error);
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+// parseGenieConfig reads dialog tokens and the RoPE base/scaling.
+TEST(LLMSpecLoader, ParsesGenieConfig) {
+    TempBundle bundle;
+    const auto gc = geniex::parseGenieConfig(bundle.dir);
+
+    EXPECT_EQ(gc.dialog_type, "basic");
+    EXPECT_EQ(gc.bos_token_id, 1);
+    EXPECT_EQ(gc.pad_token_id, 0);
+    ASSERT_EQ(gc.eos_token_ids.size(), 2u);
+    EXPECT_EQ(gc.eos_token_ids[0], 2);
+    EXPECT_EQ(gc.eos_token_ids[1], 3);
+    EXPECT_FLOAT_EQ(gc.rope_theta, 1000000.0f);
+    EXPECT_TRUE(std::holds_alternative<geniex::Llama3RopeScaling>(gc.rope_scaling));
+}
+
+// parseGenieSamplerConfig reads the dialog.sampler defaults.
+TEST(LLMSpecLoader, ParsesSamplerConfig) {
+    TempBundle bundle;
+    const auto s = geniex::parseGenieSamplerConfig(bundle.dir);
+
+    ASSERT_TRUE(s.seed.has_value());
+    EXPECT_EQ(*s.seed, 42u);
+    ASSERT_TRUE(s.temperature.has_value());
+    EXPECT_FLOAT_EQ(*s.temperature, 0.7f);
+    ASSERT_TRUE(s.top_k.has_value());
+    EXPECT_EQ(*s.top_k, 40);
+}
+
+// Missing genie_config.json yields all-default structs, never a throw.
+TEST(LLMSpecLoader, MissingGenieConfigReturnsDefaults) {
+    const auto dir = std::filesystem::temp_directory_path() / "geniex_loader_no_cfg";
+    std::filesystem::create_directories(dir);
+    const auto gc = geniex::parseGenieConfig(dir);
+    EXPECT_EQ(gc.dialog_type, "basic");
+    EXPECT_TRUE(gc.eos_token_ids.empty());
+    EXPECT_TRUE(std::holds_alternative<geniex::StandardRope>(gc.rope_scaling));
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+}
+
+// buildSpecSkeleton carries the JSON-sourced fields and a default KV block;
+// tensor-derived fields stay zero until inference.
+TEST(LLMSpecLoader, BuildsSkeletonSpec) {
+    geniex::ParsedGenieConfig gc;
+    gc.bos_token_id  = 1;
+    gc.eos_token_ids = {2, 3};
+
+    const auto spec = geniex::buildSpecSkeleton(gc);
+    EXPECT_EQ(spec.bos_token_id, 1);
+    EXPECT_EQ(spec.eos_token_ids, (std::vector<int32_t>{2, 3}));
+    EXPECT_EQ(spec.hidden_size, 0u);  // filled later by inferSpecFromGraphs
+    ASSERT_EQ(spec.state_blocks.size(), 1u);
+    EXPECT_EQ(spec.state_blocks[0].kind, geniex::StateBlockKind::KV);
+}
+
+// makeRoPEProvider selects a non-null provider for every rope-scaling variant.
+TEST(LLMSpecLoader, MakesRoPEProviderForEveryVariant) {
+    constexpr size_t          kHeadDim = 64;
+    geniex::ParsedGenieConfig gc;
+
+    gc.rope_scaling = geniex::StandardRope{};
+    EXPECT_NE(geniex::makeRoPEProvider(kHeadDim, gc), nullptr);
+
+    gc.rope_scaling = geniex::Llama3RopeScaling{8.0f, 1.0f, 4.0f, 8192};
+    EXPECT_NE(geniex::makeRoPEProvider(kHeadDim, gc), nullptr);
+
+    geniex::LongRopeScaling lrs;
+    lrs.long_factor                     = std::vector<float>(kHeadDim / 2, 1.0f);
+    lrs.short_factor                    = std::vector<float>(kHeadDim / 2, 1.0f);
+    lrs.original_max_position_embeddings = 4096;
+    gc.rope_scaling                     = lrs;
+    EXPECT_NE(geniex::makeRoPEProvider(kHeadDim, gc), nullptr);
+
+    gc.rope_scaling = geniex::PartialRopeScaling{0.5f, 1.0f};
+    EXPECT_NE(geniex::makeRoPEProvider(kHeadDim, gc), nullptr);
+
+    geniex::MRopeScaling mrs;
+    mrs.mrope_section = {16, 24, 24};
+    gc.rope_scaling   = mrs;
+    EXPECT_NE(geniex::makeRoPEProvider(kHeadDim, gc), nullptr);
+}
+
+// makeEmbeddingProvider maps the first-shard input name to a provider and
+// rejects unknown names.
+TEST(LLMSpecLoader, MakesEmbeddingProviderByInputName) {
+    geniex::ParsedGenieConfig gc;
+    gc.eos_token_ids = {2};
+
+    EXPECT_NE(geniex::makeEmbeddingProvider("input_ids", gc), nullptr);
+    EXPECT_NE(geniex::makeEmbeddingProvider("inputs_embeds", gc), nullptr);
+    EXPECT_NE(geniex::makeEmbeddingProvider("input_embeds", gc), nullptr);
+    EXPECT_THROW(geniex::makeEmbeddingProvider("bogus_tensor", gc), std::runtime_error);
 }
