@@ -81,31 +81,11 @@ void fillEncodedZero(void* dst, size_t n_bytes, Qnn_DataType_t dt) {
     }
 }
 
-// A raw token-id input (e.g. input_ids) is integer-typed; a hidden-state /
-// embedding tensor is float or fixed-point. Keeps hidden_size inference from
-// picking up a 2-D token-id tensor.
-bool isIntegerDtype(Qnn_DataType_t dt) {
-    switch (dt) {
-        case QNN_DATATYPE_INT_8:
-        case QNN_DATATYPE_INT_16:
-        case QNN_DATATYPE_INT_32:
-        case QNN_DATATYPE_INT_64:
-        case QNN_DATATYPE_UINT_8:
-        case QNN_DATATYPE_UINT_16:
-        case QNN_DATATYPE_UINT_32:
-        case QNN_DATATYPE_UINT_64:
-        case QNN_DATATYPE_BOOL_8:
-            return true;
-        default:
-            return false;
-    }
-}
-
-// Swaps the "key" token for "value" so a block declares only the key pattern.
-std::string keyPatternToValue(const std::string& key_pattern) {
-    const auto at = key_pattern.find("key");
-    if (at == std::string::npos) return {};
-    return key_pattern.substr(0, at) + "value" + key_pattern.substr(at + 3);
+// The inter-shard hidden-state / embedding tensor names an LLM export uses for
+// the value hidden_size is read from. Matching by name (as Genie does) avoids
+// mistaking another float input — a mask or bias — for the hidden state.
+bool isHiddenStateName(const std::string& name) {
+    return name == "inputs_embeds" || name == "input_embeds" || name == "hidden_states" || name == "hidden_state";
 }
 
 // Compiles `pattern` into a regex whose "{}" placeholder captures an integer.
@@ -123,9 +103,7 @@ std::regex patternToRegex(const std::string& pattern) {
 
 std::vector<KVTensorPair> LLMModel::discoverKVPairs(const Graph& g, const StateBlockSpec& block) {
     std::vector<KVTensorPair> pairs;
-    const std::string         value_out_pat = keyPatternToValue(block.key_out_pattern);
-    const std::string         value_in_pat  = keyPatternToValue(block.key_in_pattern);
-    const std::regex          key_out_re    = patternToRegex(block.key_out_pattern);
+    const std::regex          key_out_re = patternToRegex(block.key_out_pattern);
 
     for (const auto& t : g.outputSpecs()) {
         std::smatch m;
@@ -134,8 +112,11 @@ std::vector<KVTensorPair> LLMModel::discoverKVPairs(const Graph& g, const StateB
 
         KVTensorPair p{fmtPattern(block.key_in_pattern, layer),
             fmtPattern(block.key_out_pattern, layer),
-            fmtPattern(value_in_pat, layer),
-            fmtPattern(value_out_pat, layer)};
+            fmtPattern(block.value_in_pattern, layer),
+            fmtPattern(block.value_out_pattern, layer)};
+        // key_out matched by construction; the other three are the block's
+        // independently declared patterns, so validate they resolve to real
+        // tensors (a mismatched value pattern would silently drop KV state).
         if (!g.hasInput(p.key_in) || !g.hasInput(p.value_in) || !g.hasOutput(p.value_out)) {
             throw std::runtime_error("inferSpecFromGraphs: graph '" + g.name() + "' has key_out '" + p.key_out +
                                      "' but is missing a matching in/value KV tensor");
@@ -187,10 +168,12 @@ void LLMModel::inferSpecFromGraphs() {
 
         std::string in_name, out_name;
         for (const auto& t : g.inputSpecs()) {
+            // The shard's hidden-state input is the first non-special input
+            // (drives inter-shard wiring and the embedding-provider choice).
             if (in_name.empty() && !isSpecialTensor(t.name)) in_name = t.name;
-            // hidden_size = last dim of a hidden-state / embedding input. Skip
-            // integer token-id inputs (input_ids), whose last dim is seq length.
-            if (spec_.hidden_size == 0 && !isSpecialTensor(t.name) && !isIntegerDtype(t.dtype) && t.shape.size() >= 2) {
+            // hidden_size comes from the embedding/hidden-state tensor by name,
+            // never from a token-id input (integer) or an unrelated float input.
+            if (spec_.hidden_size == 0 && isHiddenStateName(t.name) && t.shape.size() >= 2) {
                 spec_.hidden_size = t.shape.back();
             }
             // KV shape: [num_kv_heads, 1, head_dim, kv_len].
@@ -202,9 +185,9 @@ void LLMModel::inferSpecFromGraphs() {
         bool has_kv_out = false;
         for (const auto& t : g.outputSpecs()) {
             if (out_name.empty() && !isSpecialTensor(t.name)) out_name = t.name;
-            // Fallback: a hidden-state output also carries hidden_size.
-            if (spec_.hidden_size == 0 && !isSpecialTensor(t.name) && t.name != "logits" && !isIntegerDtype(t.dtype) &&
-                t.shape.size() >= 2) {
+            // A hidden-state OUTPUT also carries hidden_size (shard whose only
+            // non-special input is a token-id tensor).
+            if (spec_.hidden_size == 0 && isHiddenStateName(t.name) && t.shape.size() >= 2) {
                 spec_.hidden_size = t.shape.back();
             }
             if (t.name == "logits" && spec_.vocab_size == 0) spec_.vocab_size = t.shape.back();
@@ -226,6 +209,13 @@ void LLMModel::inferSpecFromGraphs() {
     if (spec_.hidden_size == 0 || spec_.vocab_size == 0) {
         throw std::runtime_error("inferSpecFromGraphs: could not determine hidden_size / vocab_size from graphs");
     }
+
+    GENIEX_LOG_DEBUG("inferSpecFromGraphs: shards={} hidden_size={} num_kv_heads={} head_dim={} vocab_size={}",
+        shard_count_,
+        spec_.hidden_size,
+        spec_.num_kv_heads,
+        spec_.head_dim,
+        spec_.vocab_size);
 }
 
 bool LLMModel::onInitialized() {

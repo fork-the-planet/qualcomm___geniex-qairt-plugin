@@ -69,6 +69,11 @@ class GENIEX_API SSDModel : public LLMModel {
     // Root position = n_past - forecast_prefix; each child = parent + 1.
     std::vector<int32_t> computeTreePositionIds(size_t n_past, size_t num_tokens) const;
 
+    // Returns the RoPE table, which onInitialized() builds once head_dim is
+    // known. Throws instead of a bad_optional_access if a decode/prefill path
+    // is somehow reached before initialization completed.
+    RotaryEmbedding& requireRope();
+
     SSDConfig ssd_cfg_;
     // Constructed in onInitialized() once head_dim is inferred from the graphs.
     // Overrides standard RoPE with tree-based position IDs during SSD decode.

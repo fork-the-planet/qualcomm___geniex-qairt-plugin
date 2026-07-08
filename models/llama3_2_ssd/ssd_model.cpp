@@ -26,7 +26,6 @@ bool SSDModel::onInitialized() {
 
     // head_dim is only known after the base class inferred the spec from graphs.
     rope_.emplace(spec_.head_dim, ssd_cfg_.rope_theta);
-
     // Pre-cache KV tensor pointers and layout to avoid repeated graph lookups during generation.
     {
         const auto& kv_block = spec_.state_blocks[kv_state_block_idx_];
@@ -336,6 +335,13 @@ std::vector<int32_t> SSDModel::computeTreePositionIds(size_t n_past, size_t num_
     return pos_ids;
 }
 
+RotaryEmbedding& SSDModel::requireRope() {
+    if (!rope_) {
+        throw std::runtime_error("SSDModel: RoPE table accessed before onInitialized() built it");
+    }
+    return *rope_;
+}
+
 void SSDModel::runShardsWithTreeMask(
     const std::vector<int32_t>& tokens, size_t phase, size_t n_past, size_t kv_prefix_offset) {
     const size_t num_tokens = tokens.size();
@@ -344,7 +350,7 @@ void SSDModel::runShardsWithTreeMask(
 
     auto mask               = buildTreeAttentionMask(n_past, num_tokens, seq_len, kv_len, kv_prefix_offset);
     auto tree_pos           = computeTreePositionIds(n_past, num_tokens);
-    auto [cos_vec, sin_vec] = rope_->forward(tree_pos);
+    auto [cos_vec, sin_vec] = requireRope().forward(tree_pos);
 
     const LLMRunContext ctx{tokens, n_past, num_tokens, phase};
 
@@ -531,7 +537,7 @@ std::vector<int32_t> SSDModel::generate(const std::vector<int32_t>& prompt_token
 
         std::vector<int32_t> prefill_pos(chunk_size);
         for (size_t i = 0; i < chunk_size; ++i) prefill_pos[i] = static_cast<int32_t>(rope_n_past + i);
-        auto [pf_cos, pf_sin] = rope_->forward(prefill_pos);
+        auto [pf_cos, pf_sin] = requireRope().forward(prefill_pos);
 
         for (size_t s = 0; s < spec_.shards.size(); ++s) {
             const size_t gi = graphIndex(0, s, active_cl_idx_);

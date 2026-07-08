@@ -52,11 +52,6 @@ class CBLLMModel : public LLMModel {
 
     void addCBProvider(std::unique_ptr<CBInputProvider> provider) { cb_providers_.push_back(std::move(provider)); }
 
-   protected:
-    // CB drives its own CBInputProvider chain; suppress the base LLM providers.
-    void createInputProviders() override {}
-
-   public:
     // Drives all scheduled sessions until each hits EOS or max_tokens.
     void generateBatch(Scheduler& scheduler, KVCacheManager& kv_mgr,
         std::function<void(const std::string& session_id, int32_t token)> token_callback = nullptr) {
@@ -212,6 +207,9 @@ class CBLLMModel : public LLMModel {
     void resetKVCache() override { LLMModel::resetKVCache(); }
 
    protected:
+    // CB drives its own CBInputProvider chain; suppress the base LLM providers.
+    void createInputProviders() override {}
+
     bool onInitialized() override {
         if (!LLMModel::onInitialized()) return false;
         for (auto& p : cb_providers_) p->onInitialized(model_cfg_);

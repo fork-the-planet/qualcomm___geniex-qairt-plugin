@@ -418,10 +418,10 @@ TEST(LLMModel, MultiShardPrefillAndConnections) {
     geniex::testing::stubSetNextToken(-1);
 }
 
-// inferSpecFromGraphs must read hidden_size from the float embedding input and
-// skip the integer `input_ids` (the isIntegerDtype guard). in_state_name is the
-// first non-special input (input_ids), which drives the token-id embedding
-// provider.
+// inferSpecFromGraphs must read hidden_size from the named embedding tensor
+// (`input_embeds`) and never from the token-id input (`input_ids`), even though
+// input_ids is the first non-special input. in_state_name is still input_ids,
+// which drives the token-id embedding provider.
 TEST(LLMModel, IntegerInputSkippedForHiddenSize) {
     NoDecodePoolEnv  no_pool;
     IntInputFixture  fx;
