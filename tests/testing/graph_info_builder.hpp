@@ -151,16 +151,16 @@ class GraphInfoBuilder {
         }
     }
 
-    std::string                       name_;
-    std::deque<std::string>           names_;  // deque: stable c_str() across pushes
-    std::deque<std::vector<uint32_t>> input_dims_;
-    std::deque<std::vector<uint32_t>> output_dims_;
+    std::string                                name_;
+    std::deque<std::string>                    names_;  // deque: stable c_str() across pushes
+    std::deque<std::vector<uint32_t>>          input_dims_;
+    std::deque<std::vector<uint32_t>>          output_dims_;
     std::deque<std::vector<Qnn_ScaleOffset_t>> axis_store_;  // stable scaleOffset[] arrays
     std::deque<std::vector<uint8_t>>           dyn_store_;   // stable isDynamicDimensions[] arrays
-    std::vector<Qnn_Tensor_t>         input_tensors_;
-    std::vector<Qnn_Tensor_t>         output_tensors_;
-    std::vector<void*>                client_bufs_;
-    qnn_wrapper_api::GraphInfo_t      info_{};
+    std::vector<Qnn_Tensor_t>                  input_tensors_;
+    std::vector<Qnn_Tensor_t>                  output_tensors_;
+    std::vector<void*>                         client_bufs_;
+    qnn_wrapper_api::GraphInfo_t               info_{};
 };
 
 }  // namespace geniex::testing

@@ -458,9 +458,7 @@ struct TempBundle {
     TempBundle& operator=(const TempBundle&) = delete;
 
    private:
-    void write(const char* name, const char* body) const {
-        std::ofstream(dir / name) << body;
-    }
+    void              write(const char* name, const char* body) const { std::ofstream(dir / name) << body; }
     static inline int counter_ = 0;
 
     static constexpr const char* kMetadata = R"({
@@ -601,10 +599,10 @@ TEST(LLMSpecLoader, MakesRoPEProviderForEveryVariant) {
     EXPECT_NE(geniex::makeRoPEProvider(kHeadDim, gc), nullptr);
 
     geniex::LongRopeScaling lrs;
-    lrs.long_factor                     = std::vector<float>(kHeadDim / 2, 1.0f);
-    lrs.short_factor                    = std::vector<float>(kHeadDim / 2, 1.0f);
+    lrs.long_factor                      = std::vector<float>(kHeadDim / 2, 1.0f);
+    lrs.short_factor                     = std::vector<float>(kHeadDim / 2, 1.0f);
     lrs.original_max_position_embeddings = 4096;
-    gc.rope_scaling                     = lrs;
+    gc.rope_scaling                      = lrs;
     EXPECT_NE(geniex::makeRoPEProvider(kHeadDim, gc), nullptr);
 
     gc.rope_scaling = geniex::PartialRopeScaling{0.5f, 1.0f};
