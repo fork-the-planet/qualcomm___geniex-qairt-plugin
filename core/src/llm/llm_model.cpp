@@ -81,11 +81,24 @@ void fillEncodedZero(void* dst, size_t n_bytes, Qnn_DataType_t dt) {
     }
 }
 
-// The inter-shard hidden-state / embedding tensor names an LLM export uses for
-// the value hidden_size is read from. Matching by name (as Genie does) avoids
-// mistaking another float input — a mask or bias — for the hidden state.
-bool isHiddenStateName(const std::string& name) {
-    return name == "inputs_embeds" || name == "input_embeds" || name == "hidden_states" || name == "hidden_state";
+// True for integer QNN dtypes. A shard's token-id input (`input_ids`) is
+// integer; the inter-shard hidden state is always a float/quantized-float
+// tensor, so dtype separates the two regardless of tensor name.
+bool isIntegerDtype(Qnn_DataType_t dt) {
+    switch (dt) {
+        case QNN_DATATYPE_INT_8:
+        case QNN_DATATYPE_INT_16:
+        case QNN_DATATYPE_INT_32:
+        case QNN_DATATYPE_INT_64:
+        case QNN_DATATYPE_UINT_8:
+        case QNN_DATATYPE_UINT_16:
+        case QNN_DATATYPE_UINT_32:
+        case QNN_DATATYPE_UINT_64:
+        case QNN_DATATYPE_BOOL_8:
+            return true;
+        default:
+            return false;
+    }
 }
 
 // Compiles `pattern` into a regex whose "{}" placeholder captures an integer.
@@ -166,15 +179,25 @@ void LLMModel::inferSpecFromGraphs() {
         // Representative graph: prefill (phase 0), smallest CL, shard s.
         const Graph& g = graph(graphIndex(0, s, 0));
 
+        // Hidden size is the last dim of the inter-shard hidden-state tensor.
+        // That tensor is the shard's first non-special I/O that is a float
+        // (rank >= 2) and not the vocab-sized `logits`. Identifying it by role
+        // + dtype rather than a fixed name list covers models whose hidden
+        // tensors carry arbitrary compiler-assigned names (e.g. `embedding`,
+        // `add_82384`) in addition to the canonical `hidden_states` etc.
+        auto hiddenDimOf = [](const TensorSpec& t) -> size_t {
+            if (t.name == "logits" || t.shape.size() < 2) return 0;
+            if (isIntegerDtype(t.dtype)) return 0;  // token-id input, not a hidden state
+            return t.shape.back();
+        };
+
         std::string in_name, out_name;
         for (const auto& t : g.inputSpecs()) {
             // The shard's hidden-state input is the first non-special input
             // (drives inter-shard wiring and the embedding-provider choice).
             if (in_name.empty() && !isSpecialTensor(t.name)) in_name = t.name;
-            // hidden_size comes from the embedding/hidden-state tensor by name,
-            // never from a token-id input (integer) or an unrelated float input.
-            if (spec_.hidden_size == 0 && isHiddenStateName(t.name) && t.shape.size() >= 2) {
-                spec_.hidden_size = t.shape.back();
+            if (spec_.hidden_size == 0 && !isSpecialTensor(t.name)) {
+                if (size_t h = hiddenDimOf(t)) spec_.hidden_size = h;
             }
             // KV shape: [num_kv_heads, 1, head_dim, kv_len].
             if (t.name.rfind("past_key_", 0) == 0 && t.shape.size() >= 3) {
@@ -185,10 +208,10 @@ void LLMModel::inferSpecFromGraphs() {
         bool has_kv_out = false;
         for (const auto& t : g.outputSpecs()) {
             if (out_name.empty() && !isSpecialTensor(t.name)) out_name = t.name;
-            // A hidden-state OUTPUT also carries hidden_size (shard whose only
-            // non-special input is a token-id tensor).
-            if (spec_.hidden_size == 0 && isHiddenStateName(t.name) && t.shape.size() >= 2) {
-                spec_.hidden_size = t.shape.back();
+            // A hidden-state OUTPUT also carries hidden_size (e.g. shard 0,
+            // whose only non-special input is an integer token-id tensor).
+            if (spec_.hidden_size == 0 && !isSpecialTensor(t.name)) {
+                if (size_t h = hiddenDimOf(t)) spec_.hidden_size = h;
             }
             if (t.name == "logits" && spec_.vocab_size == 0) spec_.vocab_size = t.shape.back();
             if (isKVTensor(t.name)) has_kv_out = true;

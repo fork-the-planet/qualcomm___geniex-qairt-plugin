@@ -433,6 +433,84 @@ TEST(LLMModel, IntegerInputSkippedForHiddenSize) {
     EXPECT_EQ(model.spec_.shards[0].in_state_name, "input_ids");
 }
 
+namespace {
+
+// Single-shard fixture whose hidden-state tensors carry arbitrary
+// compiler-assigned names (`embedding` out) instead of a canonical
+// `hidden_states` / `inputs_embeds`. This reproduces
+// qualcomm/Qwen3-4B-Instruct-2507, whose graphs name the hidden state
+// `embedding` / `add_82384`. hidden_size must still be inferred by tensor role
+// + dtype, not by name. The first-shard input stays `input_ids` (as in the
+// real model) so embedding-provider selection is unaffected.
+struct ArbitraryHiddenNameFixture {
+    static constexpr uint32_t kVocab      = 8;
+    static constexpr uint32_t kHidden     = 4;
+    static constexpr uint32_t kKVHeads    = 1;
+    static constexpr uint32_t kHeadDim    = 2;
+    static constexpr uint32_t kContextLen = 16;
+    static constexpr uint32_t kArPrefill  = 4;
+    static constexpr uint32_t kArDecode   = 1;
+
+    QnnApi   api;
+    IOTensor io{BufferAlloc::DEFAULT};
+
+    std::deque<geniex::testing::GraphInfoBuilder> builders;
+    std::vector<geniex::Graph>                    graphs;
+
+    ArbitraryHiddenNameFixture() {
+        const uint32_t kv_capacity = kContextLen - kArDecode;
+        addGraph("prefill_ar4_cl16_1_of_1", kArPrefill, kv_capacity);
+        addGraph("token_ar1_cl16_1_of_1", kArDecode, kv_capacity);
+    }
+
+    ArbitraryHiddenNameFixture(const ArbitraryHiddenNameFixture&)            = delete;
+    ArbitraryHiddenNameFixture& operator=(const ArbitraryHiddenNameFixture&) = delete;
+
+    static geniex::LLMSpec makeSpec() {
+        geniex::LLMSpec spec;
+        spec.state_blocks.push_back(geniex::makeKVStateBlock());
+        return spec;
+    }
+
+   private:
+    void addGraph(const std::string& name, uint32_t ar, uint32_t kv_capacity) {
+        using geniex::testing::TensorDesc;
+        // Token-id input; the hidden state is the arbitrarily-named float output.
+        std::vector<TensorDesc> inputs{
+            {"input_ids", QNN_DATATYPE_INT_32, {ar}},
+            {"attention_mask", QNN_DATATYPE_FLOAT_32, {ar, kContextLen}},
+            {"past_key_0_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, kv_capacity}},
+            {"past_value_0_in", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kv_capacity, kHeadDim}},
+        };
+        std::vector<TensorDesc> outputs{
+            {"add_82384", QNN_DATATYPE_FLOAT_32, {ar, kHidden}},
+            {"logits", QNN_DATATYPE_FLOAT_32, {ar, kVocab}},
+            {"past_key_0_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, kHeadDim, ar}},
+            {"past_value_0_out", QNN_DATATYPE_FLOAT_32, {kKVHeads, 1, ar, kHeadDim}},
+        };
+        builders.emplace_back(name, inputs, outputs);
+        geniex::Graph g(&builders.back().graphInfo(), &api, &io);
+        g.setup(/*context=*/nullptr);
+        graphs.push_back(std::move(g));
+    }
+};
+
+}  // namespace
+
+// inferSpecFromGraphs must infer hidden_size from the hidden-state tensor's
+// shape even when it has no canonical name — here the `add_82384` output, one
+// of the arbitrary names qualcomm/Qwen3-4B-Instruct-2507 uses. Regression guard
+// for the name-allowlist bug that failed such models.
+TEST(LLMModel, InfersHiddenSizeFromArbitrarilyNamedTensor) {
+    NoDecodePoolEnv            no_pool;
+    ArbitraryHiddenNameFixture fx;
+    TestableLLMModel           model{ArbitraryHiddenNameFixture::makeSpec()};
+    ASSERT_TRUE(model.initFromFixture(fx));
+
+    EXPECT_EQ(model.spec_.hidden_size, ArbitraryHiddenNameFixture::kHidden);  // from add_82384 output
+    EXPECT_EQ(model.spec_.vocab_size, ArbitraryHiddenNameFixture::kVocab);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // llm_spec_loader public API (JSON-sourced spec + provider factories)
 // ─────────────────────────────────────────────────────────────────────────────
