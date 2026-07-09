@@ -102,18 +102,25 @@ class GENIEX_API LLMModel : public Model {
     // Returns 0 when n_past <= n_keep (nothing to discard).
     static size_t computeSlideDiscard(size_t n_past, size_t n_fit, size_t max_cl, size_t n_keep);
 
-    // Evicts KV entries for tokens [n_keep, n_keep + n_discard) and relocates the surviving tail
-    // [n_keep + n_discard, n_past_) down to start at n_keep, across every shard. kv_len is the
-    // *current logical* KV stride (context_lengths[active_cl_idx_] minus whichever seq_len the
-    // caller has reserved -- the same value reshapeKV's old/new_kv_len take). Unlike reshapeKV,
-    // this never changes the buffer stride -- it only relocates bytes within it. Survivors' cached
-    // RoPE rotation is left untouched (not renumbered / re-rotated); see GenerationConfig::
-    // sliding_window for why. Updates n_past_.
-    void slideWindowEvict(size_t kv_len, size_t n_discard, size_t n_keep);
+    // Evicts the oldest `n_discard` tokens above the anchored `n_keep` prefix by discarding BOTH
+    // the evicted chunk's KV and the surviving tail's cached KV, then re-prefilling the tail
+    // (recovered from token_history_) starting at KV offset n_keep. A plain byte-relocation of the
+    // tail's cached KV would leave its RoPE rotation frozen at its original absolute position --
+    // an out-of-distribution relative-position jump the model was never trained on, since QAIRT's
+    // compiled graphs cache post-RoPE K/V with no facility to re-rotate cached history in place.
+    // Re-prefilling recomputes the tail's KV from scratch at the true, contiguous position
+    // sequence instead. `at_decode_stride` must be true when called mid-decode-loop; the buffer is
+    // restrided to prefill, re-prefilled, then restrided back so the caller's decode loop can
+    // continue unmodified. Updates n_past_ and token_history_.
+    void slideWindowEvict(size_t n_discard, size_t n_keep, bool at_decode_stride);
 
-    // Per-shard half of slideWindowEvict: does the strided memmove for one shard's owned KV layers.
-    // n_valid is the count of resident tokens (== n_past_) before eviction.
-    void evictShardKV(size_t shard, size_t kv_len, size_t n_discard, size_t n_keep, size_t n_valid);
+    // Runs a chunked prefill pass over `tokens`, writing fresh KV starting at the current n_past_
+    // and advancing n_past_ (and token_history_) as each chunk completes. Assumes the KV buffer is
+    // currently strided for prefill; callers coming from decode stride must reshapeKV first (see
+    // slideWindowEvict). If `last_chunk_size_out` is non-null, receives the final chunk's token
+    // count -- needed by generate() to sample the first token, but not by slideWindowEvict's
+    // re-prefill, which re-derives already-generated history and passes nullptr.
+    void prefillChunks(const std::vector<int32_t>& tokens, size_t* last_chunk_size_out);
 
     LLMSpec                                     spec_;
     std::vector<std::unique_ptr<InputProvider>> input_providers_;
@@ -128,6 +135,12 @@ class GENIEX_API LLMModel : public Model {
 
     size_t kv_state_block_idx_ = std::numeric_limits<size_t>::max();
     size_t n_past_             = 0;
+
+    // Token IDs resident in the KV cache: token_history_[i] == the token at KV position i.
+    // token_history_.size() == n_past_ always. Populated by prefillChunks() and generate()'s
+    // decode loop; truncated by slideWindowEvict() and cleared by resetKVCache(). Exists so
+    // slideWindowEvict can recover the surviving tail's token IDs to re-prefill them.
+    std::vector<int32_t> token_history_;
 
     // Cached sampler state. `sampler_` is null when sampling is disabled
     // (greedy fast path); otherwise it persists across multi-turn calls so
