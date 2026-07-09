@@ -164,6 +164,7 @@ geniex_add_unit_test(llm_model_test
         ${CMAKE_SOURCE_DIR}/core/src/threadpool.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/llm_model.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/llm_utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_spec_loader.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/input_provider.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp
@@ -224,6 +225,7 @@ geniex_add_unit_test(vlm_model_test
         ${CMAKE_SOURCE_DIR}/core/src/threadpool.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/llm_model.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/llm_utils.cpp
+        ${CMAKE_SOURCE_DIR}/core/src/llm/llm_spec_loader.cpp
         ${CMAKE_SOURCE_DIR}/core/src/llm/input_provider.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/IOTensor.cpp
         ${CMAKE_SOURCE_DIR}/qnn-api/src/ClientBuffer.cpp

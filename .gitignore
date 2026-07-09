@@ -122,3 +122,5 @@ cython_debug/
 # PyPI
 .pypirc
 Genie/
+# Agent working docs
+.agents/

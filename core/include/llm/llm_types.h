@@ -20,12 +20,6 @@ struct LLMRunContext {
     size_t                      phase;      // 0 = prefill, 1 = decode
 };
 
-// Inclusive KV layer range [begin, end] owned by a single shard.
-struct LayerRange {
-    size_t begin;
-    size_t end;  // inclusive
-};
-
 // Per-shard descriptor for hidden-state wiring between adjacent shards.
 struct ShardSpec {
     std::string in_state_name;
@@ -37,52 +31,33 @@ enum class StateBlockKind {
     KV,
 };
 
-// State/cache declaration for a shard-partitioned decoder runtime.
-// For KV blocks, layer ranges are defined per shard and patterns map to
-// key/value in/out tensors with {} replaced by layer index.
+// The four graph tensor names that carry one key/value cache entry.
+struct KVTensorPair {
+    std::string key_in;
+    std::string key_out;
+    std::string value_in;
+    std::string value_out;
+};
+
+// Declares one key/value cache owned by a shard-partitioned decoder.
+// The patterns name its tensors ({} = layer index); shard_pairs holds the
+// tensors each shard owns, resolved during initialization.
 struct StateBlockSpec {
     std::string    name = "kv_default";
     StateBlockKind kind = StateBlockKind::KV;
-
-    // Per-shard ownership of this state block.
-    // Each shard may own zero, one, or many disjoint layer ranges.
-    std::vector<std::vector<LayerRange>> shard_layer_ranges;
 
     std::string key_in_pattern    = "past_key_{}_in";
     std::string value_in_pattern  = "past_value_{}_in";
     std::string key_out_pattern   = "past_key_{}_out";
     std::string value_out_pattern = "past_value_{}_out";
+
+    std::vector<std::vector<KVTensorPair>> shard_pairs;
 };
 
-inline std::vector<std::vector<LayerRange>> makeShardLayerRanges(
-    std::vector<std::optional<LayerRange>> shard_layer_ranges) {
-    std::vector<std::vector<LayerRange>> ranges;
-    ranges.reserve(shard_layer_ranges.size());
-    for (auto&& range : shard_layer_ranges) {
-        if (range) {
-            ranges.push_back({*range});
-        } else {
-            ranges.push_back({});
-        }
-    }
-    return ranges;
-}
-
-inline StateBlockSpec makeKVOnlyStateBlock(
-    std::vector<std::optional<LayerRange>> shard_layer_ranges, std::string name = "kv_default") {
+inline StateBlockSpec makeKVStateBlock(std::string name = "kv_default") {
     StateBlockSpec block;
-    block.name               = std::move(name);
-    block.kind               = StateBlockKind::KV;
-    block.shard_layer_ranges = makeShardLayerRanges(std::move(shard_layer_ranges));
-    return block;
-}
-
-inline StateBlockSpec makeKVOnlyStateBlock(
-    std::vector<std::vector<LayerRange>> shard_layer_ranges, std::string name = "kv_default") {
-    StateBlockSpec block;
-    block.name               = std::move(name);
-    block.kind               = StateBlockKind::KV;
-    block.shard_layer_ranges = std::move(shard_layer_ranges);
+    block.name = std::move(name);
+    block.kind = StateBlockKind::KV;
     return block;
 }
 
@@ -91,14 +66,13 @@ struct LLMSpec {
     std::vector<ShardSpec>      shards;
     std::vector<StateBlockSpec> state_blocks;
 
-    // Tensor-shape-derived hyperparameters; populated by the loader.
+    // Inferred from the loaded graph tensors.
     size_t hidden_size  = 0;
     size_t num_kv_heads = 0;
     size_t head_dim     = 0;
     size_t vocab_size   = 0;
 
-    // Populated by LLMModel::onInitialized from the loaded QNN graph names.
-    // Empty until the model has initialized.
+    // Inferred from the loaded graph names.
     size_t              seq_len_prefill = 0;
     size_t              seq_len_decode  = 0;
     std::vector<size_t> context_lengths;
@@ -107,8 +81,7 @@ struct LLMSpec {
 
     std::vector<int32_t> eos_token_ids;
 
-    // BOS token id from genie_config.json's `dialog.context.bos-token`.
-    // -1 = not configured / no BOS for this model.
+    // -1 = no BOS configured.
     int32_t bos_token_id = -1;
 };
 

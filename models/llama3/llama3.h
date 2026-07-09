@@ -14,14 +14,8 @@ namespace geniex {
 namespace llama3 {
 
 inline LLMModel makeModel(const ModelConfig& model_cfg) {
-    const auto bundle = bundleDirOf(model_cfg);
-    auto       meta   = parseQAIRTMetadata(bundle);
-    auto       gc     = parseGenieConfig(bundle);
-
-    LLMModel m(buildSpec(meta, gc));
-    m.addInputProvider(makeEmbeddingProvider(meta, gc));
-    m.addInputProvider(makeRoPEProvider(meta, gc));
-    return m;
+    auto gc = parseGenieConfig(bundleDirOf(model_cfg));
+    return LLMModel(buildSpecSkeleton(gc), std::move(gc));
 }
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {

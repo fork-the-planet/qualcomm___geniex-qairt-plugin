@@ -28,15 +28,10 @@ inline SSDConfig makeSSDConfig(const std::string& forecast_prefix_path, float ro
 }
 
 inline SSDModel makeModel(const ModelConfig& model_cfg) {
-    const auto bundle = bundleDirOf(model_cfg);
-    auto       meta   = parseQAIRTMetadata(bundle);
-    auto       gc     = parseGenieConfig(bundle);
+    auto gc = parseGenieConfig(bundleDirOf(model_cfg));
 
     const std::string forecast_prefix_path = model_cfg.forecast_prefix_path.value_or("");
-    SSDModel          m(buildSpec(meta, gc), makeSSDConfig(forecast_prefix_path, gc.rope_theta));
-    m.addInputProvider(makeEmbeddingProvider(meta, gc));
-    m.addInputProvider(makeRoPEProvider(meta, gc));
-    return m;
+    return SSDModel(buildSpecSkeleton(gc), makeSSDConfig(forecast_prefix_path, gc.rope_theta));
 }
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {

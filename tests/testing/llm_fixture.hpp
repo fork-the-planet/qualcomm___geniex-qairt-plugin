@@ -58,16 +58,11 @@ struct LLMFixture {
     LLMFixture(const LLMFixture&)            = delete;
     LLMFixture& operator=(const LLMFixture&) = delete;
 
-    // One KV-only state block; one shard owning layer 0.
+    // Skeleton spec; shapes, shard wiring, and KV pairs are inferred from the
+    // fixture graphs by LLMModel::onInitialized.
     static LLMSpec makeSpec() {
         LLMSpec spec;
-        spec.shards.resize(1);  // in/out_state_name discovered from graphs
-        spec.state_blocks.push_back(
-            makeKVOnlyStateBlock(std::vector<std::vector<LayerRange>>{{LayerRange{0, kKVLayers - 1}}}));
-        spec.hidden_size  = kHidden;
-        spec.num_kv_heads = kKVHeads;
-        spec.head_dim     = kHeadDim;
-        spec.vocab_size   = kVocab;
+        spec.state_blocks.push_back(makeKVStateBlock());
         return spec;
     }
 
@@ -132,13 +127,7 @@ struct MultiCLFixture {
 
     static LLMSpec makeSpec() {
         LLMSpec spec;
-        spec.shards.resize(1);
-        spec.state_blocks.push_back(
-            makeKVOnlyStateBlock(std::vector<std::vector<LayerRange>>{{LayerRange{0, kKVLayers - 1}}}));
-        spec.hidden_size  = kHidden;
-        spec.num_kv_heads = kKVHeads;
-        spec.head_dim     = kHeadDim;
-        spec.vocab_size   = kVocab;
+        spec.state_blocks.push_back(makeKVStateBlock());
         return spec;
     }
 
@@ -204,14 +193,7 @@ struct MultiShardFixture {
 
     static LLMSpec makeSpec() {
         LLMSpec spec;
-        spec.shards.resize(kShards);
-        // Shard 0 owns layer 0; shard 1 owns no KV (lm_head_only).
-        spec.state_blocks.push_back(
-            makeKVOnlyStateBlock(std::vector<std::vector<LayerRange>>{{LayerRange{0, kKVLayers - 1}}, {}}));
-        spec.hidden_size  = kHidden;
-        spec.num_kv_heads = kKVHeads;
-        spec.head_dim     = kHeadDim;
-        spec.vocab_size   = kVocab;
+        spec.state_blocks.push_back(makeKVStateBlock());
         return spec;
     }
 
