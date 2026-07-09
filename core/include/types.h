@@ -83,6 +83,10 @@ struct GenerationConfig {
     // QAIRT's compiled graphs cache post-RoPE K/V with no facility to re-rotate cached
     // history, so relocating KV bytes as-is would leave survivors' RoPE rotation at an
     // out-of-distribution position (see LLMModel::slideWindowEvict).
+    //
+    // TODO: `sliding_window_n_keep` only anchors a fixed token count today. llama.cpp
+    // keeps the whole system prompt in-window (n_keep sized to the system prompt's token
+    // count); consider the same here so eviction never discards it.
     bool    sliding_window        = false;
     int32_t sliding_window_n_keep = 4;
 

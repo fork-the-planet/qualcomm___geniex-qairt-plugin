@@ -111,22 +111,17 @@ class GENIEX_API LLMModel : public Model {
     // restriding all KV layers from the current CL to the new CL at stride
     bool promoteCL(size_t required, size_t capacity_reserved_seq, size_t stride_reserved_seq);
 
-    // Number of oldest tokens (above n_keep) to discard so that `n_fit` more tokens fit within
-    // max_cl. Mirrors llama.cpp's context-shift heuristic: normally discards ~half of
-    // (n_past - n_keep), but discards at least enough to fit `n_fit` when that alone demands more.
-    // Returns 0 when n_past <= n_keep (nothing to discard).
+    // Number of oldest tokens (above n_keep) to discard so `n_fit` more fit within max_cl.
+    // Mirrors llama.cpp's context-shift heuristic (~half of n_past - n_keep, or more if
+    // needed to fit n_fit). Returns 0 when n_past <= n_keep.
     static size_t computeSlideDiscard(size_t n_past, size_t n_fit, size_t max_cl, size_t n_keep);
 
-    // Evicts the oldest `n_discard` tokens above the anchored `n_keep` prefix by discarding BOTH
-    // the evicted chunk's KV and the surviving tail's cached KV, then re-prefilling the tail
-    // (recovered from token_history_) starting at KV offset n_keep. A plain byte-relocation of the
-    // tail's cached KV would leave its RoPE rotation frozen at its original absolute position --
-    // an out-of-distribution relative-position jump the model was never trained on, since QAIRT's
-    // compiled graphs cache post-RoPE K/V with no facility to re-rotate cached history in place.
-    // Re-prefilling recomputes the tail's KV from scratch at the true, contiguous position
-    // sequence instead. `at_decode_stride` must be true when called mid-decode-loop; the buffer is
-    // restrided to prefill, re-prefilled, then restrided back so the caller's decode loop can
-    // continue unmodified. Updates n_past_ and token_history_.
+    // Evicts the oldest `n_discard` tokens above the anchored `n_keep` prefix, then re-prefills
+    // the surviving tail (recovered from token_history_) instead of relocating its cached KV --
+    // QAIRT's compiled graphs cache post-RoPE K/V with no facility to re-rotate cached history,
+    // so a byte relocation would leave survivors' RoPE rotation at an out-of-distribution
+    // position. `at_decode_stride` must be true when called mid-decode-loop. Updates n_past_ and
+    // token_history_.
     void slideWindowEvict(size_t n_discard, size_t n_keep, bool at_decode_stride);
 
     // Runs a chunked prefill pass over `tokens`, writing fresh KV starting at the current n_past_

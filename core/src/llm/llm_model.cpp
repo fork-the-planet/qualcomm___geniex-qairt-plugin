@@ -569,10 +569,8 @@ bool LLMModel::promoteCL(size_t required, size_t capacity_reserved_seq, size_t s
     return true;
 }
 
-// Mirrors llama.cpp's context-shift heuristic (sdk/plugins/llama_cpp's slide_window lambda):
-// normally discards ~half of the tokens above n_keep, but discards at least enough to fit
-// `n_fit` more when that alone demands more room than the "half" heuristic would free.
-// Returns 0 when n_past <= n_keep or when no positive discard is needed.
+// Mirrors llama.cpp's context-shift heuristic: discards ~half of (n_past - n_keep), or more if
+// needed to fit `n_fit`. Returns 0 when n_past <= n_keep.
 /*static*/ size_t LLMModel::computeSlideDiscard(size_t n_past, size_t n_fit, size_t max_cl, size_t n_keep) {
     if (n_past <= n_keep) return 0;
 
@@ -587,14 +585,10 @@ bool LLMModel::promoteCL(size_t required, size_t capacity_reserved_seq, size_t s
     return discard > 0 ? static_cast<size_t>(discard) : 0;
 }
 
-// Evicts the oldest `n_discard` tokens above the anchored `n_keep` prefix. Both the evicted
-// chunk's KV and the surviving tail's cached KV are discarded; the tail is then re-prefilled
-// (its token IDs recovered from token_history_) so its KV is recomputed at correct, contiguous
-// RoPE positions instead of retaining its original absolute rotation. A plain byte-relocation of
-// the tail's cached KV would leave that rotation frozen at its old position, adjacent in the
-// buffer to the anchor -- an out-of-distribution relative-position jump the model was never
-// trained on. QAIRT's compiled graphs cache post-RoPE K/V with no facility to re-rotate cached
-// history in place, so recomputing via prefill is the only way to get correct rotation here.
+// Evicts the oldest `n_discard` tokens above the anchored `n_keep` prefix, then re-prefills the
+// surviving tail (token IDs recovered from token_history_) instead of relocating its cached KV --
+// QAIRT's compiled graphs cache post-RoPE K/V with no facility to re-rotate cached history, so a
+// byte relocation would leave survivors' RoPE rotation at an out-of-distribution position.
 //
 // `at_decode_stride` must be true when called mid-decode-loop; the buffer is restrided to prefill
 // stride, re-prefilled, then restrided back so the caller's decode loop continues unmodified.
