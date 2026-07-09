@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "IBackend.hpp"  // for qnn::tools::netrun::PerfProfile
@@ -109,11 +110,19 @@ struct GenerationConfig {
 
 // Static description of a single graph tensor, populated from GraphInfo_t.
 struct TensorSpec {
-    std::string           name;
-    Qnn_DataType_t        dtype = QNN_DATATYPE_FLOAT_32;
+    std::string    name;
+    Qnn_DataType_t dtype = QNN_DATATYPE_FLOAT_32;
+    // Graph role: APP_WRITE (input), APP_READ (output), NATIVE, STATIC, etc.
+    // Lets callers infer I/O structure from tensor metadata alone.
+    Qnn_TensorType_t      type = QNN_TENSOR_TYPE_UNDEFINED;
     std::vector<uint32_t> shape;
     float                 quant_scale  = 1.0f;
     int32_t               quant_offset = 0;
+    // Per-channel (axis) quantization: one (scale, offset) per channel.
+    // Empty when the tensor uses scalar quant or none.
+    std::vector<std::pair<float, int32_t>> axis_quant;
+    // True if any dimension may vary at runtime.
+    bool has_dynamic_dims = false;
 
     size_t elementSize() const {
         switch (dtype) {

@@ -92,13 +92,7 @@ std::vector<size_t> readShape(const json& tensor_entry) {
     return shape;
 }
 
-// Per-shard hyperparameter signal extracted from one graph entry. Hidden-state
-// *tensor names* are NOT collected here — those are read from the live QNN
-// graph after load (see LLMModel::discoverShardTensorNames). The one
-// exception is `first_input_name`, used only by makeEmbeddingProvider to
-// decide between TokenIdInputProvider ("input_ids") and EmbeddingInputProvider
-// ("inputs_embeds"); those two strings are stable across the JSON / QNN forms
-// because they contain no slashes or dots.
+// Per-shard hyperparameter signal from one metadata.json graph entry.
 struct ShardWiring {
     std::set<size_t>    kv_layer_indices;
     std::vector<size_t> in_state_shape;    // first non-special input shape (for hidden_size)
@@ -228,7 +222,6 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
     out.vision_encoder_graph = vision_encoder_key;
 
     out.shards.resize(total_shards);
-    out.shard_layer_ranges.assign(total_shards, std::nullopt);
 
     size_t max_past_key_idx   = 0;
     auto   absorb_hyperparams = [&](const ShardWiring& w) {
@@ -245,7 +238,6 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         if (out.vocab_size == 0 && !w.logits_shape.empty()) {
             out.vocab_size = w.logits_shape.back();
         }
-        for (size_t idx : w.kv_layer_indices) max_past_key_idx = std::max(max_past_key_idx, idx);
     };
 
     for (size_t s = 1; s <= total_shards; ++s) {
@@ -253,27 +245,14 @@ ParsedQAIRTMetadata parseQAIRTMetadata(const std::filesystem::path& bundle_dir) 
         if (it == per_shard_entry.end() || it->second == nullptr) {
             throw std::runtime_error("llm_spec_loader: could not locate graph entry for shard " + std::to_string(s));
         }
-        auto w = readShardWiring(*it->second, "shard " + std::to_string(s));
-        // Tensor names (in_state_name / out_state_name) and lm_head_only are
-        // populated later by LLMModel::discoverShardTensorNames() from the
-        // live QNN graph, since AI Hub's metadata.json uses ONNX-source names
-        // ("/model/.../Gather_output_0") while the compiled bin uses the
-        // QAIRT-sanitized form ("_model_..._Gather_output_0").
+        auto w            = readShardWiring(*it->second, "shard " + std::to_string(s));
         out.shards[s - 1] = ShardSpec{};
 
         // Record shard 0's first-input name (raw JSON key) so the embedding
         // provider factory can decide between input_ids and inputs_embeds.
         if (s == 1) out.first_shard_input_hint = w.first_input_name;
 
-        if (!w.kv_layer_indices.empty()) {
-            const size_t lo = *w.kv_layer_indices.begin();
-            const size_t hi = *w.kv_layer_indices.rbegin();
-            if (w.kv_layer_indices.size() != (hi - lo + 1)) {
-                throw std::runtime_error(
-                    "llm_spec_loader: shard " + std::to_string(s) + " has non-contiguous KV layer indices");
-            }
-            out.shard_layer_ranges[s - 1] = LayerRange{lo, hi};
-        }
+        for (size_t idx : w.kv_layer_indices) max_past_key_idx = std::max(max_past_key_idx, idx);
 
         absorb_hyperparams(w);
     }
@@ -425,28 +404,20 @@ ParsedSamplerConfig parseGenieSamplerConfig(const std::filesystem::path& bundle_
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// buildSpec
+// buildSpecSkeleton
 // ─────────────────────────────────────────────────────────────────────────────
-LLMSpec buildSpec(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc) {
+LLMSpec buildSpecSkeleton(const ParsedGenieConfig& gc) {
     LLMSpec spec;
-    spec.shards       = meta.shards;
-    spec.state_blocks = {makeKVOnlyStateBlock(meta.shard_layer_ranges)};
-
-    spec.hidden_size   = meta.hidden_size;
-    spec.num_kv_heads  = meta.num_kv_heads;
-    spec.head_dim      = meta.head_dim;
-    spec.vocab_size    = meta.vocab_size;
+    spec.state_blocks  = {makeKVStateBlock()};
     spec.eos_token_ids = gc.eos_token_ids;
     spec.bos_token_id  = gc.bos_token_id;
-    // seq_len_prefill / seq_len_decode / context_lengths are filled by
-    // LLMModel::onInitialized from the loaded QNN graph names.
     return spec;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Provider factories
 // ─────────────────────────────────────────────────────────────────────────────
-std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc) {
+std::unique_ptr<InputProvider> makeRoPEProvider(size_t head_dim, const ParsedGenieConfig& gc) {
     return std::visit(
         [&](const auto& s) -> std::unique_ptr<InputProvider> {
             using T = std::decay_t<decltype(s)>;
@@ -457,7 +428,7 @@ std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta,
                 // so we must reproduce Genie's scaled table to match its logits.
                 GENIEX_LOG_INFO(
                     "llm_spec_loader: rope_scaling=llama3 (factor={}); using Llama3 RoPE provider", s.factor);
-                return std::make_unique<Llama3RoPEInputProvider>(meta.head_dim,
+                return std::make_unique<Llama3RoPEInputProvider>(head_dim,
                     gc.rope_theta,
                     s.factor,
                     s.low_freq_factor,
@@ -465,39 +436,38 @@ std::unique_ptr<InputProvider> makeRoPEProvider(const ParsedQAIRTMetadata& meta,
                     static_cast<int>(s.original_max_position_embeddings));
             } else if constexpr (std::is_same_v<T, LongRopeScaling>) {
                 const size_t orig = s.original_max_position_embeddings ? s.original_max_position_embeddings : 4096;
-                return std::make_unique<LongRoPEInputProvider>(meta.head_dim,
+                return std::make_unique<LongRoPEInputProvider>(head_dim,
                     gc.rope_theta,
                     s.long_factor,
                     /*max_position_embeddings=*/131072,
                     static_cast<int>(orig));
             } else if constexpr (std::is_same_v<T, PartialRopeScaling>) {
-                return std::make_unique<PartialRoPEInputProvider>(
-                    meta.head_dim, gc.rope_theta, s.rope_fraction, s.scale);
+                return std::make_unique<PartialRoPEInputProvider>(head_dim, gc.rope_theta, s.rope_fraction, s.scale);
             } else if constexpr (std::is_same_v<T, MRopeScaling>) {
                 // Caller (VLM family) wires a dedicated MRoPEInputProvider with
                 // the full mrope_section; for the LLM dispatch this branch is
                 // unreachable. Falling back here keeps the function total.
                 GENIEX_LOG_INFO("llm_spec_loader: rope_scaling=mrope (mrope_section={}); using standard RoPE provider",
                     s.mrope_section.size());
-                return std::make_unique<RoPEInputProvider>(meta.head_dim, gc.rope_theta);
+                return std::make_unique<RoPEInputProvider>(head_dim, gc.rope_theta);
             } else {
-                return std::make_unique<RoPEInputProvider>(meta.head_dim, gc.rope_theta);
+                return std::make_unique<RoPEInputProvider>(head_dim, gc.rope_theta);
             }
         },
         gc.rope_scaling);
 }
 
-std::unique_ptr<InputProvider> makeEmbeddingProvider(const ParsedQAIRTMetadata& meta, const ParsedGenieConfig& gc) {
-    const std::string& first = meta.first_shard_input_hint;
-    if (first == "input_ids") {
+std::unique_ptr<InputProvider> makeEmbeddingProvider(
+    const std::string& first_shard_input, const ParsedGenieConfig& gc) {
+    if (first_shard_input == "input_ids") {
         int32_t pad = gc.pad_token_id;
         if (pad < 0) pad = gc.eos_token_ids.empty() ? 0 : gc.eos_token_ids.front();
         return std::make_unique<TokenIdInputProvider>("input_ids", pad);
     }
-    if (first == "input_embeds" || first == "inputs_embeds") {
-        return std::make_unique<EmbeddingInputProvider>(first);
+    if (first_shard_input == "input_embeds" || first_shard_input == "inputs_embeds") {
+        return std::make_unique<EmbeddingInputProvider>(first_shard_input);
     }
-    throw std::runtime_error("llm_spec_loader: unrecognised first-shard input '" + first +
+    throw std::runtime_error("llm_spec_loader: unrecognised first-shard input '" + first_shard_input +
                              "' — expected 'input_ids', 'input_embeds', or 'inputs_embeds'");
 }
 

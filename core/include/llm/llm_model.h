@@ -16,6 +16,7 @@
 #include "geniex-proc/sampler.h"
 #include "geniex_export.h"
 #include "llm/input_provider.h"
+#include "llm/llm_spec_loader.h"  // ParsedGenieConfig
 #include "llm/llm_types.h"
 #include "model.h"
 #include "threadpool.h"
@@ -31,7 +32,7 @@ class GENIEX_API ContextLengthExceededError : public std::runtime_error {
 
 class GENIEX_API LLMModel : public Model {
    public:
-    explicit LLMModel(LLMSpec spec);
+    explicit LLMModel(LLMSpec spec, ParsedGenieConfig gc = {});
     ~LLMModel() override;
 
     // Restored after the user-declared destructor suppressed the implicit moves.
@@ -49,7 +50,7 @@ class GENIEX_API LLMModel : public Model {
 
     size_t nPast() const;
 
-    // Vocabulary size derived from the bundle's metadata.json (logits last
+    // Vocabulary size inferred from the LM-head graph's logits tensor (last
     // dim). 0 if the model has not been initialized yet.
     size_t vocabSize() const;
 
@@ -58,6 +59,20 @@ class GENIEX_API LLMModel : public Model {
 
    protected:
     bool onInitialized() override;
+
+    // Fills spec_'s tensor-derived fields (shapes, shard wiring, KV pairs) from
+    // the loaded graphs_, which onInitialized has sorted by (phase, shard, cl).
+    // Sole source of truth for hyperparameters; throws if a field can't resolve.
+    void inferSpecFromGraphs();
+
+    // Resolves the KV tensor pairs a shard graph owns. Layer indices are global
+    // and may be non-zero-based and non-contiguous across shards, so they are
+    // read from the matched tensor names rather than assumed.
+    static std::vector<KVTensorPair> discoverKVPairs(const Graph& g, const StateBlockSpec& block);
+
+    // Builds the CPU-side input providers after the spec is inferred.
+    // Subclasses override to supply modality-specific providers.
+    virtual void createInputProviders();
 
     // Reads the last logits row, then either runs the cached sampler chain
     // (advancing penalty / DRY state) or returns argmax when sampler_ is null.
@@ -123,10 +138,10 @@ class GENIEX_API LLMModel : public Model {
     void prefillChunks(const std::vector<int32_t>& tokens, size_t* last_chunk_size_out);
 
     LLMSpec                                     spec_;
+    ParsedGenieConfig                           gc_;  // JSON-sourced RoPE / token config
     std::vector<std::unique_ptr<InputProvider>> input_providers_;
-
-    size_t shard_count_   = 0;  // total graphs = 2 × shard_count_ × num_cl_
-    size_t num_cl_        = 0;
+    size_t                                      shard_count_ = 0;  // total graphs = 2 × shard_count_ × num_cl_
+    size_t                                      num_cl_      = 0;
     size_t active_cl_idx_ = 0;  // index into spec_.context_lengths; advances during prefill
 
     std::vector<std::vector<Connection>>
@@ -157,14 +172,9 @@ class GENIEX_API LLMModel : public Model {
     uint64_t                    decode_cpu_mask_      = 0;  // shared by KV workers and clock keeper
 
    private:
-    // Reads each shard's hidden-state tensor names from the loaded QNN graphs
-    // (via QNN_TENSOR_GET_NAME) and populates spec_.shards[s].{in,out}_state_name
-    // and lm_head_only. Called once after the graph order is finalised.
-    void discoverShardTensorNames();
-
     void buildConnections();
 
-    // KV input tensor names across all shards, derived from the KV state block patterns.
+    // KV input tensor names across all shards, taken from the resolved KV pairs.
     std::unordered_set<std::string> buildKVInputNameSet() const;
 
     // One-shot fill of every KV input buffer with the encoded-zero pattern

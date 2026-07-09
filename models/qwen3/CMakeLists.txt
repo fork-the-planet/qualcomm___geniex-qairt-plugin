@@ -9,15 +9,6 @@ foreach(EXAMPLE_NAME qwen3_4b qwen3_4b_instruct_2507 qwen3_8b)
     )
 endforeach()
 
-# LLMPipeline-based variant of qwen3_4b_instruct_2507 (chat-template + streaming
-# generation bundled by LLMPipeline, instead of driving LLMModel::generate()
-# directly with hand-tokenized prompts).
-add_executable(qwen3_4b_instruct_2507_pipeline qwen3_4b_instruct_2507_pipeline.cpp)
-target_link_libraries(qwen3_4b_instruct_2507_pipeline PRIVATE geniex_core geniex-proc)
-set_target_properties(qwen3_4b_instruct_2507_pipeline PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-)
-
 # # Xtensor-based example needs xtensor_utils.cpp compiled as an additional source
 # # (not part of geniex_core to avoid adding xtensor dependency to the core library).
 # add_executable(qwen3_4b_xtensor
