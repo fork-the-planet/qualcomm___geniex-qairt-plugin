@@ -111,6 +111,27 @@ class GENIEX_API LLMModel : public Model {
     // restriding all KV layers from the current CL to the new CL at stride
     bool promoteCL(size_t required, size_t capacity_reserved_seq, size_t stride_reserved_seq);
 
+    // Number of oldest tokens (above n_keep) to discard so `n_fit` more fit within max_cl.
+    // Mirrors llama.cpp's context-shift heuristic (~half of n_past - n_keep, or more if
+    // needed to fit n_fit). Returns 0 when n_past <= n_keep.
+    static size_t computeSlideDiscard(size_t n_past, size_t n_fit, size_t max_cl, size_t n_keep);
+
+    // Evicts the oldest `n_discard` tokens above the anchored `n_keep` prefix, then re-prefills
+    // the surviving tail (recovered from token_history_) instead of relocating its cached KV --
+    // QAIRT's compiled graphs cache post-RoPE K/V with no facility to re-rotate cached history,
+    // so a byte relocation would leave survivors' RoPE rotation at an out-of-distribution
+    // position. `at_decode_stride` must be true when called mid-decode-loop. Updates n_past_ and
+    // token_history_.
+    void slideWindowEvict(size_t n_discard, size_t n_keep, bool at_decode_stride);
+
+    // Runs a chunked prefill pass over `tokens`, writing fresh KV starting at the current n_past_
+    // and advancing n_past_ (and token_history_) as each chunk completes. Assumes the KV buffer is
+    // currently strided for prefill; callers coming from decode stride must reshapeKV first (see
+    // slideWindowEvict). If `last_chunk_size_out` is non-null, receives the final chunk's token
+    // count -- needed by generate() to sample the first token, but not by slideWindowEvict's
+    // re-prefill, which re-derives already-generated history and passes nullptr.
+    void prefillChunks(const std::vector<int32_t>& tokens, size_t* last_chunk_size_out);
+
     LLMSpec                                     spec_;
     ParsedGenieConfig                           gc_;  // JSON-sourced RoPE / token config
     std::vector<std::unique_ptr<InputProvider>> input_providers_;
@@ -124,6 +145,12 @@ class GENIEX_API LLMModel : public Model {
 
     size_t kv_state_block_idx_ = std::numeric_limits<size_t>::max();
     size_t n_past_             = 0;
+
+    // Token IDs resident in the KV cache: token_history_[i] == the token at KV position i.
+    // token_history_.size() == n_past_ always. Populated by prefillChunks() and generate()'s
+    // decode loop; truncated by slideWindowEvict() and cleared by resetKVCache(). Exists so
+    // slideWindowEvict can recover the surviving tail's token IDs to re-prefill them.
+    std::vector<int32_t> token_history_;
 
     // Cached sampler state. `sampler_` is null when sampling is disabled
     // (greedy fast path); otherwise it persists across multi-turn calls so

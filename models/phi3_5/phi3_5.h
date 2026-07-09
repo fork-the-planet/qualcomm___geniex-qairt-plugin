@@ -18,8 +18,9 @@ namespace phi3_5 {
 // LongRoPE per-dimension factors come from genie_config.json's rope-scaling
 // long-factor, picked up automatically by createInputProviders().
 inline LLMModel makeModel(const ModelConfig& model_cfg) {
-    auto gc = parseGenieConfig(bundleDirOf(model_cfg));
-    return LLMModel(buildSpecSkeleton(gc), std::move(gc));
+    auto gc   = parseGenieConfig(bundleDirOf(model_cfg));
+    auto spec = buildSpecSkeleton(gc);  // must read gc before it's moved-from below
+    return LLMModel(std::move(spec), std::move(gc));
 }
 
 inline std::optional<LLMPipeline> makePipeline(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {

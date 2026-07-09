@@ -569,39 +569,86 @@ bool LLMModel::promoteCL(size_t required, size_t capacity_reserved_seq, size_t s
     return true;
 }
 
-std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens, const GenerationConfig& gen_cfg,
-    std::function<bool(int32_t)> token_callback) {
-    size_t       tokens_processed = 0;
-    const size_t total_tokens     = prompt_tokens.size();
-    size_t       last_chunk_size  = 0;  // valid token count in the final prefill chunk
+// Mirrors llama.cpp's context-shift heuristic: discards ~half of (n_past - n_keep), or more if
+// needed to fit `n_fit`. Returns 0 when n_past <= n_keep.
+/*static*/ size_t LLMModel::computeSlideDiscard(size_t n_past, size_t n_fit, size_t max_cl, size_t n_keep) {
+    if (n_past <= n_keep) return 0;
 
-    GENIEX_LOG_DEBUG("generate: prompt_tokens={}, n_past={}, max_tokens={}", total_tokens, n_past_, gen_cfg.max_tokens);
+    const auto past   = static_cast<std::ptrdiff_t>(n_past);
+    const auto fit    = static_cast<std::ptrdiff_t>(n_fit);
+    const auto cl     = static_cast<std::ptrdiff_t>(max_cl);
+    const auto keep   = static_cast<std::ptrdiff_t>(n_keep);
+    const auto needed = past + fit - cl + 1;
 
-    // (Re)build & seed the sampler. No-op when sampling is disabled — in
-    // that case `sampler_` stays null and sampleNextToken() takes the greedy
-    // argmax fast path.
-    prepareSampler(gen_cfg, prompt_tokens);
+    auto discard = std::max(past / 2 - keep, needed);
+    discard      = std::min(discard, past - keep);
+    return discard > 0 ? static_cast<size_t>(discard) : 0;
+}
 
-    // Reject prompts that cannot fit in the largest available context length.
-    // context_lengths is sorted ascending, so the last entry is the max CL.
-    const size_t max_cl = spec_.context_lengths.back();
-    if (n_past_ + total_tokens > max_cl) {
-        throw ContextLengthExceededError("geniex: prompt exceeds max context length (" + std::to_string(max_cl) + ")");
+// Evicts the oldest `n_discard` tokens above the anchored `n_keep` prefix, then re-prefills the
+// surviving tail (token IDs recovered from token_history_) instead of relocating its cached KV --
+// QAIRT's compiled graphs cache post-RoPE K/V with no facility to re-rotate cached history, so a
+// byte relocation would leave survivors' RoPE rotation at an out-of-distribution position.
+//
+// `at_decode_stride` must be true when called mid-decode-loop; the buffer is restrided to prefill
+// stride, re-prefilled, then restrided back so the caller's decode loop continues unmodified.
+void LLMModel::slideWindowEvict(size_t n_discard, size_t n_keep, bool at_decode_stride) {
+    if (n_discard == 0) return;
+
+    const size_t tail_begin = n_keep + n_discard;
+    const size_t tail_len   = (n_past_ > tail_begin) ? (n_past_ - tail_begin) : 0;
+
+    GENIEX_LOG_INFO(
+        "sliding window: discarding {} tokens (n_keep={}), re-prefilling {} surviving tokens, n_past {} -> {}",
+        n_discard,
+        n_keep,
+        tail_len,
+        n_past_,
+        n_keep + tail_len);
+
+    // Recover the surviving tail's token IDs before n_past_ / token_history_ are touched below.
+    std::vector<int32_t> tail_tokens(token_history_.begin() + static_cast<std::ptrdiff_t>(tail_begin),
+        token_history_.begin() + static_cast<std::ptrdiff_t>(tail_begin + tail_len));
+
+    if (at_decode_stride) {
+        const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
+        const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
+        for (size_t s = 0; s < shard_count_; ++s) reshapeKV(s, decode_kv, prefill_kv, n_keep);
     }
 
+    n_past_ = n_keep;
+    token_history_.resize(n_keep);
+
+    prefillChunks(tail_tokens, /*last_chunk_size_out=*/nullptr);
+
+    if (at_decode_stride) {
+        const size_t prefill_kv = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_prefill;
+        const size_t decode_kv  = spec_.context_lengths[active_cl_idx_] - spec_.seq_len_decode;
+        for (size_t s = 0; s < shard_count_; ++s) reshapeKV(s, prefill_kv, decode_kv, n_past_);
+    }
+}
+
+// Chunked prefill over `tokens`, writing fresh KV starting at the current n_past_ and advancing
+// n_past_ / token_history_ as each chunk completes. Assumes the KV buffer is already strided for
+// prefill; callers at decode stride must reshapeKV first (see slideWindowEvict). Extracted from
+// generate()'s main prefill loop so slideWindowEvict's re-prefill can reuse the same logic.
+void LLMModel::prefillChunks(const std::vector<int32_t>& tokens, size_t* last_chunk_size_out) {
+    size_t       tokens_processed = 0;
+    const size_t total_tokens     = tokens.size();
+
     while (tokens_processed < total_tokens) {
-        const size_t remaining    = total_tokens - tokens_processed;
-        const size_t chunk_size   = std::min(remaining, spec_.seq_len_prefill);
-        last_chunk_size           = chunk_size;
-        const bool is_final_chunk = (tokens_processed + chunk_size >= total_tokens);
+        const size_t remaining      = total_tokens - tokens_processed;
+        const size_t chunk_size     = std::min(remaining, spec_.seq_len_prefill);
+        const bool   is_final_chunk = (tokens_processed + chunk_size >= total_tokens);
+        if (last_chunk_size_out) *last_chunk_size_out = chunk_size;
 
         // Ensure the prefill KV buffer (CL - seq_len_prefill) can hold n_past + chunk_size after this chunk.
         promoteCL(/*required=*/n_past_ + chunk_size,
             /*capacity_reserved_seq=*/spec_.seq_len_prefill,
             /*stride_reserved_seq=*/spec_.seq_len_prefill);
 
-        const std::vector<int32_t> chunk(prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed),
-            prompt_tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed + chunk_size));
+        const std::vector<int32_t> chunk(tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed),
+            tokens.begin() + static_cast<std::ptrdiff_t>(tokens_processed + chunk_size));
 
         GENIEX_LOG_DEBUG("prefill chunk: tokens [{}, {}) cl_idx={} final={}",
             tokens_processed,
@@ -627,9 +674,56 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             }
         }
 
+        token_history_.insert(token_history_.end(), chunk.begin(), chunk.end());
         n_past_ += chunk_size;
         tokens_processed += chunk_size;
     }
+}
+
+std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_tokens, const GenerationConfig& gen_cfg,
+    std::function<bool(int32_t)> token_callback) {
+    const size_t total_tokens    = prompt_tokens.size();
+    size_t       last_chunk_size = 0;  // valid token count in the final prefill chunk
+
+    GENIEX_LOG_DEBUG("generate: prompt_tokens={}, n_past={}, max_tokens={}", total_tokens, n_past_, gen_cfg.max_tokens);
+
+    // (Re)build & seed the sampler. No-op when sampling is disabled — in
+    // that case `sampler_` stays null and sampleNextToken() takes the greedy
+    // argmax fast path.
+    prepareSampler(gen_cfg, prompt_tokens);
+
+    // Reject prompts that cannot fit in the largest available context length, unless sliding_window
+    // is opted in, in which case evict the oldest tokens above n_keep to make room first.
+    // context_lengths is sorted ascending, so the last entry is the max CL.
+    const size_t max_cl = spec_.context_lengths.back();
+    const size_t n_keep =
+        gen_cfg.sliding_window
+            ? std::min<size_t>(static_cast<size_t>(std::max<int32_t>(gen_cfg.sliding_window_n_keep, 0)), max_cl)
+            : 0;
+
+    // Attempts to evict enough of the oldest tokens (above n_keep) to fit `n_fit` more.
+    // `at_decode_stride` must reflect whether the KV buffer is currently strided for decode (true)
+    // or prefill (false) at the call site -- see slideWindowEvict. Returns false (no-op) when
+    // sliding_window is disabled or eviction alone cannot make the requested room.
+    auto try_slide = [&](size_t n_fit, bool at_decode_stride) -> bool {
+        if (!gen_cfg.sliding_window) return false;
+        const size_t n_discard = computeSlideDiscard(n_past_, n_fit, max_cl, n_keep);
+        if (n_discard == 0 || (n_past_ - n_discard) + n_fit > max_cl) return false;
+        slideWindowEvict(n_discard, n_keep, at_decode_stride);
+        return true;
+    };
+
+    if (n_past_ + total_tokens > max_cl) {
+        // Entering generate(), the KV buffer is left at the prefill stride by the previous call's
+        // cleanup reshape (or at initKVBuffers()'s default on the very first call).
+        try_slide(total_tokens, /*at_decode_stride=*/false);
+        if (n_past_ + total_tokens > max_cl) {
+            throw ContextLengthExceededError(
+                "geniex: prompt exceeds max context length (" + std::to_string(max_cl) + ")");
+        }
+    }
+
+    prefillChunks(prompt_tokens, &last_chunk_size);
 
     // Switch KV stride from prefill to decode before entering the decode loop.
     {
@@ -664,15 +758,20 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
             break;
         }
 
-        // Stop and report when the next decode step would exceed the largest available CL.
-        if (n_past_ + 1 > max_cl) {
-            throw ContextLengthExceededError(
-                "geniex: generation exceeds max context length (" + std::to_string(max_cl) + ")");
-        }
-
-        // KV write-back from the previous step must finish before restriding or
+        // KV write-back from the previous step must finish before restriding, evicting, or
         // re-reading the KV buffers below.
         if (decode_pool_) decode_pool_->wait();
+
+        // Stop and report when the next decode step would exceed the largest available CL.
+        // With sliding_window enabled, evict the oldest tokens above n_keep to make room first.
+        // The KV buffer is at the decode stride throughout this loop (switched right before it).
+        if (n_past_ + 1 > max_cl) {
+            try_slide(1, /*at_decode_stride=*/true);
+            if (n_past_ + 1 > max_cl) {
+                throw ContextLengthExceededError(
+                    "geniex: generation exceeds max context length (" + std::to_string(max_cl) + ")");
+            }
+        }
 
         // Ensure the decode KV buffer (CL - seq_len_decode) has room for the write at offset n_past_.
         promoteCL(/*required=*/n_past_ + 1,
@@ -697,6 +796,7 @@ std::vector<int32_t> LLMModel::generate(const std::vector<int32_t>& prompt_token
         }
 
         n_past_++;
+        token_history_.push_back(next_token);
         next_token = sampleNextToken(/*phase=*/1, /*token_offset=*/0);
     }
 
@@ -830,6 +930,7 @@ std::unordered_set<std::string> LLMModel::buildKVInputNameSet() const {
 void LLMModel::resetKVCache() {
     n_past_        = 0;
     active_cl_idx_ = 0;
+    token_history_.clear();
 
     // Drop sampler state too; penalty / DRY shouldn't leak across resets.
     sampler_.reset();
@@ -859,6 +960,15 @@ void LLMModel::saveKVCacheToFile(const std::string& path) const {
     f.write(reinterpret_cast<const char*>(&n_past_), sizeof(n_past_));
     f.write(reinterpret_cast<const char*>(&active_cl_idx_), sizeof(active_cl_idx_));
 
+    // Persisted so slideWindowEvict() has valid history to re-prefill after a load; without this,
+    // token_history_ would be empty while n_past_ is restored non-zero, corrupting the next eviction.
+    const size_t history_size = token_history_.size();
+    f.write(reinterpret_cast<const char*>(&history_size), sizeof(history_size));
+    if (history_size > 0) {
+        f.write(reinterpret_cast<const char*>(token_history_.data()),
+            static_cast<std::streamsize>(history_size * sizeof(int32_t)));
+    }
+
     const auto   kv_names       = buildKVInputNameSet();
     const size_t prefill_graphs = shard_count_ * num_cl_;
     for (size_t gi = 0; gi < prefill_graphs; ++gi) {
@@ -882,6 +992,14 @@ void LLMModel::loadKVCacheFromFile(const std::string& path) {
 
     f.read(reinterpret_cast<char*>(&n_past_), sizeof(n_past_));
     f.read(reinterpret_cast<char*>(&active_cl_idx_), sizeof(active_cl_idx_));
+
+    size_t history_size = 0;
+    f.read(reinterpret_cast<char*>(&history_size), sizeof(history_size));
+    token_history_.assign(history_size, 0);
+    if (history_size > 0) {
+        f.read(reinterpret_cast<char*>(token_history_.data()),
+            static_cast<std::streamsize>(history_size * sizeof(int32_t)));
+    }
 
     const auto   kv_names       = buildKVInputNameSet();
     const size_t prefill_graphs = shard_count_ * num_cl_;
