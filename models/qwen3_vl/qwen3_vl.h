@@ -27,11 +27,14 @@ namespace qwen3_vl {
 // ── Vision-tower internals (not exposed in the bundle's config.json) ─────────
 // Qwen3-VL's ViT runs full (non-windowed) attention over the patches of a
 // single image, applies 2-D rotary position embeddings, and emits both the
-// merged image features and the intermediate "DeepStack" features. The RoPE
-// cos/sin width comes from the vision_encoder.bin schema (position_ids_cos
-// has last-dim 32 ⇒ kVitRopeDim = 32).
-static constexpr int   kVitRopeDim   = 32;
-static constexpr float kVitRopeTheta = 10000.0f;
+// merged image features and the intermediate "DeepStack" features.
+//
+// kVitRopeDimDefault: RoPE cos/sin embed dim. Varies by model size (32 for
+// 4B, 36 for 8B) and determines a tensor shape, so it's detected from the
+// compiled graph at initialize() time (see rope_dim_); this default is only
+// used if 'position_ids_cos' is absent from the graph.
+static constexpr int   kVitRopeDimDefault = 32;
+static constexpr float kVitRopeTheta      = 10000.0f;
 
 // Vision-related token IDs. Family-level constants — the runtime no longer
 // reads HuggingFace config.json and the bundle's genie_config.json doesn't
@@ -76,6 +79,11 @@ class Qwen3VLVisionEncoder : public QnnVisionEncoder {
     int    temporal_patch_size_ = 0;
     int    spatial_merge_size_  = 0;
     size_t hidden_size_         = 0;
+
+    // RoPE cos/sin embed dim, detected in initialize() from the compiled
+    // graph's position_ids_cos input tensor shape (last dim). Uses
+    // kVitRopeDimDefault if the input is missing or has an unexpected rank.
+    int rope_dim_ = kVitRopeDimDefault;
 
     // DeepStack output tensor name prefix (tensor k is "<prefix><k>"); set by ctor.
     std::string deepstack_prefix_;

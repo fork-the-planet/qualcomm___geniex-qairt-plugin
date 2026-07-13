@@ -31,9 +31,27 @@ void Qwen3VLVisionEncoder::setPreprocessing(const ParsedVisionPreprocessing& vp)
 bool Qwen3VLVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     if (!QnnVisionEncoder::initialize(runtime_cfg, model_cfg)) return false;
 
+    Graph& g = graph(0);
+
+    // Detect the RoPE cos/sin embed dim from the graph's actual tensor shape
+    // (see kVitRopeDimDefault) instead of a hardcoded constant.
+    if (g.hasInput("position_ids_cos")) {
+        const auto& shape = g.inputSpec("position_ids_cos").shape;
+        if (!shape.empty()) {
+            rope_dim_ = static_cast<int>(shape.back());
+        } else {
+            GENIEX_LOG_WARN(
+                "Qwen3VLVisionEncoder: 'position_ids_cos' has an empty shape; using default rope_dim={}",
+                kVitRopeDimDefault);
+        }
+    } else {
+        GENIEX_LOG_WARN(
+            "Qwen3VLVisionEncoder: vision graph has no 'position_ids_cos' input; using default rope_dim={}",
+            kVitRopeDimDefault);
+    }
+
     // The graph structure is fixed, so detect the DeepStack output count once
     // here rather than on every encode() (which loops over images).
-    Graph& g              = graph(0);
     num_deepstack_levels_ = 0;
     while (g.hasOutput(deepstack_prefix_ + std::to_string(num_deepstack_levels_))) ++num_deepstack_levels_;
     if (num_deepstack_levels_ == 0) {
@@ -78,7 +96,7 @@ std::vector<float> Qwen3VLVisionEncoder::encode(const PixelData& pixel_data) {
     // Qwen3-VL's ViT uses full (non-windowed) attention, so there is no window
     // reordering of patches: RoPE cos/sin and the output features stay in
     // natural patch order. computePatchRoPE() already yields natural order.
-    const auto inv_freq       = qwen_vit::makeInvFreq(kVitRopeDim, kVitRopeTheta);
+    const auto inv_freq       = qwen_vit::makeInvFreq(rope_dim_, kVitRopeTheta);
     auto [rope_cos, rope_sin] = qwen_vit::computePatchRoPE(grid_t, grid_h, grid_w, spatial_merge_size_, inv_freq);
 
     // Single image ⇒ one attention block spanning all patches. Both the full

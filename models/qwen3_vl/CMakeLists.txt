@@ -23,3 +23,15 @@ target_link_libraries(qwen3_vl_4b_pipeline PRIVATE geniex_vlm geniex-proc-vision
 set_target_properties(qwen3_vl_4b_pipeline PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
+
+# Qwen3-VL-8B-Instruct, VLMPipeline-based.
+add_executable(qwen3_vl_8b_pipeline
+    qwen3_vl_8b_pipeline.cpp
+)
+target_include_directories(qwen3_vl_8b_pipeline PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(qwen3_vl_8b_pipeline PRIVATE geniex_vlm geniex-proc-vision)
+set_target_properties(qwen3_vl_8b_pipeline PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
