@@ -40,13 +40,11 @@ bool Qwen3VLVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg, const
         if (!shape.empty()) {
             rope_dim_ = static_cast<int>(shape.back());
         } else {
-            GENIEX_LOG_WARN(
-                "Qwen3VLVisionEncoder: 'position_ids_cos' has an empty shape; using default rope_dim={}",
+            GENIEX_LOG_WARN("Qwen3VLVisionEncoder: 'position_ids_cos' has an empty shape; using default rope_dim={}",
                 kVitRopeDimDefault);
         }
     } else {
-        GENIEX_LOG_WARN(
-            "Qwen3VLVisionEncoder: vision graph has no 'position_ids_cos' input; using default rope_dim={}",
+        GENIEX_LOG_WARN("Qwen3VLVisionEncoder: vision graph has no 'position_ids_cos' input; using default rope_dim={}",
             kVitRopeDimDefault);
     }
 
