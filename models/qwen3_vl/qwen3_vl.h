@@ -32,16 +32,10 @@ namespace qwen3_vl {
 // RoPE cos/sin embed dim varies by model size (32 for 4B, 36 for 8B) and
 // determines a tensor shape, so it's detected from the compiled graph's
 // position_ids_cos input at initialize() time (see rope_dim_) rather than a
-// hardcoded constant. genie_config.json's positional-encoding block only
-// covers the LLM text decoder's RoPE (rope-dim/rope-theta there are for the
-// text tower); no bundle exposes an equivalent field for the vision tower,
-// so the compiled graph's tensor shape is the only source of truth.
+// hardcoded constant.
 //
 // kVitRopeTheta: only scales RoPE angle values, not a tensor shape, so it
-// can't be detected from the graph. Verified against HF's
-// modeling_qwen3_vl.py: Qwen3VLVisionRotaryEmbedding(head_dim // 2) never
-// overrides the theta=10000.0 default, and no bundle exposes a vision-tower
-// rope_theta field. Re-verify against upstream if a new variant is added.
+// can't be detected from the graph.
 static constexpr float kVitRopeTheta = 10000.0f;
 
 // Vision-related token IDs. Family-level constants — the runtime no longer
