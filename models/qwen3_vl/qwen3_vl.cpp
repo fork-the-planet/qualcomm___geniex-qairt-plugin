@@ -30,7 +30,11 @@ void Qwen3VLVisionEncoder::setPreprocessing(const ParsedVisionPreprocessing& vp)
 
 bool Qwen3VLVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg, const ModelConfig& model_cfg) {
     if (!QnnVisionEncoder::initialize(runtime_cfg, model_cfg)) return false;
+    inferSpecFromGraphs();
+    return true;
+}
 
+void Qwen3VLVisionEncoder::inferSpecFromGraphs() {
     Graph& g = graph(0);
 
     // Detect the RoPE cos/sin embed dim from the graph's actual tensor shape
@@ -40,11 +44,11 @@ bool Qwen3VLVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg, const
     // any other observable symptom (see PR history for the 4B-vs-8B bug this
     // fixes).
     if (!g.hasInput("position_ids_cos")) {
-        throw std::runtime_error("Qwen3VLVisionEncoder: vision graph has no 'position_ids_cos' input");
+        throw std::runtime_error("inferSpecFromGraphs: vision graph has no 'position_ids_cos' input");
     }
     const auto& shape = g.inputSpec("position_ids_cos").shape;
     if (shape.empty()) {
-        throw std::runtime_error("Qwen3VLVisionEncoder: 'position_ids_cos' has an empty shape");
+        throw std::runtime_error("inferSpecFromGraphs: 'position_ids_cos' has an empty shape");
     }
     rope_dim_ = static_cast<int>(shape.back());
 
@@ -54,11 +58,10 @@ bool Qwen3VLVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg, const
     while (g.hasOutput(deepstack_prefix_ + std::to_string(num_deepstack_levels_))) ++num_deepstack_levels_;
     if (num_deepstack_levels_ == 0) {
         GENIEX_LOG_WARN(
-            "Qwen3VLVisionEncoder: no '{}<k>' outputs found on the vision graph; "
+            "inferSpecFromGraphs: no '{}<k>' outputs found on the vision graph; "
             "DeepStack injection will be a no-op",
             deepstack_prefix_);
     }
-    return true;
 }
 
 std::vector<float> Qwen3VLVisionEncoder::encode(const PixelData& pixel_data) {
