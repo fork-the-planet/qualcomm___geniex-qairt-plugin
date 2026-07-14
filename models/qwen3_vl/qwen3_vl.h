@@ -29,12 +29,20 @@ namespace qwen3_vl {
 // single image, applies 2-D rotary position embeddings, and emits both the
 // merged image features and the intermediate "DeepStack" features.
 //
-// kVitRopeDimDefault: RoPE cos/sin embed dim. Varies by model size (32 for
-// 4B, 36 for 8B) and determines a tensor shape, so it's detected from the
-// compiled graph at initialize() time (see rope_dim_); this default is only
-// used if 'position_ids_cos' is absent from the graph.
-static constexpr int   kVitRopeDimDefault = 32;
-static constexpr float kVitRopeTheta      = 10000.0f;
+// RoPE cos/sin embed dim varies by model size (32 for 4B, 36 for 8B) and
+// determines a tensor shape, so it's detected from the compiled graph's
+// position_ids_cos input at initialize() time (see rope_dim_) rather than a
+// hardcoded constant. genie_config.json's positional-encoding block only
+// covers the LLM text decoder's RoPE (rope-dim/rope-theta there are for the
+// text tower); no bundle exposes an equivalent field for the vision tower,
+// so the compiled graph's tensor shape is the only source of truth.
+//
+// kVitRopeTheta: only scales RoPE angle values, not a tensor shape, so it
+// can't be detected from the graph. Verified against HF's
+// modeling_qwen3_vl.py: Qwen3VLVisionRotaryEmbedding(head_dim // 2) never
+// overrides the theta=10000.0 default, and no bundle exposes a vision-tower
+// rope_theta field. Re-verify against upstream if a new variant is added.
+static constexpr float kVitRopeTheta = 10000.0f;
 
 // Vision-related token IDs. Family-level constants — the runtime no longer
 // reads HuggingFace config.json and the bundle's genie_config.json doesn't
@@ -81,9 +89,9 @@ class Qwen3VLVisionEncoder : public QnnVisionEncoder {
     size_t hidden_size_         = 0;
 
     // RoPE cos/sin embed dim, detected in initialize() from the compiled
-    // graph's position_ids_cos input tensor shape (last dim). Uses
-    // kVitRopeDimDefault if the input is missing or has an unexpected rank.
-    int rope_dim_ = kVitRopeDimDefault;
+    // graph's position_ids_cos input tensor shape (last dim). 0 until set;
+    // initialize() throws if it can't be determined, so encode() never sees 0.
+    int rope_dim_ = 0;
 
     // DeepStack output tensor name prefix (tensor k is "<prefix><k>"); set by ctor.
     std::string deepstack_prefix_;

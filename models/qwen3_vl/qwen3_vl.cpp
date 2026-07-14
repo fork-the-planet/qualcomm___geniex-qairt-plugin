@@ -34,19 +34,19 @@ bool Qwen3VLVisionEncoder::initialize(const QnnRuntimeConfig& runtime_cfg, const
     Graph& g = graph(0);
 
     // Detect the RoPE cos/sin embed dim from the graph's actual tensor shape
-    // (see kVitRopeDimDefault) instead of a hardcoded constant.
-    if (g.hasInput("position_ids_cos")) {
-        const auto& shape = g.inputSpec("position_ids_cos").shape;
-        if (!shape.empty()) {
-            rope_dim_ = static_cast<int>(shape.back());
-        } else {
-            GENIEX_LOG_WARN("Qwen3VLVisionEncoder: 'position_ids_cos' has an empty shape; using default rope_dim={}",
-                kVitRopeDimDefault);
-        }
-    } else {
-        GENIEX_LOG_WARN("Qwen3VLVisionEncoder: vision graph has no 'position_ids_cos' input; using default rope_dim={}",
-            kVitRopeDimDefault);
+    // instead of a hardcoded constant (see qwen3_vl.h comment on kVitRopeTheta
+    // for why this can't come from genie_config.json). Fail loudly rather than
+    // guess a default: a wrong dim silently corrupts vision positions without
+    // any other observable symptom (see PR history for the 4B-vs-8B bug this
+    // fixes).
+    if (!g.hasInput("position_ids_cos")) {
+        throw std::runtime_error("Qwen3VLVisionEncoder: vision graph has no 'position_ids_cos' input");
     }
+    const auto& shape = g.inputSpec("position_ids_cos").shape;
+    if (shape.empty()) {
+        throw std::runtime_error("Qwen3VLVisionEncoder: 'position_ids_cos' has an empty shape");
+    }
+    rope_dim_ = static_cast<int>(shape.back());
 
     // The graph structure is fixed, so detect the DeepStack output count once
     // here rather than on every encode() (which loops over images).
